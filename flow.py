@@ -97,7 +97,7 @@ class TradeJournal:
                     writer = csv.writer(file)
                     writer.writerow([
                         'trade_id', 'entry_time', 'exit_time', 'duration_minutes', 
-                        'direction', 'entry_price', 'exit_price', 'position_size',
+                        'direction', 'entry_price', 'exit_price', 'ActiveTrade_size',
                         'pnl_percent', 'pnl_value', 'exit_reason', 'market_volatility',
                         'market_trend', 'relative_strength', 'order_imbalance',
                         'notes'
@@ -119,7 +119,7 @@ class TradeJournal:
                                 
                             # Convert numeric fields
                             for numeric_field in ['duration_minutes', 'entry_price', 'exit_price', 
-                                                 'position_size', 'pnl_percent', 'pnl_value',
+                                                 'ActiveTrade_size', 'pnl_percent', 'pnl_value',
                                                  'market_volatility', 'market_trend', 
                                                  'relative_strength', 'order_imbalance']:
                                 if row[numeric_field]:
@@ -305,7 +305,7 @@ class TradingConfig:
     DEFAULT_WARMUP_TICKS = 300
     DEFAULT_RISK_FACTOR = 0.02  # סיכון של 2% לעסקה
     DEFAULT_DYNAMIC_WINDOW = True
-    DEFAULT_ADAPTIVE_POSITION_SIZING = True
+    DEFAULT_ADAPTIVE_ActiveTrade_SIZING = True
     
     MARKET_CONDITIONS = {
         'BUY': {
@@ -336,8 +336,8 @@ class TradingConfig:
                         cls.DEFAULT_RISK_FACTOR = config['DEFAULT_RISK_FACTOR']
                     if 'DEFAULT_DYNAMIC_WINDOW' in config:
                         cls.DEFAULT_DYNAMIC_WINDOW = config['DEFAULT_DYNAMIC_WINDOW']
-                    if 'DEFAULT_ADAPTIVE_POSITION_SIZING' in config:
-                        cls.DEFAULT_ADAPTIVE_POSITION_SIZING = config['DEFAULT_ADAPTIVE_POSITION_SIZING']
+                    if 'DEFAULT_ADAPTIVE_ActiveTrade_SIZING' in config:
+                        cls.DEFAULT_ADAPTIVE_ActiveTrade_SIZING = config['DEFAULT_ADAPTIVE_ActiveTrade_SIZING']
                     
                     # Update market conditions
                     if 'MARKET_CONDITIONS' in config:
@@ -360,7 +360,7 @@ class TradingConfig:
                 'DEFAULT_WARMUP_TICKS': cls.DEFAULT_WARMUP_TICKS,
                 'DEFAULT_RISK_FACTOR': cls.DEFAULT_RISK_FACTOR,
                 'DEFAULT_DYNAMIC_WINDOW': cls.DEFAULT_DYNAMIC_WINDOW,
-                'DEFAULT_ADAPTIVE_POSITION_SIZING': cls.DEFAULT_ADAPTIVE_POSITION_SIZING,
+                'DEFAULT_ADAPTIVE_ActiveTrade_SIZING': cls.DEFAULT_ADAPTIVE_ActiveTrade_SIZING,
                 'MARKET_CONDITIONS': cls.MARKET_CONDITIONS
             }
             
@@ -374,7 +374,7 @@ class TradingConfig:
 
 # ===== ניהול עמדות =====
 @dataclass
-class Position:
+class ActiveTrade:
     active: bool = False
     entry_price: float = 0.0
     stop_loss: float = 0.0
@@ -386,7 +386,7 @@ class Position:
     entry_time: Optional[datetime] = None
     
     def reset(self) -> None:
-        """Reset position to default values"""
+        """Reset ActiveTrade to default values"""
         self.active = False
         self.entry_price = 0.0
         self.stop_loss = 0.0
@@ -398,13 +398,13 @@ class Position:
         self.entry_time = None
     
     def update(self, **kwargs: Any) -> None:
-        """Update position attributes"""
+        """Update ActiveTrade attributes"""
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert position to dictionary format"""
+        """Convert ActiveTrade to dictionary format"""
         return {
             'active': self.active,
             'entry_price': self.entry_price,
@@ -418,15 +418,15 @@ class Position:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Position':
-        """Create position from dictionary data"""
-        position = cls()
+    def from_dict(cls, data: Dict[str, Any]) -> 'ActiveTrade':
+        """Create ActiveTrade from dictionary data"""
+        ActiveTrade = cls()
         for key, value in data.items():
             if key == 'entry_time' and value:
-                position.entry_time = datetime.fromisoformat(value)
-            elif hasattr(position, key):
-                setattr(position, key, value)
-        return position
+                ActiveTrade.entry_time = datetime.fromisoformat(value)
+            elif hasattr(ActiveTrade, key):
+                setattr(ActiveTrade, key, value)
+        return ActiveTrade
 
 # ===== מעקב ביצועים =====
 class PerformanceTracker:
@@ -843,16 +843,16 @@ class MarketAnalyzer:
                  warmup_ticks: int = TradingConfig.DEFAULT_WARMUP_TICKS,
                  dynamic_window: bool = TradingConfig.DEFAULT_DYNAMIC_WINDOW,
                  risk_factor: float = TradingConfig.DEFAULT_RISK_FACTOR,
-                 adaptive_position: bool = TradingConfig.DEFAULT_ADAPTIVE_POSITION_SIZING):
+                 adaptive_ActiveTrade: bool = TradingConfig.DEFAULT_ADAPTIVE_ActiveTrade_SIZING):
         
         self.warmup_ticks = warmup_ticks
         self.dynamic_window = dynamic_window
         self.risk_factor = risk_factor
-        self.adaptive_position = adaptive_position
+        self.adaptive_ActiveTrade = adaptive_ActiveTrade
         
         self.market_data = MarketData()
         self.metrics_calculator = MarketMetricsCalculator(self.market_data)
-        self.position = Position()
+        self.ActiveTrade = ActiveTrade()
         self.performance = PerformanceTracker()
         self.trade_journal = TradeJournal('trades/market_analyzer_journal.csv')
         
@@ -869,7 +869,7 @@ class MarketAnalyzer:
         with self._lock:
             self.market_data.reset()
             self.metrics_calculator.reset()
-            self.position.reset()
+            self.ActiveTrade.reset()
             self.performance.reset()
             self.warmup_complete = False
             self.last_data_time = datetime.now()
@@ -958,7 +958,7 @@ class MarketAnalyzer:
             return None
 
         try:
-            if self.position.active:
+            if self.ActiveTrade.active:
                 return self._check_exit_conditions(price, timestamp)
             
             metrics = self.metrics_calculator.metrics
@@ -999,46 +999,46 @@ class MarketAnalyzer:
 
     def _check_exit_conditions(self, price: float, timestamp: datetime) -> Optional[Dict[str, Any]]:
         """בדיקת תנאי יציאה מעמדה (Long בלבד)"""
-        if not self.position.active:
+        if not self.ActiveTrade.active:
             return None
             
         try:
             # לעמדת Long מעדכנים את המחיר הגבוה ביותר
-            self.position.highest_price = max(self.position.highest_price, price)
+            self.ActiveTrade.highest_price = max(self.ActiveTrade.highest_price, price)
             
             stop_triggered = False
             reason = None
             
             # Check stop loss
-            if price <= self.position.stop_loss:
+            if price <= self.ActiveTrade.stop_loss:
                 stop_triggered = True
                 reason = 'stop_loss'
                 
             # Check take profit
-            if price >= self.position.take_profit:
+            if price >= self.ActiveTrade.take_profit:
                 stop_triggered = True
                 reason = 'take_profit'
                 
             # Calculate current profit percentage
-            profit_pct = (price / self.position.entry_price - 1)
+            profit_pct = (price / self.ActiveTrade.entry_price - 1)
             
             # Adjust trailing stop if profit exceeds activation threshold
             activation_threshold = TradingConfig.MARKET_CONDITIONS['EXIT']['trailing_stop_act_ivation'] / 100
             if profit_pct >= activation_threshold:
                 # Calculate trailing stop level
                 trail_distance = TradingConfig.MARKET_CONDITIONS['EXIT']['trailing_stop_distance'] * \
-                                 self.metrics_calculator.metrics['atr'] / self.position.highest_price
-                trail_level = self.position.highest_price * (1 - trail_distance)
+                                 self.metrics_calculator.metrics['atr'] / self.ActiveTrade.highest_price
+                trail_level = self.ActiveTrade.highest_price * (1 - trail_distance)
                 
                 # Update stop loss if trailing stop is higher
-                if trail_level > self.position.stop_loss:
-                    self.position.stop_loss = trail_level
+                if trail_level > self.ActiveTrade.stop_loss:
+                    self.ActiveTrade.stop_loss = trail_level
                     self.logger.debug(f"Trailing stop updated to {trail_level:.6f} (profit: {profit_pct*100:.2f}%)")
                     
             # Check time-based exit
-            if self.position.entry_time:
-                position_duration = (timestamp - self.position.entry_time).total_seconds() / 3600
-                if position_duration > 4:  # Exit after 4 hours
+            if self.ActiveTrade.entry_time:
+                ActiveTrade_duration = (timestamp - self.ActiveTrade.entry_time).total_seconds() / 3600
+                if ActiveTrade_duration > 4:  # Exit after 4 hours
                     stop_triggered = True
                     reason = 'time_exit'
                     
@@ -1048,7 +1048,7 @@ class MarketAnalyzer:
                 reason = 'trend_reversal'
                 
             if stop_triggered:
-                self._close_position(price, reason, timestamp)
+                self._close_ActiveTrade(price, reason, timestamp)
                 return {
                     'action': 'close', 
                     'price': price, 
@@ -1068,15 +1068,15 @@ class MarketAnalyzer:
             
         return None
 
-    def _calculate_position_size(self) -> float:
+    def _calculate_ActiveTrade_size(self) -> float:
         """חישוב גודל העמדה בהתאם לפרמטרי סיכון ותנאי שוק"""
         if not self.warmup_complete:
             return 0.0
         try:
             base_risk = self.risk_factor
             
-            if self.adaptive_position:
-                # Adjust position size based on market conditions
+            if self.adaptive_ActiveTrade:
+                # Adjust ActiveTrade size based on market conditions
                 
                 # Volatility factor - reduce size when volatility is high
                 vol = self.metrics_calculator.metrics['realized_volatility']
@@ -1085,7 +1085,7 @@ class MarketAnalyzer:
                 # Trend alignment - reduce size when going against the trend
                 trend_alignment = 0.0
                 trend = self.metrics_calculator.metrics['trend_strength']
-                # For long positions, reduce size if trend is down
+                # For long ActiveTrades, reduce size if trend is down
                 if trend < 0:
                     trend_alignment = min(0.3, -trend)
                 
@@ -1100,30 +1100,30 @@ class MarketAnalyzer:
                 # Calculate adjusted risk
                 adjusted_risk = base_risk * vol_factor * (1.0 - trend_alignment) * perf_factor
                 
-                # Ensure position size is within reasonable bounds
+                # Ensure ActiveTrade size is within reasonable bounds
                 return min(0.05, max(0.005, adjusted_risk))
             else:
                 return base_risk
                 
         except Exception as e:
-            error_msg = f"Position sizing error: {str(e)}"
+            error_msg = f"ActiveTrade sizing error: {str(e)}"
             self.logger.error(error_msg)
             self.logger.debug(traceback.format_exc())
             self.event_emitter.emit(Event(
                 type=EventType.ERROR,
-                data={'error': error_msg, 'source': 'calculate_position_size', 'details': traceback.format_exc()}
+                data={'error': error_msg, 'source': 'calculate_ActiveTrade_size', 'details': traceback.format_exc()}
             ))
             return self.risk_factor  # Fall back to base risk
 
     def _action(self, price: float, direction: str, timestamp: datetime) -> None:
         """פתיחת עמדה עם ניהול סיכונים דינמי – עבור Long בלבד"""
         if price <= 0:
-            self.logger.error("Invalid price for opening position")
+            self.logger.error("Invalid price for opening ActiveTrade")
             return
 
         try:
-            # Calculate position size based on risk parameters
-            position_size = self._calculate_position_size()
+            # Calculate ActiveTrade size based on risk parameters
+            ActiveTrade_size = self._calculate_ActiveTrade_size()
             
             # Calculate stop loss and take profit levels
             atr = max(self.metrics_calculator.metrics['atr'], price * 0.001)  # Use minimum 0.1% ATR
@@ -1131,12 +1131,12 @@ class MarketAnalyzer:
             risk_reward = TradingConfig.MARKET_CONDITIONS['EXIT']['profit_target_multiplier']
             profit_distance = stop_distance * risk_reward
             
-            # For long positions: stop below entry, target above entry
+            # For long ActiveTrades: stop below entry, target above entry
             stop_loss = price - stop_distance
             take_profit = price + profit_distance
                 
-            # Update position details
-            self.position.update(
+            # Update ActiveTrade details
+            self.ActiveTrade.update(
                 active=True,
                 entry_price=price,
                 stop_loss=stop_loss,
@@ -1144,7 +1144,7 @@ class MarketAnalyzer:
                 highest_price=price,
                 lowest_price=price,
                 direction=direction,
-                size=position_size,
+                size=ActiveTrade_size,
                 entry_time=timestamp
             )
             
@@ -1156,39 +1156,39 @@ class MarketAnalyzer:
                     'entry_price': price,
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
-                    'size': position_size,
+                    'size': ActiveTrade_size,
                     'time': timestamp,
                     'risk_reward': risk_reward,
                     'metrics': {k: round(v, 4) for k, v in self.metrics_calculator.metrics.items()}
                 }
             ))
             
-            self.logger.info(f"Opened {direction} position at {price:.6f} (Stop: {stop_loss:.6f}, Target: {take_profit:.6f}, RR: {risk_reward:.1f})")
+            self.logger.info(f"Opened {direction} ActiveTrade at {price:.6f} (Stop: {stop_loss:.6f}, Target: {take_profit:.6f}, RR: {risk_reward:.1f})")
             
         except Exception as e:
-            error_msg = f"Error opening position: {str(e)}"
+            error_msg = f"Error opening ActiveTrade: {str(e)}"
             self.logger.error(error_msg)
             self.logger.debug(traceback.format_exc())
             self.event_emitter.emit(Event(
                 type=EventType.ERROR,
-                data={'error': error_msg, 'source': 'open_position', 'details': traceback.format_exc()}
+                data={'error': error_msg, 'source': 'open_ActiveTrade', 'details': traceback.format_exc()}
             ))
 
-    def _close_position(self, exit_price: float, reason: str, timestamp: datetime) -> None:
+    def _close_ActiveTrade(self, exit_price: float, reason: str, timestamp: datetime) -> None:
         """סגירת עמדה ורישום נתוני העסקה – עבור Long בלבד"""
-        if not self.position.active or exit_price <= 0:
+        if not self.ActiveTrade.active or exit_price <= 0:
             return
 
         try:
-            # Get position details
-            entry_price = self.position.entry_price
-            direction = self.position.direction
-            position_size = self.position.size
-            entry_time = self.position.entry_time
+            # Get ActiveTrade details
+            entry_price = self.ActiveTrade.entry_price
+            direction = self.ActiveTrade.direction
+            ActiveTrade_size = self.ActiveTrade.size
+            entry_time = self.ActiveTrade.entry_time
             
             # Calculate profit/loss
             pnl_pct = (exit_price / entry_price - 1) * 100
-            pnl_value = position_size * (pnl_pct / 100)
+            pnl_value = ActiveTrade_size * (pnl_pct / 100)
                 
             # Record trade details
             trade_record = {
@@ -1198,7 +1198,7 @@ class MarketAnalyzer:
                 'direction': direction,
                 'entry_price': entry_price,
                 'exit_price': exit_price,
-                'size': position_size,
+                'size': ActiveTrade_size,
                 'pnl': pnl_pct,
                 'pnl_value': pnl_value,
                 'exit_reason': reason
@@ -1238,20 +1238,20 @@ class MarketAnalyzer:
             # Log trade result
             result_desc = "PROFIT" if pnl_pct > 0 else "LOSS"
             self.logger.info(
-                f"Closed {direction} position: Entry={entry_price:.6f}, Exit={exit_price:.6f}, "
+                f"Closed {direction} ActiveTrade: Entry={entry_price:.6f}, Exit={exit_price:.6f}, "
                 f"{result_desc}={pnl_pct:.2f}%, Reason={reason}"
             )
             
-            # Reset position
-            self.position.reset()
+            # Reset ActiveTrade
+            self.ActiveTrade.reset()
             
         except Exception as e:
-            error_msg = f"Error closing position: {str(e)}"
+            error_msg = f"Error closing ActiveTrade: {str(e)}"
             self.logger.error(error_msg)
             self.logger.debug(traceback.format_exc())
             self.event_emitter.emit(Event(
                 type=EventType.ERROR,
-                data={'error': error_msg, 'source': 'close_position', 'details': traceback.format_exc()}
+                data={'error': error_msg, 'source': 'close_ActiveTrade', 'details': traceback.format_exc()}
             ))
 
     def get_market_state(self) -> Dict[str, Any]:
@@ -1263,19 +1263,19 @@ class MarketAnalyzer:
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'current_price': current_price,
                 'metrics': self.metrics_calculator.metrics.copy(),
-                'position': {
-                    'active': self.position.active,
-                    'direction': self.position.direction,
-                    'entry_price': self.position.entry_price,
+                'ActiveTrade': {
+                    'active': self.ActiveTrade.active,
+                    'direction': self.ActiveTrade.direction,
+                    'entry_price': self.ActiveTrade.entry_price,
                     'current_pnl': 0.0,
-                    'stop_loss': self.position.stop_loss,
-                    'take_profit': self.position.take_profit
+                    'stop_loss': self.ActiveTrade.stop_loss,
+                    'take_profit': self.ActiveTrade.take_profit
                 },
                 'performance': self.performance.get_metrics()
             }
             
-            if self.position.active and current_price > 0:
-                state['position']['current_pnl'] = (current_price / self.position.entry_price - 1) * 100
+            if self.ActiveTrade.active and current_price > 0:
+                state['ActiveTrade']['current_pnl'] = (current_price / self.ActiveTrade.entry_price - 1) * 100
                     
             return state
 
@@ -1618,10 +1618,10 @@ class MarketStatusReporter:
                     f"Trend: {metrics['trend_strength']:.2f}"
                 )
                 
-                # Add position info if active
-                if state['position']['active']:
-                    entry = state['position']['entry_price']
-                    pnl = state['position']['current_pnl']
+                # Add ActiveTrade info if active
+                if state['ActiveTrade']['active']:
+                    entry = state['ActiveTrade']['entry_price']
+                    pnl = state['ActiveTrade']['current_pnl']
                     status += f" | BUY @ {entry:.6f} | PnL: {pnl:.2f}%"
                     
                 # Add performance metrics if available
@@ -1684,7 +1684,7 @@ def main() -> None:
         warmup_ticks=TradingConfig.DEFAULT_WARMUP_TICKS,
         dynamic_window=TradingConfig.DEFAULT_DYNAMIC_WINDOW,
         risk_factor=TradingConfig.DEFAULT_RISK_FACTOR,
-        adaptive_position=TradingConfig.DEFAULT_ADAPTIVE_POSITION_SIZING
+        adaptive_ActiveTrade=TradingConfig.DEFAULT_ADAPTIVE_ActiveTrade_SIZING
     )
 
     # Initialize WebSocket manager and backtest engine
