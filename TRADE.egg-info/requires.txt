@@ -1,5 +1,0 @@
-numpy
-pandas
-scipy
-websocket-client
-requests

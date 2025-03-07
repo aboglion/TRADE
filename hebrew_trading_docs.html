@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>תיעוד מערכת המסחר</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            font-weight: 600;
+        }
+        h1 {
+            text-align: center;
+            color: #2980b9;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+            margin-bottom: 15px;
+        }
+        code {
+            font-family: Consolas, Monaco, 'Andale Mono', monospace;
+            background-color: #f5f5f5;
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #e1e1e8;
+            direction: ltr;
+            display: inline-block;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            direction: ltr;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            direction: rtl;
+        }
+        th, td {
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            text-align: right;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .english-term {
+            direction: ltr;
+            display: inline-block;
+        }
+        .file-path {
+            direction: ltr;
+            display: inline-block;
+            font-family: monospace;
+            color: #2980b9;
+        }
+        .toc {
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px 20px;
+            margin-bottom: 30px;
+        }
+        .toc ul {
+            list-style-type: none;
+            padding-right: 20px;
+        }
+        .toc ul li {
+            margin-bottom: 8px;
+        }
+        .toc a {
+            text-decoration: none;
+            color: #3498db;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        .directory-structure {
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            direction: ltr;
+            font-family: monospace;
+            line-height: 1.4;
+            white-space: pre;
+            overflow-x: auto;
+        }
+        .flow-diagram {
+            background-color: #f5f7fa;
+            padding: 20px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            margin: 20px 0;
+            text-align: center;
+            direction: ltr;
+        }
+        .highlight {
+            background-color: #fffacd;
+            padding: 2px;
+        }
+        .note {
+            background-color: #e7f5fe;
+            border-right: 4px solid #3498db;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 3px;
+        }
+        .key-feature {
+            margin-bottom: 10px;
+        }
+        .key-feature:before {
+            content: "✓";
+            color: #27ae60;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .directory-structure, .flow-diagram {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>תיעוד מערכת המסחר</h1>
+    <p>מדריך מקיף למערכת המסחר האלגוריתמית</p>
+    
+    <div class="toc">
+        <h2>תוכן עניינים</h2>
+        <ul>
+            <li><a href="#system-overview">סקירת המערכת</a></li>
+            <li><a href="#system-architecture">ארכיטקטורת המערכת</a></li>
+            <li><a href="#key-components">רכיבים עיקריים</a></li>
+            <li><a href="#data-flow">זרימת נתונים וקריאות פונקציות</a></li>
+            <li><a href="#market-metrics">הסבר על מדדי שוק</a></li>
+            <li><a href="#trading-logic">לוגיקת המסחר</a></li>
+            <li><a href="#running-system">הפעלת המערכת</a></li>
+            <li><a href="#configuration">אפשרויות תצורה</a></li>
+        </ul>
+    </div>
+    
+    <h2 id="system-overview">סקירת המערכת</h2>
+    <p>מערכת מסחר זו היא פלטפורמת מסחר אלגוריתמית למטבעות קריפטוגרפיים המתוכננת לנתח נתוני שוק בזמן אמת, לזהות הזדמנויות מסחר על בסיס אינדיקטורים סטטיסטיים, ולבצע עסקאות באופן אוטומטי. המערכת מתחברת לבורסות קריפטו באמצעות WebSocket, מעבדת נתוני שוק, מחשבת אינדיקטורים טכניים שונים, מייצרת אותות מסחר, ומנהלת עסקאות עם כללי ניהול סיכונים.</p>
+    
+    <h3>תכונות עיקריות</h3>
+    <div class="key-feature">עיבוד נתוני שוק בזמן אמת באמצעות חיבורי WebSocket</div>
+    <div class="key-feature">ניתוח סטטיסטי של תנאי שוק</div>
+    <div class="key-feature">יצירת אותות מסחר אוטומטית</div>
+    <div class="key-feature">ניהול סיכונים עם התאמת גודל פוזיציה אדפטיבי</div>
+    <div class="key-feature">מעקב אחר ביצועים ותיעוד עסקאות</div>
+    <div class="key-feature">ארכיטקטורה מבוססת אירועים לגמישות והרחבה</div>
+    
+    <h2 id="system-architecture">ארכיטקטורת המערכת</h2>
+    <p>מערכת המסחר מבוססת על ארכיטקטורה מודולרית ומונעת-אירועים המאורגנת במספר מודולים מרכזיים:</p>
+    
+    <h3>Connectivity (קישוריות)</h3>
+    <p>מטפל בתקשורת עם בורסות באמצעות חיבורי WebSocket, מעבד נתוני שוק נכנסים, ושומר על תקינות החיבור.</p>
+    
+    <h3>Market (שוק)</h3>
+    <p>מאחסן ומנהל נתוני שוק, מחשב אינדיקטורים טכניים ומדדי שוק המשמשים לניתוח.</p>
+    
+    <h3>Analysis (ניתוח)</h3>
+    <p>מנתח נתוני שוק, מייצר אותות מסחר, ומזהה הזדמנויות כניסה/יציאה על בסיס תנאי שוק.</p>
+    
+    <h3>Trading (מסחר)</h3>
+    <p>מנהל עסקאות פעילות, מטפל בקביעת גודל פוזיציה, מיישם ניהול סיכונים, ועוקב אחר ביצועים.</p>
+    
+    <h3>Events (אירועים)</h3>
+    <p>מספק מערכת אירועים לתקשורת בין רכיבים, המאפשרת צימוד רופף וגמישות.</p>
+    
+    <h3>Utils (כלי עזר)</h3>
+    <p>מכיל פונקציות עזר, ניהול תצורה, ופונקציונליות רישום.</p>
+    
+    <h3>Storage (אחסון)</h3>
+    <p>מטפל בשמירת נתונים, רישום נתוני שוק ומידע על עסקאות לניתוח מאוחר יותר.</p>
+    
+    <h3>Reporting (דיווח)</h3>
+    <p>מספק עדכוני סטטוס ודוחות ביצועים במהלך פעולת המערכת.</p>
+    
+    <h3>מבנה ספריות</h3>
+    <div class="directory-structure">
+TRADE/
+├── __init__.py
+├── main.py                  # נקודת כניסה ראשית
+├── analysis/                # רכיבי ניתוח שוק
+│   ├── __init__.py
+│   ├── market_analyzer.py   # מנוע ניתוח ליבה
+│   └── signal_generator.py  # יצירת אותות מסחר
+├── connectivity/            # קישוריות לבורסה
+│   ├── __init__.py
+│   ├── simulator.py         # סימולטור שוק לבדיקות
+│   └── websocket_manager.py # ניהול חיבור WebSocket
+├── events/                  # מערכת אירועים
+│   ├── __init__.py
+│   ├── event.py             # מבנה נתוני אירוע
+│   ├── event_emitter.py     # פרסום/מנוי לאירועים
+│   └── event_type.py        # הגדרות סוגי אירועים
+├── market/                  # ניהול נתוני שוק
+│   ├── __init__.py
+│   ├── market_data.py       # אחסון נתוני שוק
+│   └── market_metrics.py    # חישוב אינדיקטורים טכניים
+├── reporting/               # דיווח סטטוס
+│   ├── __init__.py
+│   └── status_reporter.py   # עדכוני סטטוס מערכת
+├── storage/                 # שמירת נתונים
+│   ├── __init__.py
+│   └── data_storage.py      # פונקציונליות רישום נתונים
+├── trading/                 # ניהול מסחר
+│   ├── __init__.py
+│   ├── active_trade.py      # מעקב אחר עסקאות פעילות
+│   ├── performance_tracker.py # מדדי ביצועים
+│   ├── trade_journal.py     # רישום היסטוריית עסקאות
+│   └── trade_manager.py     # ביצוע וניהול עסקאות
+└── utils/                   # כלי עזר
+    ├── __init__.py
+    ├── config.py            # ניהול תצורה
+    └── logger.py            # הגדרת רישום לוג
+</div>
+    
+    <h2 id="key-components">רכיבים עיקריים</h2>
+    
+    <h3>MarketAnalyzer</h3>
+    <p>הרכיב המרכזי המתאם ניתוח שוק, יצירת אותות, וניהול עסקאות. הוא מעבד נתוני שוק נכנסים, מחשב מדדים, ומייצר אותות מסחר.</p>
+    <p><strong>אחריות עיקרית:</strong></p>
+    <ul>
+        <li>עיבוד טיקים נכנסים של נתוני שוק</li>
+        <li>תיאום חישוב מדדי שוק</li>
+        <li>הפעלת יצירת אותות</li>
+        <li>עיבוד אותות מסחר</li>
+        <li>ניהול שלב האתחול (warmup)</li>
+        <li>אספקת מידע על מצב השוק</li>
+    </ul>
+    <p><strong>מיקום:</strong> <span class="file-path">TRADE/analysis/market_analyzer.py</span></p>
+    
+    <h3>MarketWebSocketManager</h3>
+    <p>מנהל חיבורי WebSocket לבורסות קריפטו, מטפל בנתוני שוק נכנסים, ומבטיח את תקינות החיבור.</p>
+    <p><strong>אחריות עיקרית:</strong></p>
+    <ul>
+        <li>יצירה ותחזוקה של חיבורי WebSocket</li>
+        <li>עיבוד הודעות נתוני שוק נכנסות</li>
+        <li>טיפול בשגיאות חיבור והתחברות מחדש</li>
+        <li>ניטור תקינות החיבור</li>
+        <li>רישום נתוני שוק (אם מופעל)</li>
+    </ul>
+    <p><strong>מיקום:</strong> <span class="file-path">TRADE/connectivity/websocket_manager.py</span></p>
+    
+    <h3>SignalGenerator</h3>
+    <p>מנתח תנאי שוק ומייצר אותות מסחר לנקודות כניסה ויציאה על בסיס קריטריונים מוגדרים מראש.</p>
+    <p><strong>אחריות עיקרית:</strong></p>
+    <ul>
+        <li>בדיקת תנאי כניסה לעסקאות חדשות</li>
+        <li>בדיקת תנאי יציאה מעסקאות פעילות</li>
+        <li>יצירת אותות קנייה/מכירה</li>
+        <li>יישום לוגיקת עצירה נגררת (trailing stop)</li>
+    </ul>
+    <p><strong>מיקום:</strong> <span class="file-path">TRADE/analysis/signal_generator.py</span></p>
+    
+    <h3>TradeManager</h3>
+    <p>מטפל בביצוע עסקאות, קביעת גודל פוזיציה, ניהול סיכונים, ומעקב אחר ביצועים.</p>
+    <p><strong>אחריות עיקרית:</strong></p>
+    <ul>
+        <li>פתיחה וסגירה של עסקאות</li>
+        <li>חישוב גודלי פוזיציה על בסיס פרמטרים של סיכון</li>
+        <li>יישום לוגיקת עצירת הפסד (stop loss) ומטרות רווח (take profit)</li>
+        <li>מעקב אחר ביצועי עסקאות</li>
+        <li>רישום היסטוריית עסקאות</li>
+    </ul>
+    <p><strong>מיקום:</strong> <span class="file-path">TRADE/trading/trade_manager.py</span></p>
+    
+    <h3>MarketMetricsCalculator</h3>
+    <p>מחשב אינדיקטורים טכניים שונים ומדדי שוק המשמשים להחלטות מסחר.</p>
+    <p><strong>אחריות עיקרית:</strong></p>
+    <ul>
+        <li>חישוב מדדי תנודתיות</li>
+        <li>חישוב חוזק מגמה</li>
+        <li>חישוב חוזק יחסי</li>
+        <li>חישוב חוסר איזון בהזמנות</li>
+        <li>חישוב יחס יעילות שוק</li>
+    </ul>
+    <p><strong>מיקום:</strong> <span class="file-path">TRADE/market/market_metrics.py</span></p>
+    
+    <h3>EventEmitter</h3>
+    <p>מיישם את מערכת האירועים המאפשרת תקשורת בין רכיבים שונים.</p>
+    <p><strong>אחריות עיקרית:</strong></p>
+    <ul>
+        <li>רישום מטפלי אירועים</li>
+        <li>שליחת אירועים למטפלים רשומים</li>
+        <li>ניהול מנויים לאירועים</li>
+    </ul>
+    <p><strong>מיקום:</strong> <span class="file-path">TRADE/events/event_emitter.py</span></p>
+    
+    <h2 id="data-flow">זרימת נתונים וקריאות פונקציות</h2>
+    
+    <h3>זרימת אתחול מערכת</h3>
+    <ul>
+        <li><code>main.py</code> - נקודת כניסה המאתחלת את המערכת</li>
+        <li>הגדרת לוגר באמצעות <code>LoggerSetup.get_logger()</code></li>
+        <li>טעינת תצורה באמצעות <code>TradingConfig.load_from_file()</code></li>
+        <li>אתחול MarketAnalyzer עם פרמטרי תצורה</li>
+        <li>אתחול מנהל WebSocket עם המנתח והסמלים</li>
+        <li>רישום מטפלי אירועים עבור אירועי מסחר</li>
+        <li>אתחול והפעלת מדווח סטטוס</li>
+        <li>התחלת חיבור WebSocket על בסיס ארגומנטים מהשורה הפקודה</li>
+    </ul>
+    
+    <h3>זרימת עיבוד נתוני שוק</h3>
+    <ul>
+        <li>WebSocket מקבל נתוני שוק באמצעות <code>_handle_message()</code></li>
+        <li>הנתונים מנורמלים ומועברים ל-<code>analyzer.process_tick()</code></li>
+        <li>MarketAnalyzer מאמת את הנתונים ושולח אירוע TICK</li>
+        <li>נתוני שוק מתעדכנים באמצעות <code>market_data.add_tick()</code></li>
+        <li>מדדי שוק מחושבים באמצעות <code>metrics_calculator.calculate_metrics()</code></li>
+        <li>אם המדדים מתעדכנים, נשלח אירוע METRIC_UPDATE</li>
+        <li>אם האתחול הושלם, נגרמת יצירת אותות</li>
+        <li>SignalGenerator מנתח תנאים ועשוי לייצר אות</li>
+        <li>אם נוצר אות, הוא מעובד על ידי <code>_process_signal()</code></li>
+        <li>נשלח אירוע SIGNAL עם פרטי האות</li>
+    </ul>
+    
+    <h3>זרימת ביצוע עסקאות</h3>
+    <ul>
+        <li>כשאות BUY מעובד, נקראת <code>trade_manager.open_trade()</code></li>
+        <li>גודל פוזיציה מחושב על בסיס פרמטרי סיכון</li>
+        <li>מחושבות רמות עצירת הפסד ולקיחת רווח</li>
+        <li>ActiveTrade מתעדכן עם פרטי העסקה</li>
+        <li>נשלח אירוע TRADE_OPENED</li>
+        <li>כשאות CLOSE מעובד, נקראת <code>trade_manager.close_trade()</code></li>
+        <li>מחושב רווח/הפסד</li>
+        <li>פרטי עסקה נרשמים ביומן המסחר</li>
+        <li>מדדי ביצועים מתעדכנים</li>
+        <li>נשלח אירוע TRADE_CLOSED</li>
+        <li>ActiveTrade מאופס</li>
+    </ul>
+    
+    <h3>תרשים זרימת אירועים</h3>
+    <div class="flow-diagram">
+        WebSocket Data → TICK Event → Market Data Update → Metrics Calculation → METRIC_UPDATE Event
+                                                                              ↓
+                                                                    Signal Generation
+                                                                              ↓
+                                                                       SIGNAL Event
+                                                                              ↓
+                                                              ┌─────────────────────────┐
+                                                              ↓                         ↓
+                                                         BUY Signal                CLOSE Signal
+                                                              ↓                         ↓
+                                                       Open Trade                 Close Trade
+                                                              ↓                         ↓
+                                                     TRADE_OPENED Event         TRADE_CLOSED Event
+    </div>
+    
+    <h2 id="market-metrics">מדדי שוק - הסברים</h2>
+    <p>המערכת משתמשת במספר מדדי שוק לניתוח תנאי שוק וקבלת החלטות מסחר:</p>
+    
+    <h3>Realized Volatility (תנודתיות שהתממשה)</h3>
+    <p><strong>תיאור:</strong> מודד את אחוז שינוי המחיר הממוצע לאורך זמן.</p>
+    <p><strong>חישוב:</strong> סטיית תקן של תשואות מוכפלת בשורש של (252 * 1440) כדי לנרמל לשנה, מבוטא כאחוז.</p>
+    <p><strong>משמעות במסחר:</strong> תנודתיות גבוהה יותר עשויה להצביע על הזדמנויות מסחר פוטנציאליות אך גם על סיכון מוגבר.</p>
+    
+    <h3>Average True Range (ATR)</h3>
+    <p><strong>תיאור:</strong> מודד תנודתיות שוק על ידי פירוק הטווח המלא של מחיר הנכס לתקופה.</p>
+    <p><strong>חישוב:</strong> ממוצע של טווחים אמיתיים על פני חלון של 14 תקופות, כאשר טווח אמיתי הוא הגדול ביותר מבין: גבוה נוכחי - נמוך נוכחי, גבוה נוכחי - סגירה קודמת, או נמוך נוכחי - סגירה קודמת.</p>
+    <p><strong>משמעות במסחר:</strong> משמש לקביעת רמות עצירת הפסד וגודלי פוזיציה על בסיס תנודתיות שוק.</p>
+    
+    <h3>Relative Strength (חוזק יחסי)</h3>
+    <p><strong>תיאור:</strong> מודד את חוזק תנועת המחיר, דומה ל-RSI אך מנורמל בין 0 ל-1.</p>
+    <p><strong>חישוב:</strong> יחס של רווחים לסך תשואות מוחלטות על פני תקופת חלון.</p>
+    <p><strong>משמעות במסחר:</strong> ערכים מעל 0.5 מצביעים על תנופה שורית, בעוד ערכים מתחת ל-0.5 מצביעים על תנופה דובית.</p>
+    
+    <h3>Order Imbalance (חוסר איזון בהזמנות)</h3>
+    <p><strong>תיאור:</strong> מודד את היחס בין נפחי קנייה ומכירה.</p>
+    <p><strong>חישוב:</strong> נפח קנייה מחולק בסך הנפח (קנייה + מכירה).</p>
+    <p><strong>משמעות במסחר:</strong> ערכים מעל 0.5 מצביעים על לחץ קנייה גבוה יותר, בעוד ערכים מתחת ל-0.5 מצביעים על לחץ מכירה גבוה יותר.</p>
+    
+    <h3>Trend Strength (חוזק מגמה)</h3>
+    <p><strong>תיאור:</strong> מודד את החוזק והכיוון של מגמת המחיר הנוכחית.</p>
+    <p><strong>חישוב:</strong> שיפוע רגרסיה לינארית מוכפל בערך R-squared ומוכפל ברמת המחיר.</p>
+    <p><strong>משמעות במסחר:</strong> ערכים חיוביים מצביעים על מגמת עלייה, ערכים שליליים מצביעים על מגמת ירידה, והגודל מצביע על החוזק.</p>
+    
+    <h3>Market Efficiency Ratio (MER) (יחס יעילות שוק)</h3>
+    <p><strong>תיאור:</strong> מודד כמה ביעילות המחיר נע מנקודה אחת לאחרת.</p>
+    <p><strong>חישוב:</strong> תנועה כיוונית נטו מחולקת באורך המסלול הכולל על פני חלון של 30 תקופות.</p>
+    <p><strong>משמעות במסחר:</strong> ערכים גבוהים יותר מצביעים על שוק מגמתי יותר ויעיל יותר, בעוד ערכים נמוכים יותר מצביעים על שוק גועש ותחום בטווח.</p>
+    
+    <h2 id="trading-logic">לוגיקת המסחר</h2>
+    
+    <h3>תנאי קנייה</h3>
+    <p>המערכת נכנסת לעסקת קנייה כאשר כל התנאים הבאים מתקיימים:</p>
+    <ul>
+        <li>תנודתיות שהתממשה היא מעל הסף (0.3%)</li>
+        <li>חוזק יחסי הוא מעל הסף (0.2)</li>
+        <li>חוזק מגמה הוא חיובי ומעל הסף (6)</li>
+        <li>חוסר איזון בהזמנות הוא מעל הסף (0.25)</li>
+        <li>יחס יעילות שוק הוא מעל הסף (1.0)</li>
+    </ul>
+    
+    <h3>תנאי יציאה</h3>
+    <p>המערכת יוצאת מעסקה כאשר אחד מהתנאים הבאים מתקיים:</p>
+    <ul>
+        <li>המחיר מגיע לרמת עצירת הפסד</li>
+        <li>המחיר מגיע לרמת לקיחת רווח</li>
+        <li>עצירה נגררת מופעלת לאחר שהרווח עובר סף הפעלה</li>
+        <li>משך העסקה עולה על 4 שעות</li>
+        <li>חוזק מגמה מתהפך מתחת ל-0.4-</li>
+    </ul>
+    
+    <h3>ניהול סיכונים</h3>
+    <p>המערכת מיישמת מספר טכניקות לניהול סיכונים:</p>
+    <ul>
+        <li><strong>קביעת גודל פוזיציה:</strong> סיכון ברירת המחדל הוא 2% לעסקה, אך ניתן להתאים על בסיס תנאי שוק</li>
+        <li><strong>עצירת הפסד:</strong> נקבעת ב-1.5 פעמים ה-ATR מתחת למחיר הכניסה</li>
+        <li><strong>לקיחת רווח:</strong> נקבעת ב-2.5 פעמים מרחק העצירה (יחס סיכון-תגמול של 2.5)</li>
+        <li><strong>עצירה נגררת:</strong> מופעלת כאשר הרווח מגיע ל-1%, עם מרחק של 1.5 פעמים ATR</li>
+        <li><strong>קביעת גודל אדפטיבית:</strong> מתאימה את גודל הפוזיציה על בסיס תנודתיות, יישור מגמה, וביצועים אחרונים</li>
+    </ul>
+    
+    <h3>כיצד המערכת קונה</h3>
+    <ol>
+        <li>המערכת מנתחת מדדי שוק כדי לזהות תנאים מועדפים</li>
+        <li>כאשר כל תנאי הקנייה מתקיימים, נוצר אות BUY</li>
+        <li>גודל פוזיציה מחושב על בסיס פרמטרי סיכון ותנאי שוק</li>
+        <li>עצירת הפסד נקבעת ב-1.5 * ATR מתחת למחיר הכניסה</li>
+        <li>לקיחת רווח נקבעת במחיר כניסה + (מרחק עצירה * 2.5)</li>
+        <li>העסקה נפתחת ונשלח אירוע TRADE_OPENED</li>
+        <li>פרטי העסקה נרשמים ומנוטרים</li>
+    </ol>
+    
+    <h3>כיצד המערכת מוכרת</h3>
+    <ol>
+        <li>עבור עסקאות פעילות, המערכת בודקת באופן רציף את תנאי היציאה</li>
+        <li>אם המחיר מגיע לעצירת הפסד, לקיחת רווח, או עצירה נגררת, נוצר אות CLOSE</li>
+        <li>אם המגמה מתהפכת או שמגבלת הזמן מגיעה, נוצר אות CLOSE</li>
+        <li>העסקה נסגרת ומחושב רווח/הפסד</li>
+        <li>פרטי העסקה נרשמים ביומן</li>
+        <li>מדדי ביצועים מתעדכנים</li>
+        <li>נשלח אירוע TRADE_CLOSED</li>
+        <li>המערכת חוזרת לחיפוש הזדמנויות כניסה חדשות</li>
+    </ol>
+    
+    <h2 id="running-system">הפעלת המערכת</h2>
+    
+    <h3>דרישות מקדימות</h3>
+    <ul>
+        <li>Python 3.7 ומעלה</li>
+        <li>חבילות נדרשות: websocket-client, numpy, scipy</li>
+        <li>חיבור אינטרנט למסחר בזמן אמת</li>
+    </ul>
+    
+    <h3>התקנה</h3>
+    <p>התקן את התלויות הנדרשות:</p>
+    <pre>pip install -r requirements.txt</pre>
+    
+    <h3>הפעלה במצב חי (Live)</h3>
+    <p>להפעלת המערכת במצב מסחר חי:</p>
+    <pre>python run.py live</pre>
+    <p>או לחלופין:</p>
+    <pre>python -m TRADE.main live</pre>
+    
+    <h3>הפעלה במצב Backtest</h3>
+    <p>מצב Backtest עדיין לא מיושם באופן מלא, אך הפקודה תהיה:</p>
+    <pre>python run.py backtest</pre>
+    
+    <h3>פלט המערכת</h3>
+    <p>בעת הפעלה, המערכת תציג:</p>
+    <ul>
+        <li>הודעות סטטוס חיבור</li>
+        <li>אותות מסחר עם מדדי שוק</li>
+        <li>התראות על פתיחת/סגירת עסקאות עם פרטים</li>
+        <li>הודעות שגיאה אם יש בעיות כלשהן</li>
+        <li>עדכוני סטטוס קבועים ממדווח הסטטוס</li>
+    </ul>
+    
+    <h3>עצירת המערכת</h3>
+    <p>לעצירת המערכת, לחץ <code>Ctrl+C</code> בטרמינל. המערכת תבצע כיבוי מסודר, סגירת כל החיבורים והעסקאות הפתוחות.</p>
+    
+    <h2 id="configuration">אפשרויות תצורה</h2>
+    <p>ניתן להגדיר את המערכת על ידי עריכת קובץ <code>trading_config.json</code> או על ידי שינוי ערכי ברירת המחדל ב-<span class="file-path">TRADE/utils/config.py</span>.</p>
+    
+    <h3>פרמטרי תצורה עיקריים</h3>
+    <table>
+        <tr>
+            <th>פרמטר</th>
+            <th>תיאור</th>
+            <th>ערך ברירת מחדל</th>
+        </tr>
+        <tr>
+            <td>DEFAULT_WARMUP_TICKS</td>
+            <td>מספר טיקים נדרש לפני תחילת ניתוח</td>
+            <td>300</td>
+        </tr>
+        <tr>
+            <td>DEFAULT_RISK_FACTOR</td>
+            <td>אחוז סיכון לעסקה (0.02 = 2%)</td>
+            <td>0.02</td>
+        </tr>
+        <tr>
+            <td>DEFAULT_DYNAMIC_WINDOW</td>
+            <td>האם להשתמש בגודל חלון דינמי לניתוח</td>
+            <td>True</td>
+        </tr>
+        <tr>
+            <td>DEFAULT_ADAPTIVE_ActiveTrade_SIZING</td>
+            <td>האם להתאים גודל פוזיציה על בסיס תנאי שוק</td>
+            <td>True</td>
+        </tr>
+    </table>
+    
+    <h3>תצורת תנאי שוק</h3>
+    <p>ניתן להגדיר את תנאי הקנייה והיציאה בחלק MARKET_CONDITIONS:</p>
+    
+    <h4>תנאי קנייה</h4>
+    <table>
+        <tr>
+            <th>פרמטר</th>
+            <th>תיאור</th>
+            <th>ערך ברירת מחדל</th>
+        </tr>
+        <tr>
+            <td>volatility_threshold</td>
+            <td>תנודתיות מינימלית לכניסת קנייה</td>
+            <td>0.3</td>
+        </tr>
+        <tr>
+            <td>relative_strength_threshold</td>
+            <td>חוזק יחסי מינימלי לכניסת קנייה</td>
+            <td>0.2</td>
+        </tr>
+        <tr>
+            <td>trend_strength</td>
+            <td>חוזק מגמה מינימלי לכניסת קנייה</td>
+            <td>6</td>
+        </tr>
+        <tr>
+            <td>order_imbalance</td>
+            <td>חוסר איזון הזמנות מינימלי לכניסת קנייה</td>
+            <td>0.25</td>
+        </tr>
+        <tr>
+            <td>market_efficiency_ratio</td>
+            <td>יעילות שוק מינימלית לכניסת קנייה</td>
+            <td>1.0</td>
+        </tr>
+    </table>
+    
+    <h4>תנאי יציאה</h4>
+    <table>
+        <tr>
+            <th>פרמטר</th>
+            <th>תיאור</th>
+            <th>ערך ברירת מחדל</th>
+        </tr>
+        <tr>
+            <td>profit_target_multiplier</td>
+            <td>מרחק לקיחת רווח כמכפלה של מרחק עצירה</td>
+            <td>2.5</td>
+        </tr>
+        <tr>
+            <td>trailing_stop_activation</td>
+            <td>אחוז רווח להפעלת עצירה נגררת</td>
+            <td>1.0</td>
+        </tr>
+        <tr>
+            <td>trailing_stop_distance</td>
+            <td>מרחק עצירה נגררת כמכפלה של ATR</td>
+            <td>1.5</td>
+        </tr>
+    </table>
+    
+    <div class="note">
+        <strong>הערה חשובה:</strong> שינוי פרמטרי תצורה יכול להשפיע משמעותית על ביצועי המסחר. מומלץ לבדוק כל שינוי בסביבת סימולציה לפני השימוש בו במסחר חי.
+    </div>
+    
+    <p>תיעוד זה מספק סקירה של ארכיטקטורת מערכת המסחר ותפקודה. המערכת מיועדת למטרות חינוכיות ומחקריות.</p>
+</body>
+</html>
