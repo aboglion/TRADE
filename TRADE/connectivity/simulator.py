@@ -14,7 +14,7 @@ class MarketSimulator:
     סימולטור שוק המשתמש בנתונים מוקלטים במקום חיבור WebSocket
     """
     
-    def __init__(self, data_callback: Callable[[Dict[str, Any]], None], speed_factor: float = 1.0):
+    def __init__(self, data_callback: Callable[[Dict[str, Any]], None], speed_factor: float = 2.0):
         """
         אתחול סימולטור השוק
         
@@ -94,15 +94,15 @@ class MarketSimulator:
                 # קבלת ה-tick הנוכחי
                 current_tick = self.dataset[self.current_index]
                 
-                if self.current_index > 0:
-                    # חישוב זמן ההמתנה בין ticks
-                    prev_tick_time = self.dataset[self.current_index - 1]['T'] / 1000
-                    current_tick_time = current_tick['T'] / 1000
-                    wait_time = (current_tick_time - prev_tick_time) / self.speed_factor
+                # if self.current_index > 0:
+                    # # חישוב זמן ההמתנה בין ticks
+                    # prev_tick_time = self.dataset[self.current_index - 1]['T'] / 1000
+                    # current_tick_time = current_tick['T'] / 1000
+                    # wait_time = (current_tick_time - prev_tick_time) / self.speed_factor
                     
-                    # המתנה לזמן המתאים
-                    if wait_time > 0:
-                        time.sleep(wait_time)
+                    # # המתנה לזמן המתאים
+                    # if wait_time > 0:
+                    #     time.sleep(wait_time)
                 
                 # שליחת הנתונים לcallback
                 if self.running:  # בדיקה נוספת במקרה שהסימולציה נעצרה בזמן ההמתנה

@@ -9,6 +9,8 @@ from .utils.logger import LoggerSetup
 from .utils.config import TradingConfig
 from .analysis.market_analyzer import MarketAnalyzer
 from .connectivity.websocket_manager import MarketWebSocketManager
+from .connectivity.simulator import MarketSimulator
+from .storage.data_storage import DataStorage
 from .reporting.status_reporter import MarketStatusReporter
 
 def main() -> None:
@@ -57,13 +59,51 @@ def main() -> None:
             command = sys.argv[1].lower()
             
             if command == "live":
-                # Run in live trading mode
+                # Run in live trading mode with data recording
                 print("Starting live market data analysis...")
+                print("Raw market data will be recorded to data/ directory")
                 print("Press Ctrl+C to exit")
+                
+                # Initialize WebSocket manager with recording enabled
+                ws_manager = MarketWebSocketManager(market_analyzer, ['btcusdt'], record_data=True)
                 ws_manager.start()
+                
             elif command == "backtest":
-                # Run in backtest mode if implemented
-                print("Backtest mode not yet implemented")
+                # Run in backtest mode with dataset selection
+                print("\nAvailable historical datasets:")
+                data_storage = DataStorage()
+                datasets = data_storage.get_available_datasets()
+                
+                if not datasets:
+                    print("No datasets found in data/ directory")
+                    print("Record some live data first using 'live' mode")
+                    return
+                    
+                for idx, dataset in enumerate(datasets, 1):
+                    print(f"{idx}. {dataset}")
+                    
+                try:
+                    selection = int(input("\nSelect dataset to use (number): "))
+                    if selection < 1 or selection > len(datasets):
+                        raise ValueError
+                        
+                    selected_dataset = datasets[selection-1]
+                    
+                    # Initialize simulator
+                    simulator = MarketSimulator(market_analyzer.process_tick)
+                    if not simulator.load_dataset(selected_dataset):
+                        print(f"Failed to load dataset: {selected_dataset}")
+                        return
+                        
+                    print(f"\nStarting backtest with {selected_dataset}")
+                    simulator.start()
+                    
+                    # Keep main thread alive while simulator runs
+                    while simulator.running:
+                        pass
+                        
+                except ValueError:
+                    print("Invalid selection - please enter a valid number")
             else:
                 print(f"Unknown command: {command}")
                 print("Available commands:")

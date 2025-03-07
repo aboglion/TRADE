@@ -52,7 +52,9 @@ class DataStorage:
             self.current_writer.writerow(['timestamp', 'price', 'volume', 'is_ask'])
             self.current_file = filepath
             
-            logging.info(f"Started recording market data to {filepath}")
+            full_path = os.path.abspath(filepath)
+            logging.info(f"Started recording market data to {full_path}")
+            print(f"\n📁 Raw market data will be saved to: {full_path}")
         except Exception as e:
             logging.error(f"Error starting data recording: {str(e)}")
             logging.debug(traceback.format_exc())
