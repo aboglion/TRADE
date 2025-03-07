@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מערכת מסחר אלגוריתמית - תיעוד מפורט</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --accent-color: #e74c3c;
+            --light-color: #ecf0f1;
+            --dark-color: #34495e;
+            --success-color: #2ecc71;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--primary-color);
+            background-color: var(--light-color);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--secondary-color);
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            font-size: 1.8rem;
+            margin: 30px 0 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--light-color);
+        }
+
+        h3 {
+            color: var(--dark-color);
+            font-size: 1.4rem;
+            margin: 25px 0 15px;
+        }
+
+        h4 {
+            color: var(--dark-color);
+            font-size: 1.2rem;
+            margin: 20px 0 10px;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        ul, ol {
+            margin: 15px 0;
+            padding-right: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        code {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: var(--light-color);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background-color: var(--dark-color);
+            color: white;
+            padding: 15px;
+            border-radius: var(--border-radius);
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background-color: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .diagram {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .diagram img {
+            max-width: 100%;
+        }
+
+        .function-flow {
+            background-color: #f8f9fa;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .function {
+            background-color: white;
+            border-left: 4px solid var(--secondary-color);
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 0 var(--border-radius) var(--border-radius) 0;
+        }
+
+        .function h4 {
+            color: var(--secondary-color);
+            margin-top: 0;
+        }
+
+        .function-description {
+            margin-bottom: 10px;
+        }
+
+        .function-params {
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .function-return {
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .buy-signal {
+            border-left: 4px solid var(--success-color);
+        }
+
+        .buy-signal h4 {
+            color: var(--success-color);
+        }
+
+        .sell-signal {
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .sell-signal h4 {
+            color: var(--danger-color);
+        }
+
+        .flow-diagram {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 30px 0;
+        }
+
+        .flow-box {
+            background-color: white;
+            border: 2px solid var(--secondary-color);
+            border-radius: var(--border-radius);
+            padding: 15px;
+            margin: 10px 0;
+            width: 80%;
+            text-align: center;
+            position: relative;
+        }
+
+        .flow-box::after {
+            content: "↓";
+            position: absolute;
+            bottom: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 20px;
+            color: var(--secondary-color);
+        }
+
+        .flow-box:last-child::after {
+            content: "";
+        }
+
+        .buy-flow .flow-box {
+            border-color: var(--success-color);
+        }
+
+        .buy-flow .flow-box::after {
+            color: var(--success-color);
+        }
+
+        .sell-flow .flow-box {
+            border-color: var(--danger-color);
+        }
+
+        .sell-flow .flow-box::after {
+            color: var(--danger-color);
+        }
+
+        .metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        .metrics-table th, .metrics-table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: right;
+        }
+
+        .metrics-table th {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+
+        .metrics-table tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>מערכת מסחר אלגוריתמית</h1>
+            <p>תיעוד מפורט של מערכת המסחר האלגוריתמית המבוססת על ניתוח טכני וזרימת הזמנות</p>
+        </header>
+
+        <section class="section" id="overview">
+            <h2>סקירה כללית</h2>
+            <p>
+                מערכת המסחר האלגוריתמית היא מערכת מודולרית המבוססת על אירועים (Event-Driven Architecture) המיועדת לניתוח נתוני שוק בזמן אמת, 
+                זיהוי הזדמנויות מסחר, וביצוע עסקאות באופן אוטומטי. המערכת מנתחת מדדים טכניים ומזהה דפוסים בשוק כדי לקבל החלטות מסחר.
+            </p>
+            <p>
+                המערכת מחולקת למודולים שונים, כל אחד אחראי על היבט ספציפי של תהליך המסחר, מה שמאפשר תחזוקה קלה יותר, יכולת הרחבה, 
+                ובדיקות יחידה פשוטות יותר.
+            </p>
+        </section>
+
+        <section class="section" id="architecture">
+            <h2>ארכיטקטורת המערכת</h2>
+            <p>
+                המערכת בנויה ממספר מודולים עיקריים המתקשרים ביניהם באמצעות מערכת אירועים:
+            </p>
+
+            <div class="diagram">
+                <pre>
++----------------+     +----------------+     +----------------+
+|                |     |                |     |                |
+|  Connectivity  |---->|  Market Data   |---->|    Analysis    |
+|                |     |                |     |                |
++----------------+     +----------------+     +----------------+
+        |                      |                     |
+        |                      v                     v
+        |              +----------------+     +----------------+
+        |              |                |     |                |
+        +------------->|  Event System  |<----|    Trading     |
+                       |                |     |                |
+                       +----------------+     +----------------+
+                               |                     ^
+                               v                     |
+                       +----------------+     +----------------+
+                       |                |     |                |
+                       |   Reporting    |     |     Utils      |
+                       |                |     |                |
+                       +----------------+     +----------------+
+                </pre>
+            </div>
+
+            <h3>מודולים עיקריים:</h3>
+            <ul>
+                <li><strong>מערכת אירועים (events/)</strong> - מאפשרת תקשורת בין הרכיבים השונים במערכת</li>
+                <li><strong>נתוני שוק (market/)</strong> - אחראי על אחסון וניתוח נתוני השוק</li>
+                <li><strong>ניתוח (analysis/)</strong> - אחראי על קבלת החלטות מסחר על בסיס נתוני השוק והמדדים הטכניים</li>
+                <li><strong>מסחר (trading/)</strong> - אחראי על ניהול העמדות, תיעוד העסקאות ומעקב אחר הביצועים</li>
+                <li><strong>תקשורת (connectivity/)</strong> - אחראי על החיבור לבורסה וקבלת נתוני מסחר בזמן אמת</li>
+                <li><strong>דיווח (reporting/)</strong> - אחראי על הצגת מצב המערכת והביצועים למשתמש</li>
+                <li><strong>כלים (utils/)</strong> - כלי עזר שונים כמו לוגים והגדרות תצורה</li>
+                <li><strong>אחסון (storage/)</strong> - אחראי על שמירת נתוני שוק לצורך סימולציה ובקטסטינג</li>
+            </ul>
+        </section>
+
+        <section class="section" id="trading-logic">
+            <h2>לוגיקת המסחר</h2>
+            <p>
+                המערכת מבצעת ניתוח טכני של נתוני השוק ומזהה הזדמנויות מסחר על בסיס מספר מדדים ואינדיקטורים.
+            </p>
+
+            <h3>מדדים עיקריים:</h3>
+            <div class="card">
+                <table class="metrics-table">
+                    <tr>
+                        <th>מדד</th>
+                        <th>תיאור</th>
+                        <th>שימוש</th>
+                    </tr>
+                    <tr>
+                        <td>realized_volatility</td>
+                        <td>אחוז שינוי המחיר הממוצע באחוזים</td>
+                        <td>מדידת תנודתיות השוק</td>
+                    </tr>
+                    <tr>
+                        <td>atr</td>
+                        <td>Average True Range - מודד תנודות השוק</td>
+                        <td>קביעת גודל Stop Loss ו-Take Profit</td>
+                    </tr>
+                    <tr>
+                        <td>relative_strength</td>
+                        <td>מדד כוח יחסי (דומה ל-RSI)</td>
+                        <td>זיהוי מגמות עולות/יורדות</td>
+                    </tr>
+                    <tr>
+                        <td>order_imbalance</td>
+                        <td>יחס בין bid ל-ask</td>
+                        <td>זיהוי לחץ קנייה/מכירה</td>
+                    </tr>
+                    <tr>
+                        <td>trend_strength</td>
+                        <td>עוצמת המגמה הנוכחית</td>
+                        <td>זיהוי מגמות חזקות</td>
+                    </tr>
+                    <tr>
+                        <td>market_efficiency_ratio</td>
+                        <td>יחס יעילות השוק</td>
+                        <td>זיהוי שווקים יעילים/לא יעילים</td>
+                    </tr>
+                </table>
+            </div>
+
+            <h3>מתי המערכת קונה?</h3>
+            <div class="card buy-signal">
+                <h4>תנאי כניסה לקנייה (Long)</h4>
+                <p>המערכת תיכנס לעמדת קנייה כאשר כל התנאים הבאים מתקיימים:</p>
+                <ol>
+                    <li><strong>תנודתיות גבוהה</strong> - realized_volatility >= 0.3%</li>
+                    <li><strong>כוח יחסי גבוה</strong> - relative_strength >= 0.2</li>
+                    <li><strong>מגמה חזקה</strong> - trend_strength >= 6</li>
+                    <li><strong>חוסר איזון בהזמנות</strong> - order_imbalance >= 0.25 (יותר קונים מאשר מוכרים)</li>
+                    <li><strong>שוק יעיל</strong> - market_efficiency_ratio >= 1.0</li>
+                </ol>
+                <p>
+                    הרציונל: המערכת מחפשת מצבים בהם יש תנודתיות מספקת בשוק, מגמה עולה חזקה, ולחץ קנייה משמעותי.
+                    שילוב זה מצביע על סבירות גבוהה להמשך תנועה כלפי מעלה.
+                </p>
+            </div>
+
+            <h3>מתי המערכת מוכרת?</h3>
+            <div class="card sell-signal">
+                <h4>תנאי יציאה (סגירת עמדה)</h4>
+                <p>המערכת תסגור עמדת קנייה כאשר אחד מהתנאים הבאים מתקיים:</p>
+                <ol>
+                    <li><strong>הפעלת Stop Loss</strong> - המחיר יורד מתחת לרמת ה-Stop Loss</li>
+                    <li><strong>הגעה ליעד רווח</strong> - המחיר מגיע לרמת ה-Take Profit</li>
+                    <li><strong>Trailing Stop</strong> - כאשר הרווח מגיע לסף מסוים, מופעל מנגנון Trailing Stop שמתעדכן עם עליית המחיר</li>
+                    <li><strong>יציאה מבוססת זמן</strong> - אם העמדה פתוחה יותר מ-4 שעות</li>
+                    <li><strong>היפוך מגמה</strong> - כאשר trend_strength < -0.4 (מגמה יורדת חזקה)</li>
+                </ol>
+                <p>
+                    הרציונל: המערכת משתמשת במספר אסטרטגיות יציאה כדי להגן על ההון ולמקסם רווחים. 
+                    Stop Loss מגן מפני הפסדים גדולים, Take Profit מממש רווחים, Trailing Stop מאפשר לרווחים לגדול תוך הגנה על רווחים קיימים,
+                    ויציאה מבוססת זמן ומגמה מגנה מפני שינויים בתנאי השוק.
+                </p>
+            </div>
+        </section>
+
+        <section class="section" id="function-flow">
+            <h2>זרימת פונקציות</h2>
+            <p>
+                להלן תיאור מפורט של זרימת הפונקציות במערכת המשופרת, מרגע קבלת נתוני השוק ועד לביצוע פעולות מסחר.
+            </p>
+
+            <h3>זרימת פונקציות - כניסה לעמדת קנייה</h3>
+            <div class="flow-diagram buy-flow">
+                <div class="flow-box">
+                    <h4>WebSocketManager._handle_message()</h4>
+                    <p>מקבל נתוני מסחר מהבורסה ומעביר אותם למנתח</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketAnalyzer.process_tick()</h4>
+                    <p>מעבד את נתוני ה-tick ומעדכן את נתוני השוק</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketData.add_tick()</h4>
+                    <p>מוסיף את נתוני ה-tick להיסטוריית המחירים והנפחים</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketMetricsCalculator.calculate_metrics()</h4>
+                    <p>מחשב מדדים טכניים על בסיס נתוני השוק</p>
+                </div>
+                <div class="flow-box">
+                    <h4>SignalGenerator.generate_signal()</h4>
+                    <p>בודק אם התנאים לכניסה לעמדה מתקיימים</p>
+                </div>
+                <div class="flow-box">
+                    <h4>SignalGenerator._check_entry_conditions()</h4>
+                    <p>בודק את תנאי הכניסה הספציפיים</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketAnalyzer._process_signal()</h4>
+                    <p>מעבד את האות שנוצר</p>
+                </div>
+                <div class="flow-box">
+                    <h4>TradeManager.open_trade()</h4>
+                    <p>פותח עמדת קנייה אם כל התנאים מתקיימים</p>
+                </div>
+                <div class="flow-box">
+                    <h4>TradeManager._calculate_position_size()</h4>
+                    <p>מחשב את גודל העמדה בהתאם לפרמטרי סיכון ותנאי שוק</p>
+                </div>
+                <div class="flow-box">
+                    <h4>ActiveTrade.update()</h4>
+                    <p>מעדכן את פרטי העמדה הפתוחה</p>
+                </div>
+                <div class="flow-box">
+                    <h4>EventEmitter.emit(EventType.TRADE_OPENED)</h4>
+                    <p>שולח אירוע פתיחת עמדה למערכת</p>
+                </div>
+            </div>
+
+            <h3>זרימת פונקציות - יציאה מעמדת קנייה (מכירה)</h3>
+            <div class="flow-diagram sell-flow">
+                <div class="flow-box">
+                    <h4>WebSocketManager._handle_message()</h4>
+                    <p>מקבל נתוני מסחר מהבורסה ומעביר אותם למנתח</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketAnalyzer.process_tick()</h4>
+                    <p>מעבד את נתוני ה-tick ומעדכן את נתוני השוק</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketData.add_tick()</h4>
+                    <p>מוסיף את נתוני ה-tick להיסטוריית המחירים והנפחים</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketMetricsCalculator.calculate_metrics()</h4>
+                    <p>מחשב מדדים טכניים על בסיס נתוני השוק</p>
+                </div>
+                <div class="flow-box">
+                    <h4>SignalGenerator.generate_signal()</h4>
+                    <p>מזהה שיש עמדה פתוחה ומעביר לבדיקת תנאי יציאה</p>
+                </div>
+                <div class="flow-box">
+                    <h4>SignalGenerator._check_exit_conditions()</h4>
+                    <p>בודק אם מתקיים אחד מתנאי היציאה</p>
+                </div>
+                <div class="flow-box">
+                    <h4>MarketAnalyzer._process_signal()</h4>
+                    <p>מעבד את אות היציאה</p>
+                </div>
+                <div class="flow-box">
+                    <h4>TradeManager.close_trade()</h4>
+                    <p>סוגר את העמדה אם אחד מתנאי היציאה מתקיים</p>
+                </div>
+                <div class="flow-box">
+                    <h4>TradeJournal.add_trade()</h4>
+                    <p>מתעד את העסקה ביומן העסקאות</p>
+                </div>
+                <div class="flow-box">
+                    <h4>PerformanceTracker.add_trade()</h4>
+                    <p>מעדכן את מדדי הביצוע</p>
+                </div>
+                <div class="flow-box">
+                    <h4>EventEmitter.emit(EventType.TRADE_CLOSED)</h4>
+                    <p>שולח אירוע סגירת עמדה למערכת</p>
+                </div>
+                <div class="flow-box">
+                    <h4>ActiveTrade.reset()</h4>
+                    <p>מאפס את העמדה הפעילה</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="detailed-functions">
+            <h2>פירוט פונקציות מרכזיות</h2>
+
+            <h3>מודול ניתוח (MarketAnalyzer)</h3>
+            
+            <div class="function">
+                <h4>process_tick(tick_data: Dict[str, Any]) -> Optional[Dict[str, Any]]</h4>
+                <div class="function-description">
+                    מעבד נתוני tick עם בדיקת תקינות ועדכון מדדים. זוהי הפונקציה המרכזית שמקבלת נתונים מהבורסה ומפעילה את תהליך הניתוח.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> tick_data - מילון עם נתוני ה-tick (מחיר, כמות, דגל מסמן)
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> אות מסחר אם נוצר, או None אם לא
+                </div>
+            </div>
+
+            <div class="function">
+                <h4>_process_signal(signal: Dict[str, Any], price: float, timestamp: datetime) -> None</h4>
+                <div class="function-description">
+                    מעבד אותות מסחר ומבצע פעולות בהתאם. מפנה לפונקציות המתאימות בהתאם לסוג האות (קנייה או מכירה).
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> signal - אות המסחר, price - המחיר הנוכחי, timestamp - חותמת זמן
+                </div>
+            </div>
+
+            <h3>מודול יצירת אותות (SignalGenerator)</h3>
+            
+            <div class="function">
+                <h4>generate_signal(price: float, timestamp: datetime, metrics: Dict[str, float], is_active_trade: bool, active_trade_data: Dict[str, Any]) -> Optional[Dict[str, Any]]</h4>
+                <div class="function-description">
+                    יצירת אות מסחר על בסיס תנאי שוק סטטיסטיים. בודק אם יש עמדה פתוחה ומפנה לבדיקת תנאי יציאה, או בודק תנאי כניסה אם אין עמדה פתוחה.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> price - המחיר הנוכחי, timestamp - חותמת זמן, metrics - מדדי שוק, is_active_trade - האם יש עמדה פעילה, active_trade_data - נתוני העמדה הפעילה
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> אות מסחר אם התנאים מתקיימים, או None אם לא
+                </div>
+            </div>
+
+            <div class="function buy-signal">
+                <h4>_check_entry_conditions(price: float, timestamp: datetime, metrics: Dict[str, float]) -> Optional[Dict[str, Any]]</h4>
+                <div class="function-description">
+                    בדיקת תנאי כניסה לעמדה. בודק אם כל תנאי הכניסה מתקיימים ומחזיר אות קנייה אם כן.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> price - המחיר הנוכחי, timestamp - חותמת זמן, metrics - מדדי שוק
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> אות קנייה אם כל התנאים מתקיימים, או None אם לא
+                </div>
+            </div>
+
+            <div class="function sell-signal">
+                <h4>_check_exit_conditions(price: float, timestamp: datetime, metrics: Dict[str, float], active_trade_data: Dict[str, Any]) -> Optional[Dict[str, Any]]</h4>
+                <div class="function-description">
+                    בדיקת תנאי יציאה מעמדה. בודק אם מתקיים אחד מתנאי היציאה: Stop Loss, Take Profit, Trailing Stop, יציאה מבוססת זמן, או היפוך מגמה.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> price - המחיר הנוכחי, timestamp - חותמת זמן, metrics - מדדי שוק, active_trade_data - נתוני העמדה הפעילה
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> אות יציאה אם אחד מהתנאים מתקיים, או None אם לא
+                </div>
+            </div>
+
+            <h3>מודול ניהול מסחר (TradeManager)</h3>
+            
+            <div class="function buy-signal">
+                <h4>open_trade(price: float, direction: str, timestamp: datetime, metrics: Dict[str, float]) -> None</h4>
+                <div class="function-description">
+                    פתיחת עמדה עם ניהול סיכונים דינמי. מחשב את גודל העמדה, רמות Stop Loss ו-Take Profit, ומעדכן את העמדה הפעילה.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> price - מחיר הכניסה, direction - כיוון העסקה ("buy"), timestamp - חותמת זמן, metrics - מדדי שוק
+                </div>
+            </div>
+
+            <div class="function sell-signal">
+                <h4>close_trade(exit_price: float, reason: str, timestamp: datetime, metrics: Dict[str, float]) -> None</h4>
+                <div class="function-description">
+                    סגירת עמדה ורישום נתוני העסקה. מחשב את הרווח/הפסד, מתעד את העסקה ביומן, ומעדכן את מדדי הביצוע.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> exit_price - מחיר היציאה, reason - סיבת היציאה, timestamp - חותמת זמן, metrics - מדדי שוק
+                </div>
+            </div>
+
+            <div class="function">
+                <h4>_calculate_position_size(metrics: Dict[str, float]) -> float</h4>
+                <div class="function-description">
+                    חישוב גודל עמדה דינמי בהתאם לתנאי שוק ופרמטרי סיכון. מתאים את גודל העמדה בהתאם לתנודתיות, מגמה, וביצועים קודמים.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> metrics - מדדי שוק
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> גודל העמדה כאחוז מההון
+                </div>
+            </div>
+
+            <h3>מודול מדדי שוק (MarketMetricsCalculator)</h3>
+            
+            <div class="function">
+                <h4>calculate_metrics() -> bool</h4>
+                <div class="function-description">
+                    חישוב כל מדדי השוק באמצעות מתודות סטטיסטיות. מחשב את כל המדדים הטכניים על בסיס נתוני השוק.
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> True אם החישוב הצליח, False אם לא
+                </div>
+            </div>
+
+            <div class="function">
+                <h4>_calculate_relative_strength(returns: np.ndarray) -> float</h4>
+                <div class="function-description">
+                    חישוב Relative Strength (דומה ל-RSI). מחשב את היחס בין רווחים להפסדים בחלון זמן מוגדר.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> returns - מערך של תשואות
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> ערך ה-Relative Strength בין 0 ל-1
+                </div>
+            </div>
+
+            <div class="function">
+                <h4>_calculate_trend_strength(prices: np.ndarray) -> float</h4>
+                <div class="function-description">
+                    חישוב עוצמת מגמה באמצעות רגרסיה לינארית. מחשב את עוצמת המגמה על בסיס השיפוע ומקדם המתאם של רגרסיה לינארית.
+                </div>
+                <div class="function-params">
+                    <strong>פרמטרים:</strong> prices - מערך של מחירים
+                </div>
+                <div class="function-return">
+                    <strong>מחזיר:</strong> ערך עוצמת המגמה (חיובי למגמה עולה, שלילי למגמה יורדת)
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="risk-management">
+            <h2>ניהול סיכונים</h2>
+            <p>
+                המערכת כוללת מספר מנגנוני ניהול סיכונים מתקדמים:
+            </p>
+
+            <div class="card">
+                <h3>גודל עמדה דינמי</h3>
+                <p>
+                    הפונקציה <code>TradeManager._calculate_position_size()</code> מחשבת את גודל העמדה באופן דינמי בהתאם לתנאי השוק:
+                </p>
+                <ul>
+                    <li><strong>גורם תנודתיות</strong> - מקטין את גודל העמדה כאשר התנודתיות גבוהה</li>
+                    <li><strong>התאמת מגמה</strong> - מקטין את גודל העמדה כאשר המגמה מנוגדת לכיוון העסקה</li>
+                    <li><strong>גורם ביצועים</strong> - מתאים את גודל העמדה בהתאם לאחוז הניצחונות האחרונים</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>מנגנוני יציאה</h3>
+                <p>
+                    המערכת משתמשת במספר מנגנוני יציאה להגנה על ההון ומקסום רווחים:
+                </p>
+                <ul>
+                    <li><strong>Stop Loss</strong> - נקבע באופן דינמי בהתאם ל-ATR (Average True Range)</li>
+                    <li><strong>Take Profit</strong> - נקבע כמכפלה של מרחק ה-Stop Loss (יחס סיכון-תשואה)</li>
+                    <li><strong>Trailing Stop</strong> - מתעדכן עם עליית המחיר כדי להגן על רווחים</li>
+                    <li><strong>יציאה מבוססת זמן</strong> - סוגר עמדות שנשארות פתוחות זמן רב מדי</li>
+                    <li><strong>יציאה מבוססת מגמה</strong> - סוגר עמדות כאשר המגמה מתהפכת</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="section" id="refactored-architecture">
+            <h2>ארכיטקטורה משופרת</h2>
+            <p>
+                המערכת עברה שיפור ארכיטקטוני משמעותי כדי להפוך אותה למודולרית יותר, קלה יותר לתחזוקה, ויותר מובנת:
+            </p>
+
+            <div class="card">
+                <h3>הפרדת אחריות</h3>
+                <p>
+                    המערכת המשופרת מפרידה את האחריות בין מודולים שונים:
+                </p>
+                <ul>
+                    <li><strong>MarketAnalyzer</strong> - מתאם בין כל הרכיבים ומנהל את זרימת הנתונים</li>
+                    <li><strong>SignalGenerator</strong> - אחראי אך ורק על יצירת אותות מסחר</li>
+                    <li><strong>TradeManager</strong> - אחראי על ניהול עמדות וביצוע עסקאות</li>
+                    <li><strong>MarketMetricsCalculator</strong> - אחראי על חישוב מדדי שוק</li>
+                    <li><strong>MarketData</strong> - אחראי על אחסון וניהול נתוני שוק</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h3>יתרונות הארכיטקטורה החדשה</h3>
+                <ul>
+                    <li><strong>קוד מודולרי</strong> - כל רכיב אחראי על תחום ספציפי</li>
+                    <li><strong>בדיקות קלות יותר</strong> - ניתן לבדוק כל רכיב בנפרד</li>
+                    <li><strong>תחזוקה פשוטה</strong> - קל יותר לאתר ולתקן באגים</li>
+                    <li><strong>הרחבה קלה</strong> - ניתן להוסיף פונקציונליות חדשה בקלות</li>
+                    <li><strong>קריאות משופרת</strong> - קל יותר להבין את זרימת הנתונים והלוגיקה</li>
+                </ul>
+            </div>
+        </section>
+
+        <div class="footer">
+            <p>מערכת מסחר אלגוריתמית - תיעוד מפורט</p>
+            <p>גרסה 2.0</p>
+        </div>
+    </div>
+</body>
+</html>

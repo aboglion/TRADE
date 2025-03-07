@@ -1,0 +1,1 @@
+trade_id,entry_time,exit_time,duration_minutes,direction,entry_price,exit_price,ActiveTrade_size,pnl_percent,pnl_value,exit_reason,market_volatility,market_trend,relative_strength,order_imbalance,notes
