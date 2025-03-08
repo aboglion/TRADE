@@ -61,7 +61,7 @@ class MarketStatusReporter:
                     f"Price: {current_price} | "
                     f"Volatility: {metrics['realized_volatility']:.2f}% | "
                     f"RS: {metrics['relative_strength']:.2f} | "
-                    f"Trend: {metrics['trend_strength']:.2f} | "
+                    f"Trend: { metrics['trend_strength']*100000 :.4f} | "
                     f"Imbalance: {metrics['order_imbalance']:.2f} | "
                     f"MER: {metrics['market_efficiency_ratio']:.2f}"
                 )
@@ -82,15 +82,15 @@ class MarketStatusReporter:
                 print(status)
                 
                 # Report recent trade analysis if available
-                recent_trades = self.analyzer.trade_manager.trade_journal.get_trades(days=7)
-                if recent_trades:
-                    recent_analysis = self.analyzer.trade_manager.trade_journal.analyze_performance(days=7)
-                    if recent_analysis['total_trades'] > 0:
-                        print(
-                            f"Last 7 days: {recent_analysis['total_trades']} trades, "
-                            f"Win rate: {recent_analysis['win_rate']*100:.1f}%, "
-                            f"Avg P&L: {recent_analysis['average_pnl']:.2f}%"
-                        )
+                # recent_trades = self.analyzer.trade_manager.trade_journal.get_trades(days=7)
+                # if recent_trades:
+                #     recent_analysis = self.analyzer.trade_manager.trade_journal.analyze_performance(days=7)
+                #     if recent_analysis['total_trades'] > 0:
+                #         print(
+                #             f"Last 7 days: {recent_analysis['total_trades']} trades, "
+                #             f"Win rate: {recent_analysis['win_rate']*100:.1f}%, "
+                #             f"Avg P&L: {recent_analysis['average_pnl']:.2f}%"
+                #         )
                 
             except Exception as e:
                 error_msg = f"Status report error: {str(e)}"

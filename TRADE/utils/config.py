@@ -13,7 +13,7 @@ class TradingConfig:
         'BUY': {
             'volatility_threshold': 0.3,     # כניסה בקניה כאשר התנודות גבוהות
             'relative_strength_threshold': 0.2,    # כניסה בקניה כאשר RS גבוה
-            'trend_strength': 6,                # חזקה כאשר המחיר עולה 5 פעמים רצופות
+            'trend_strength': (3/100000),                # חזקה כאשר המחיר עולה 5 פעמים רצופות
             'order_imbalance': 0.25,   # כניסה בקניה כאשר יחס הזמנות גבוה
             'market_efficiency_ratio': 1.0,      # כניסה בקניה כאשר השוק יעיל
         },
