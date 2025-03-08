@@ -92,7 +92,7 @@ class TradeManager:
                 lowest_price=price,
                 direction=direction,
                 size=position_size,
-                entry_time=timestamp
+                entry_time=timestamp.isoformat()
             )
             
             # Emit trade opened event
@@ -144,12 +144,21 @@ class TradeManager:
             # Calculate profit/loss
             pnl_pct = (exit_price / entry_price - 1) * 100
             pnl_value = position_size * (pnl_pct / 100)
+            
+            # Convert entry_time from string to datetime if needed
+            entry_time_dt = entry_time
+            if isinstance(entry_time, str):
+                try:
+                    entry_time_dt = datetime.fromisoformat(entry_time)
+                except ValueError:
+                    self.logger.warning(f"Invalid entry_time format: {entry_time}. Using current time.")
+                    entry_time_dt = timestamp
                 
             # Record trade details
             trade_record = {
                 'entry_time': entry_time,
                 'exit_time': timestamp,
-                'duration': (timestamp - entry_time).total_seconds() / 60 if entry_time else 0,
+                'duration': (timestamp - entry_time_dt).total_seconds() / 60 if entry_time_dt else 0,
                 'direction': direction,
                 'entry_price': entry_price,
                 'exit_price': exit_price,
@@ -185,7 +194,7 @@ class TradeManager:
                     'pnl': pnl_pct,
                     'pnl_value': pnl_value,
                     'reason': reason,
-                    'duration': (timestamp - entry_time).total_seconds() / 60 if entry_time else 0,
+                    'duration': (timestamp - entry_time_dt).total_seconds() / 60 if entry_time_dt else 0,
                     'metrics': {k: round(v, 4) for k, v in metrics.items()}
                 }
             ))

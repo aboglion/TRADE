@@ -20,7 +20,7 @@ class TradingConfig:
         'EXIT': {
             'profit_target_multiplier': 2.5,     # יעד רווח ביחס לסיכון
             'trailing_stop_act_ivation': 1.0,     # הפעלת trailing stop כאשר הרווח מגיע אחוז מסוים
-            'trailing_stop_distance': 1.5
+            'trailing_stop_distance': 1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
         }
     }
     

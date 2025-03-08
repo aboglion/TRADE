@@ -71,15 +71,21 @@ class DataStorage:
             
         try:
             # המרת חותמת זמן אם צריך
-            timestamp = tick_data.get('T', int(datetime.now().timestamp() * 1000))
-            
-            # כתיבת שורה לקובץ CSV
-            self.current_writer.writerow([
-                timestamp,
-                tick_data.get('p', 0),
-                tick_data.get('q', 0),
-                tick_data.get('m', False)
-            ])
+            try:
+                timestamp = tick_data.get('T', int(datetime.now().timestamp() * 1000))
+                # Ensure timestamp is an integer
+                if isinstance(timestamp, str):
+                    timestamp = int(timestamp)
+                
+                # כתיבת שורה לקובץ CSV
+                self.current_writer.writerow([
+                    timestamp,
+                    tick_data.get('p', 0),
+                    tick_data.get('q', 0),
+                    tick_data.get('m', False)
+                ])
+            except (ValueError, TypeError) as e:
+                logging.error(f"Error processing timestamp in tick_data: {e}")
         except Exception as e:
             logging.error(f"Error recording tick data: {str(e)}")
             logging.debug(traceback.format_exc())
@@ -126,12 +132,16 @@ class DataStorage:
                 reader = csv.DictReader(file)
                 for row in reader:
                     # המרת שדות לטיפוסים המתאימים
-                    tick = {
-                        'T': int(row['timestamp']),
-                        'p': float(row['price']),
-                        'q': float(row['volume']),
-                        'm': row['is_ask'].lower() == 'true'
-                    }
+                    try:
+                        tick = {
+                            'T': int(row['timestamp']),
+                            'p': float(row['price']),
+                            'q': float(row['volume']),
+                            'm': row['is_ask'].lower() == 'true'
+                        }
+                    except ValueError as e:
+                        logging.warning(f"Error converting data types in row {row}: {e}")
+                        continue
                     data.append(tick)
             
             logging.info(f"Loaded {len(data)} ticks from {filepath}")

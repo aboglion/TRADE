@@ -34,25 +34,62 @@ class ActiveTrade:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert ActiveTrade to dictionary format"""
-        return {
-            'active': self.active,
-            'entry_price': self.entry_price,
-            'stop_loss': self.stop_loss,
-            'take_profit': self.take_profit,
-            'highest_price': self.highest_price,
-            'lowest_price': self.lowest_price,
-            'direction': self.direction,
-            'size': self.size,
-            'entry_time': self.entry_time.isoformat() if self.entry_time else None
-        }
+        try:
+            # Ensure entry_time is a datetime object before calling isoformat()
+            entry_time_str = None
+            if self.entry_time:
+                if isinstance(self.entry_time, datetime):
+                    entry_time_str = self.entry_time.isoformat()
+                else:
+                    # If it's already a string, just use it directly
+                    entry_time_str = self.entry_time
+            
+            return {
+                'active': self.active,
+                'entry_price': self.entry_price,
+                'stop_loss': self.stop_loss,
+                'take_profit': self.take_profit,
+                'highest_price': self.highest_price,
+                'lowest_price': self.lowest_price,
+                'direction': self.direction,
+                'size': self.size,
+                'entry_time': entry_time_str
+            }
+        except Exception as e:
+            # Fallback in case of error
+            import logging
+            logging.error(f"Error in ActiveTrade.to_dict: {str(e)}")
+            return {
+                'active': self.active,
+                'entry_price': self.entry_price,
+                'stop_loss': self.stop_loss,
+                'take_profit': self.take_profit,
+                'highest_price': self.highest_price,
+                'lowest_price': self.lowest_price,
+                'direction': self.direction,
+                'size': self.size,
+                'entry_time': None
+            }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ActiveTrade':
         """Create ActiveTrade from dictionary data"""
         ActiveTrade = cls()
-        for key, value in data.items():
-            if key == 'entry_time' and value:
-                ActiveTrade.entry_time = datetime.fromisoformat(value)
-            elif hasattr(ActiveTrade, key):
-                setattr(ActiveTrade, key, value)
+        try:
+            for key, value in data.items():
+                if key == 'entry_time' and value:
+                    if isinstance(value, str):
+                        try:
+                            ActiveTrade.entry_time = datetime.fromisoformat(value)
+                        except ValueError:
+                            import logging
+                            logging.warning(f"Invalid entry_time format: {value}. Using as string.")
+                            ActiveTrade.entry_time = value
+                    else:
+                        ActiveTrade.entry_time = value
+                elif hasattr(ActiveTrade, key):
+                    setattr(ActiveTrade, key, value)
+        except Exception as e:
+            import logging
+            logging.error(f"Error in ActiveTrade.from_dict: {str(e)}")
         return ActiveTrade

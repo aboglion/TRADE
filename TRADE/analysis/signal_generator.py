@@ -93,6 +93,15 @@ class SignalGenerator:
             highest_price = active_trade_data.get('highest_price', 0)
             entry_time = active_trade_data.get('entry_time')
             
+            # Convert string timestamp to datetime object if needed
+            if entry_time:
+                if isinstance(entry_time, str):
+                    try:
+                        entry_time = datetime.fromisoformat(entry_time)
+                    except ValueError as e:
+                        self.logger.warning(f"Invalid entry_time format: {entry_time}. Using current time. Error: {e}")
+                        entry_time = timestamp
+            
             # Update highest price for trailing stop calculation
             highest_price = max(highest_price, price)
             

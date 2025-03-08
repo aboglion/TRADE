@@ -98,7 +98,16 @@ class MarketAnalyzer:
                 is_ask = bool(tick_data['m'])
                 
                 if 'T' in tick_data:
-                    timestamp = datetime.fromtimestamp(int(tick_data['T']) / 1000)
+                    # Ensure timestamp is properly converted to int before processing
+                    # This handles cases where T might be a string from CSV data
+                    try:
+                        timestamp_value = tick_data['T']
+                        if isinstance(timestamp_value, str):
+                            timestamp_value = int(timestamp_value)
+                        timestamp = datetime.fromtimestamp(timestamp_value / 1000)
+                    except (ValueError, TypeError) as e:
+                        self.logger.warning(f"Invalid timestamp format: {tick_data['T']}. Using current time. Error: {e}")
+                        timestamp = datetime.now()
                 else:
                     timestamp = datetime.now()
                     
@@ -113,6 +122,8 @@ class MarketAnalyzer:
                 ))
                 
                 # Update market data
+                # Store timestamp and ensure ISO format string
+                # Store raw datetime object
                 self.market_data.add_tick(price, volume, is_ask, timestamp)
                 self.last_data_time = timestamp
                     

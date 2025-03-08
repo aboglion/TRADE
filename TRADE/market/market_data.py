@@ -20,6 +20,21 @@ class MarketData:
     def add_tick(self, price: float, volume: float, is_ask: bool, timestamp: datetime) -> bool:
             """הוספת נתוני tick עם עיגול נכון ועדכון מעקב"""
             with self._lock:
+                # Ensure timestamp is a datetime object
+                if not isinstance(timestamp, datetime):
+                    try:
+                        if isinstance(timestamp, str):
+                            # Try to parse string as ISO format
+                            timestamp = datetime.fromisoformat(timestamp)
+                        elif isinstance(timestamp, (int, float)):
+                            # Convert timestamp to datetime
+                            timestamp = datetime.fromtimestamp(timestamp / 1000)
+                        else:
+                            # Fallback to current time
+                            timestamp = datetime.now()
+                    except Exception:
+                        # If all conversions fail, use current time
+                        timestamp = datetime.now()
                 if self.round_num == 0 :
                     # Determine rounding precision based on the price magnitude
                     price_str = str(price)
