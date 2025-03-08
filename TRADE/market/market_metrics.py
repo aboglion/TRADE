@@ -152,7 +152,7 @@ class MarketMetricsCalculator:
                 # Calculate linear regression
                 slope, _, r_value, _, _ = stats.linregress(x, window_prices)
                 # Scale slope by r-squared and price level
-                trend_strength = slope * r_value**2 * (30 / np.mean(window_prices))
+                trend_strength = slope * r_value**2 * (30 / np.mean(window_prices)) * 100000 
                 return float(trend_strength)
             else:
                 return 0.0
