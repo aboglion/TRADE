@@ -143,7 +143,7 @@ class SignalGenerator:
                     reason = 'time_exit'
                     
             # Check trend reversal exit
-            if metrics['trend_strength'] < -0.4:
+            if metrics['trend_strength'] < -1*(TradingConfig.MARKET_CONDITIONS['BUY']['relative_strength_threshold'][0]):
                 stop_triggered = True
                 reason = 'trend_reversal'
                 
