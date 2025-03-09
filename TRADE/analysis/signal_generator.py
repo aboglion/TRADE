@@ -53,7 +53,8 @@ class SignalGenerator:
             # Buy entry conditions
             buy_entry = (
                 metrics['realized_volatility'] >= conditions['BUY']['volatility_threshold'] and
-                metrics['relative_strength'] >= conditions['BUY']['relative_strength_threshold'] and 
+                metrics['relative_strength'] >= conditions['BUY']['relative_strength_threshold'][0] and 
+                metrics['relative_strength'] <= conditions['BUY']['relative_strength_threshold'][1] and
                 metrics['trend_strength'] >= conditions['BUY']['trend_strength'] and
                 metrics['order_imbalance'] >= conditions['BUY']['order_imbalance'] and
                 metrics['market_efficiency_ratio'] >= conditions['BUY']['market_efficiency_ratio']
