@@ -42,6 +42,7 @@ class TradingConfig:
         PROFIT_TARGET_MULTIPLIER=2.5     # יעד רווח ביחס לסיכון
         TRAILING_STOP_DISTANCE=1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
         TREND_STRENGTH_THRESHOLD = -7.0  # סף עוצמת מגמה ליציאה
+        MIN_PROFIT = 0.02               # רווח מינימלי לסגירת עסקה
 
         # Check if there is an active trade
         if not active_trade_data:
@@ -85,12 +86,12 @@ class TradingConfig:
         # Check time-based exit
         if entry_time:
             trade_duration = (timestamp - entry_time).total_seconds() / 3600
-            if trade_duration > 4:  # Exit after 4 hours
+            if trade_duration > 4 and profit >= MIN_PROFIT:  # Exit after 4 hours
                 stop_triggered = True
                 reason = 'time_exit'
                 
         # Check trend reversal exit
-        if metrics['trend_strength'] < TREND_STRENGTH_THRESHOLD:
+        if metrics['trend_strength'] < TREND_STRENGTH_THRESHOLD and profit >= MIN_PROFIT:
             stop_triggered = True
             reason = 'trend_reversal'
         return {stop_triggered, reason, stop_loss, profit}

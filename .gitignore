@@ -30,7 +30,8 @@ coverage.xml
 .vscode/
 
 # Log files
-data/*.csv
+.data/*.csv
+.Logs/*.log
 
 # Operating System files
 .DS_Store
