@@ -72,22 +72,12 @@ class TradeManager:
             # Calculate position size based on risk parameters
             position_size = self._calculate_position_size(metrics)
             
-            # Calculate stop loss and take profit levels
-            atr = max(metrics['atr'], price * 0.001)  # Use minimum 0.1% ATR
-            stop_distance = 1.5 * atr
-            risk_reward = TradingConfig.MARKET_CONDITIONS['EXIT']['profit_target_multiplier']
-            profit_distance = stop_distance * risk_reward
-            
-            # For long trades: stop below entry, target above entry
-            stop_loss = price - stop_distance
-            take_profit = price + profit_distance
+
                 
             # Update trade details
             self.active_trade.update(
                 active=True,
                 entry_price=price,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
                 highest_price=price,
                 lowest_price=price,
                 direction=direction,
@@ -101,16 +91,13 @@ class TradeManager:
                 data={
                     'direction': direction,
                     'entry_price': price,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
                     'size': position_size,
                     'time': timestamp,
-                    'risk_reward': risk_reward,
                     'metrics': {k: round(v, 4) for k, v in metrics.items()}
                 }
             ))
             
-            self.logger.info(f"Opened {direction} trade at {price:.6f} (Stop: {stop_loss:.6f}, Target: {take_profit:.6f}, RR: {risk_reward:.1f})")
+            self.logger.info(f"Opened {direction} trade at {price:.6f})")
             
         except Exception as e:
             error_msg = f"Error opening trade: {str(e)}"

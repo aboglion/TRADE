@@ -250,8 +250,6 @@ class MarketAnalyzer:
                     'direction': active_trade_data['direction'],
                     'entry_price': active_trade_data['entry_price'],
                     'current_pnl': 0.0,
-                    'stop_loss': active_trade_data['stop_loss'],
-                    'take_profit': active_trade_data['take_profit']
                 },
                 'performance': self.trade_manager.get_performance_metrics()
             }

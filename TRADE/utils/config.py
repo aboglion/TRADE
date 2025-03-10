@@ -1,7 +1,9 @@
 import json
 import os
 import logging
-import traceback
+import traceback, datetime
+from typing import Dict, Optional, Any
+
 
 class TradingConfig:
     DEFAULT_WARMUP_TICKS = 300
@@ -9,21 +11,89 @@ class TradingConfig:
     DEFAULT_DYNAMIC_WINDOW = True
     DEFAULT_ADAPTIVE_ActiveTrade_SIZING = True
     
-    MARKET_CONDITIONS = {
-        'BUY': {
-            'volatility_threshold': 0.3,     # כניסה בקניה כאשר התנודות גבוהות
-            'relative_strength_threshold': [0.2,0.5],    # כניסה בקניה כאשר RS גבוה
-            'trend_strength': 6,                # חזקה כאשר המחיר עולה 5 פעמים רצופות
-            'order_imbalance': 0.25,   # כניסה בקניה כאשר יחס הזמנות גבוה
-            'market_efficiency_ratio': 1.0,      # כניסה בקניה כאשר השוק יעיל
-        },
-        'EXIT': {
-            'profit_target_multiplier': 2.5,     # יעד רווח ביחס לסיכון
-            'trailing_stop_act_ivation': 1.0,     # הפעלת trailing stop כאשר הרווח מגיע אחוז מסוים
-            'trailing_stop_distance': 1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
-        }
-    }
+
+    # metrics['realized_volatility']  # כניסה בקניה כאשר התנודות גבוהות
+    # metrics['relative_strength']    # כניסה בקניה כאשר RS גבוה
+    #metrics['trend_strength']     # חזקה כאשר המחיר עולה 5 פעמים רצופות
+    # metrics['order_imbalance']    # כניסה בקניה כאשר יחס הזמנות גבוה
+    # metrics['market_efficiency_ratio']     # כניסה בקניה כאשר השוק יעיל
     @classmethod
+    def check_buy_conditions(cls:'TradingConfig',metrics: dict) -> bool:
+        return (
+        metrics['realized_volatility'] >= 0.3 and
+        metrics['relative_strength'] >= 0.2 and
+        metrics['relative_strength'] <= 0.5 and
+        metrics['trend_strength'] >= 6 and
+        metrics['order_imbalance'] >= 0.25 and
+        metrics['market_efficiency_ratio'] >= 1.0 
+        )
+
+    @classmethod
+    def check_sell_conditions (cls: 'TradingConfig',
+                        entry_time: datetime,
+                        entry_price: float,
+                        highest_price: float,
+                        price: float, 
+                        timestamp: datetime, 
+                        metrics: Dict[str, float], 
+                        active_trade_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+    
+        TRAILING_STOP_ACT_IVATION=1.0     # הפעלת trailing stop כאשר הרווח מגיע אחוז מסוים
+        PROFIT_TARGET_MULTIPLIER=2.5     # יעד רווח ביחס לסיכון
+        TRAILING_STOP_DISTANCE=1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
+        TREND_STRENGTH_THRESHOLD = -7.0  # סף עוצמת מגמה ליציאה
+
+        # Check if there is an active trade
+        if not active_trade_data:
+            return False
+        # Calculate current profit percentage
+        profit = (price / entry_price - 1)
+        stop_triggered = False
+        reason = None
+
+        # Calculate stop loss and take profit levels
+        atr = max(metrics['atr'], price * 0.001)  # Use minimum 0.1% ATR
+        stop_distance = TRAILING_STOP_DISTANCE * atr
+        profit_distance = stop_distance * PROFIT_TARGET_MULTIPLIER
+        
+        # For long trades: stop below entry, target above entry
+        stop_loss = price - stop_distance
+        take_profit = price + profit_distance
+
+        # Check stop loss
+        if price <= stop_loss:
+            stop_triggered = True
+            reason = 'stop_loss'
+
+        # Check take profit
+        if price >= take_profit:
+            stop_triggered = True
+            reason = 'take_profit'
+
+         # Adjust trailing stop if profit exceeds activation threshold
+        activation_threshold = TRAILING_STOP_ACT_IVATION / 100
+        if profit >= activation_threshold:
+            # Calculate trailing stop level
+            trail_distance = TRAILING_STOP_ACT_IVATION * (metrics['atr'] / highest_price)
+            trail_level = highest_price * (1 - trail_distance)
+            
+            # Update stop loss if trailing stop is higher
+            if trail_level > stop_loss:
+                stop_loss = trail_level
+                logging.getLogger('MarketAnalyzer.SignalGenerator').debug(f"Trailing stop updated to {trail_level:.6f} (profit: {profit*100:.2f}%)")
+                
+        # Check time-based exit
+        if entry_time:
+            trade_duration = (timestamp - entry_time).total_seconds() / 3600
+            if trade_duration > 4:  # Exit after 4 hours
+                stop_triggered = True
+                reason = 'time_exit'
+                
+        # Check trend reversal exit
+        if metrics['trend_strength'] < TREND_STRENGTH_THRESHOLD:
+            stop_triggered = True
+            reason = 'trend_reversal'
+        return {stop_triggered, reason, stop_loss, profit}
 
     
     @classmethod
