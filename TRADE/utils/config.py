@@ -23,6 +23,8 @@ class TradingConfig:
             'trailing_stop_distance': 1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
         }
     }
+    @classmethod
+
     
     @classmethod
     def load_from_file(cls, filename: str = 'trading_config.json') -> bool:
