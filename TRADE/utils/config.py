@@ -21,9 +21,8 @@ class TradingConfig:
     def check_buy_conditions(cls:'TradingConfig',metrics: dict) -> bool:
         return (
         metrics['realized_volatility'] >= 0.3 and
-        metrics['relative_strength'] >= 0.2 and
-        metrics['relative_strength'] <= 0.5 and
-        metrics['trend_strength'] >= 6 and
+        0.7 >= metrics['relative_strength'] >= 0.2 and
+        metrics['trend_strength'] >= 7 and
         metrics['order_imbalance'] >= 0.25 and
         metrics['market_efficiency_ratio'] >= 1.0 
         )
@@ -42,13 +41,13 @@ class TradingConfig:
         PROFIT_TARGET_MULTIPLIER=2.5     # יעד רווח ביחס לסיכון
         TRAILING_STOP_DISTANCE=1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
         TREND_STRENGTH_THRESHOLD = -7.0  # סף עוצמת מגמה ליציאה
-        MIN_PROFIT = 0.02               # רווח מינימלי לסגירת עסקה
+        MIN_PROFIT = 0.035               # רווח מינימלי לסגירת עסקה
 
         # Check if there is an active trade
         if not active_trade_data:
             return False
         # Calculate current profit percentage
-        profit = (price / entry_price - 1)
+        profit = (price / entry_price - 1) * 100
         stop_triggered = False
         reason = None
 
@@ -59,8 +58,9 @@ class TradingConfig:
         
         # For long trades: stop below entry, target above entry
         stop_loss = price - stop_distance
+        
         take_profit = price + profit_distance
-
+        
         # Check stop loss
         if price <= stop_loss:
             stop_triggered = True
@@ -94,7 +94,7 @@ class TradingConfig:
         if metrics['trend_strength'] < TREND_STRENGTH_THRESHOLD and profit >= MIN_PROFIT:
             stop_triggered = True
             reason = 'trend_reversal'
-        return {stop_triggered, reason, stop_loss, profit}
+        return (stop_triggered, reason, stop_loss, profit)
 
     
     @classmethod
