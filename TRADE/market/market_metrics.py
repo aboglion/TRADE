@@ -4,19 +4,23 @@ import traceback
 import numpy as np
 from scipy import stats
 from typing import Dict
+from collections import deque
 
 # Keep the relative import as is since it's already correct
 from .market_data import MarketData
 
 class MarketMetricsCalculator:
+
     def __init__(self, market_data: MarketData):
         self.market_data = market_data
+        self._trend_strength_window = deque(maxlen=20)
         self.metrics: Dict[str, float] = {
             'realized_volatility': 0.0,
             'atr': 0.0,
             'relative_strength': 0.5,
             'order_imbalance': 0.5,
             'trend_strength': 0.0,
+            'avg_trend_strength': 0.0,
             'market_efficiency_ratio': 0.0,
         }
         self._lock = threading.RLock()  # Thread-safe operation
@@ -49,6 +53,9 @@ class MarketMetricsCalculator:
                 relative_strength = self._calculate_relative_strength(returns)
                 order_imbalance = self._calculate_order_imbalance()
                 trend_strength = self._calculate_trend_strength(prices)
+                self._trend_strength_window.append(trend_strength)
+                avg_trend_strength = np.mean(self._trend_strength_window) if len(self._trend_strength_window) >= 7 else 0.0
+
                 mer = self._calculate_market_efficiency_ratio(prices)
     
                 # Update metrics dictionary
@@ -58,6 +65,7 @@ class MarketMetricsCalculator:
                     'relative_strength': float(relative_strength), #==> כוח המטבע
                     'order_imbalance': float(order_imbalance), #==> יחס בין bid ל-ask
                     'trend_strength': float(trend_strength), #==> עוצמת מגמה
+                    'avg_trend_strength': float(avg_trend_strength), #==> עוצמת מגמה ממוצעת
                     'market_efficiency_ratio': float(mer)   #==> יחס יעילות השוק   חישוב התזוזה הנטו - השינוי המוחלט בין המחיר הנוכחי למחיר לפני 30 נקודות זמן
                 })
                 
@@ -185,5 +193,6 @@ class MarketMetricsCalculator:
                 'relative_strength': 0.5,
                 'order_imbalance': 0.5,
                 'trend_strength': 0.0,
+                'avg_trend_strength': 0.0,
                 'market_efficiency_ratio': 0.0,
             }

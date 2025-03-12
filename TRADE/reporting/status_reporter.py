@@ -61,7 +61,8 @@ class MarketStatusReporter:
                     f"Price: {current_price} | "
                     f"Volatility: {metrics['realized_volatility']:.2f}% | "
                     f"RS: {metrics['relative_strength']:.2f} | "
-                    f"Trend: { metrics['trend_strength']:.4f} | "
+                    f"Trend: { metrics['trend_strength']:.2f} | "
+                    f"AVG Trend: {metrics['avg_trend_strength']:.2f} | "
                     f"Imbalance: {metrics['order_imbalance']:.2f} | "
                     f"MER: {metrics['market_efficiency_ratio']:.2f}"
                 )

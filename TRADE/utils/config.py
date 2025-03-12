@@ -13,18 +13,20 @@ class TradingConfig:
     
 
     # metrics['realized_volatility']  # כניסה בקניה כאשר התנודות גבוהות
-    # metrics['relative_strength']    # כניסה בקניה כאשר RS גבוה
+    # metrics['relative_strength']    # כניסה בקניה כאשר RS גבוהGIT
     #metrics['trend_strength']     # חזקה כאשר המחיר עולה 5 פעמים רצופות
     # metrics['order_imbalance']    # כניסה בקניה כאשר יחס הזמנות גבוה
     # metrics['market_efficiency_ratio']     # כניסה בקניה כאשר השוק יעיל
     @classmethod
     def check_buy_conditions(cls:'TradingConfig',metrics: dict) -> bool:
         return (
-        metrics['realized_volatility'] >= 0.3 and
-        0.7 >= metrics['relative_strength'] >= 0.2 and
-        metrics['trend_strength'] >= 7 and
-        metrics['order_imbalance'] >= 0.25 and
-        metrics['market_efficiency_ratio'] >= 1.0 
+        0.55 >= metrics['realized_volatility'] >= 0.20 and
+        0.75 >= metrics['relative_strength'] >= 0.25 and
+        metrics['trend_strength'] >= 5 and
+        metrics['avg_trend_strength'] >= 3 and
+        metrics['trend_strength'] > metrics['avg_trend_strength'] and
+        metrics['order_imbalance'] >= 0.65 and
+        metrics['market_efficiency_ratio'] >= 0.93
         )
 
     @classmethod
@@ -41,7 +43,7 @@ class TradingConfig:
         PROFIT_TARGET_MULTIPLIER=2.5     # יעד רווח ביחס לסיכון
         TRAILING_STOP_DISTANCE=1.5       # מרחק מהמחיר הנוכחי להפעלת trailing stop
         TREND_STRENGTH_THRESHOLD = -7.0  # סף עוצמת מגמה ליציאה
-        MIN_PROFIT = 0.035               # רווח מינימלי לסגירת עסקה
+        MIN_PROFIT = 0.3             # רווח מינימלי לסגירת עסקה
 
         # Check if there is an active trade
         if not active_trade_data:
