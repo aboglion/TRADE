@@ -11,3 +11,5 @@
 2025-03-12 22:45:38|INFO|Started recording market data for btcusdt
 2025-03-12 22:45:40|INFO|Connection established successfully
 2025-03-12 22:45:59|INFO|Warmup phase completed with 300 ticks
+2025-03-12 23:00:16|INFO|Opened buy trade at 83147.060000)
+2025-03-12 23:00:16|INFO|Signal: BUY BUY @ 83147.060000 on BTCUSDT
