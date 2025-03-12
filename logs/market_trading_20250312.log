@@ -1,15 +1,1 @@
-2025-03-12 22:31:24|INFO|Starting Market Trading System
-2025-03-12 22:31:24|INFO|Status reporter started
-2025-03-12 22:31:24|INFO|Started recording market data for btcusdt
-2025-03-12 22:31:25|INFO|Connection established successfully
-2025-03-12 22:31:35|INFO|Warmup phase completed with 300 ticks
-2025-03-12 22:45:35|INFO|Initiating graceful shutdown
-2025-03-12 22:45:35|WARNING|Connection closed: unknown reason
-2025-03-12 22:45:36|INFO|Status reporter stopped
-2025-03-12 22:45:38|INFO|Starting Market Trading System
-2025-03-12 22:45:38|INFO|Status reporter started
-2025-03-12 22:45:38|INFO|Started recording market data for btcusdt
-2025-03-12 22:45:40|INFO|Connection established successfully
-2025-03-12 22:45:59|INFO|Warmup phase completed with 300 ticks
-2025-03-12 23:00:16|INFO|Opened buy trade at 83147.060000)
-2025-03-12 23:00:16|INFO|Signal: BUY BUY @ 83147.060000 on BTCUSDT
+2025-03-12 23:20:01|INFO|Warmup phase completed with 300 ticks

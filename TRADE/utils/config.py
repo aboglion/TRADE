@@ -12,15 +12,15 @@ class TradingConfig:
     DEFAULT_ADAPTIVE_ActiveTrade_SIZING = True
     
 
-    # metrics['realized_volatility']  # כניסה בקניה כאשר התנודות גבוהות
-    # metrics['relative_strength']    # כניסה בקניה כאשר RS גבוהGIT
+    # metrics['realized_volatility']  #  התנודות 
+    # metrics['relative_strength']    #    RS כאשר המחיר עולה יותר מהורד מהממוצע
     #metrics['trend_strength']     # חזקה כאשר המחיר עולה 5 פעמים רצופות
     # metrics['order_imbalance']    # כניסה בקניה כאשר יחס הזמנות גבוה
     # metrics['market_efficiency_ratio']     # כניסה בקניה כאשר השוק יעיל
     @classmethod
     def check_buy_conditions(cls:'TradingConfig',metrics: dict) -> bool:
         return (
-        0.55 >= metrics['realized_volatility'] >= 0.20 and
+        0.70 >= metrics['realized_volatility'] >= 0.35 and
         0.75 >= metrics['relative_strength'] >= 0.25 and
         metrics['trend_strength'] >= 5 and
         metrics['avg_trend_strength'] >= 3 and
