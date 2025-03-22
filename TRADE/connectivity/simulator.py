@@ -20,7 +20,6 @@ class MarketSimulator:
         
         Args:
             data_callback: פונקציית callback לשליחת נתונים
-            speed_factor: מקדם מהירות (1.0 = מהירות רגילה, 2.0 = מהירות כפולה)
         """
         self.data_callback = data_callback
         self.speed_factor = speed_factor

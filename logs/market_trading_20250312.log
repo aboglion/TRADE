@@ -1,1 +1,18 @@
 2025-03-12 23:20:01|INFO|Warmup phase completed with 300 ticks
+2025-03-13 00:11:34|INFO|Opened buy trade at 83291.940000)
+2025-03-13 00:11:34|INFO|Signal: BUY BUY @ 83291.940000 on BTCUSDT
+2025-03-13 00:24:41|INFO|Closed buy trade: Entry=83291.940000, Exit=83542.170000, PROFIT=0.30%, Reason=trend_reversal
+2025-03-13 00:24:41|INFO|Signal: CLOSE @ 83542.170000 (trend_reversal) on BTCUSDT
+2025-03-13 02:25:55|INFO|Opened buy trade at 83893.260000)
+2025-03-13 02:25:55|INFO|Signal: BUY BUY @ 83893.260000 on BTCUSDT
+2025-03-13 03:52:16|INFO|Closed buy trade: Entry=83893.260000, Exit=84147.820000, PROFIT=0.30%, Reason=trend_reversal
+2025-03-13 03:52:16|INFO|Signal: CLOSE @ 84147.820000 (trend_reversal) on BTCUSDT
+2025-03-13 03:57:01|INFO|Opened buy trade at 83985.450000)
+2025-03-13 03:57:01|INFO|Signal: BUY BUY @ 83985.450000 on BTCUSDT
+2025-03-13 04:07:12|INFO|Closed buy trade: Entry=83985.450000, Exit=84267.990000, PROFIT=0.34%, Reason=trend_reversal
+2025-03-13 04:07:12|INFO|Signal: CLOSE @ 84267.990000 (trend_reversal) on BTCUSDT
+2025-03-13 04:07:12|INFO|Opened buy trade at 84276.000000)
+2025-03-13 04:07:12|INFO|Signal: BUY BUY @ 84276.000000 on BTCUSDT
+2025-03-13 06:47:11|INFO|Initiating graceful shutdown
+2025-03-13 06:47:11|WARNING|Connection closed: unknown reason
+2025-03-13 06:47:11|INFO|Status reporter stopped

@@ -4,7 +4,15 @@ import logging
 import traceback, datetime
 from typing import Dict, Optional, Any
 
+# for rv_upper in [0.90, 0.80, 0.70, 0.60]:
+#     for rv_lower in [0.50, 0.40, 0.30, 0.20, 0.10]:
+#         for rs_upper in [0.90, 0.80, 0.70, 0.60]:
+#             for rs_lower in [0.50, 0.40, 0.30, 0.20, 0.10]:
+#                 for ts in [5, 7, 9, 12]:
+#                     for avg_ts in [5, 7, 9]:
+#                         for oi in [0.65, 0.80, 1]:
 
+                         
 class TradingConfig:
     DEFAULT_WARMUP_TICKS = 300
     DEFAULT_RISK_FACTOR = 0.02  # סיכון של 2% לעסקה
@@ -18,16 +26,27 @@ class TradingConfig:
     # metrics['order_imbalance']    # כניסה בקניה כאשר יחס הזמנות גבוה
     # metrics['market_efficiency_ratio']     # כניסה בקניה כאשר השוק יעיל
     @classmethod
-    def check_buy_conditions(cls:'TradingConfig',metrics: dict) -> bool:
-        return (
-        0.70 >= metrics['realized_volatility'] >= 0.35 and
-        0.75 >= metrics['relative_strength'] >= 0.25 and
-        metrics['trend_strength'] >= 5 and
-        metrics['avg_trend_strength'] >= 3 and
-        metrics['trend_strength'] > metrics['avg_trend_strength'] and
-        metrics['order_imbalance'] >= 0.65 and
-        metrics['market_efficiency_ratio'] >= 0.93
-        )
+    def check_buy_conditions(cls: 'TradingConfig', metrics: dict, metrics_sp: dict = {
+        'realized_volatility_hi': 0.70,
+        'realized_volatility_lo': 0.35,
+        'relative_strength_hi': 0.75,
+        'relative_strength_lo': 0.25,
+        'trend_strength': 5,
+        'avg_trend_strength': 3,
+        'order_imbalance': 0.65,
+        'market_efficiency_ratio': 0.93}) -> bool:
+            return (
+                metrics['realized_volatility'] <= metrics_sp['realized_volatility_hi'] and #0.70
+                metrics['realized_volatility'] >= metrics_sp['realized_volatility_lo'] and #0.35
+                metrics['relative_strength'] <= metrics_sp['relative_strength_hi'] and #0.75
+                metrics['relative_strength'] >= metrics_sp['relative_strength_lo'] and #0.25
+                metrics['trend_strength'] >= metrics_sp['trend_strength'] and #5    
+                metrics['avg_trend_strength'] >= metrics_sp['avg_trend_strength'] and #3
+                metrics['trend_strength'] > metrics['avg_trend_strength'] and   
+                metrics['order_imbalance'] >= metrics_sp['order_imbalance'] and #0.65
+                metrics['market_efficiency_ratio'] >= metrics_sp['market_efficiency_ratio'] #0.93
+                )
+
 
     @classmethod
     def check_sell_conditions (cls: 'TradingConfig',
