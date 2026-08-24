@@ -1,32 +1,19 @@
-# Walk-Forward + Regime Detection + Trend Rider Engine (v11.0 FAKEOUT-PROTECTED)
+# Walk-Forward + Regime Detection + Trend Rider Engine (v12.0 DYNAMIC REGIME ENGINE)
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
-import itertools
 import warnings
 warnings.filterwarnings('ignore')
 
 # ═══════════════════════════════════════════════════════════
-# הגדרות הון וסיכון (מכוון לרווחים גבוהים במגמה + הגנת דשדוש)
+# הגדרות הון וסיכון (v12.0 DYNAMIC REGIME ENGINE)
 # ═══════════════════════════════════════════════════════════
 INITIAL_CAPITAL = 1000.0
 FEE_PER_SIDE = 0.0006
 SLIPPAGE_PER_SIDE = 0.0002
 POSITION_ALLOCATION = 0.90
-
-# Walk-Forward
-TRAIN_DAYS = 2700
-TEST_DAYS = 540
-STEP_DAYS = 540
-MIN_TRADES_PER_WF = 3
-
-PARAM_GRID = {
-    'atr_trail_mult':  [2.8, 3.5],
-    'donchian_period': [20, 30],
-    'use_fakeout_filter': [True, False]
-}
 
 # ═══════════════════════════════════════════════════════════
 # טעינת נתונים
@@ -64,16 +51,13 @@ def load_real_data(filepath='BTC_USD_4h.csv'):
     return df
 
 # ═══════════════════════════════════════════════════════════
-# אינדיקטורים
+# אינדיקטורים וסיווג משטר שוק (v12.0 Regime State Classifier)
 # ═══════════════════════════════════════════════════════════
 def add_indicators(df):
     x = df.copy()
     x["EMA50"] = x.Close.ewm(span=50, adjust=False).mean()
     x["EMA200"] = x.Close.ewm(span=200, adjust=False).mean()
-    x["Donchian20"] = x.High.rolling(20).max().shift(1)
     x["Donchian30"] = x.High.rolling(30).max().shift(1)
-    x["VolMA20"] = x.Volume.rolling(20).mean()
-    x["VolRatio"] = x.Volume / x.VolMA20
     
     # ATR
     prev = x.Close.shift()
@@ -83,6 +67,13 @@ def add_indicators(df):
         (x.Low - prev).abs()
     ], axis=1).max(axis=1)
     x["ATR"] = tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    
+    # RSI 14
+    delta = x.Close.diff()
+    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    x["RSI"] = 100 - (100 / (1 + rs))
     
     # ADX
     up_move = x.High - x.High.shift(1)
@@ -95,17 +86,36 @@ def add_indicators(df):
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
     x["ADX"] = dx.ewm(alpha=1/14, min_periods=14).mean()
     
+    # Range Compression Ratio
+    high30 = x.High.rolling(30).max()
+    low30 = x.Low.rolling(30).min()
+    x["Range30"] = high30 - low30
+    x["RangeToATR"] = x.Range30 / x.ATR
+    x["Ret30"] = (x.Close - x.Close.shift(180)) / x.Close.shift(180)
+    
+    # Classification Engine
+    regimes = []
+    for i in range(len(x)):
+        r = x.iloc[i]
+        ret = r['Ret30'] if not np.isnan(r['Ret30']) else 0.0
+        
+        if r.Close < r.EMA200 or ret < -0.12:
+            regimes.append('BEAR')
+        elif r.Close > r.EMA50 > r.EMA200 and ret > 0.05:
+            regimes.append('STRONG_BULL')
+        elif r.RangeToATR < 4.5 or r.ADX < 18.0:
+            regimes.append('SIDEWAYS')
+        else:
+            regimes.append('BULL')
+            
+    x["RegimeV12"] = regimes
     return x.dropna()
 
 # ═══════════════════════════════════════════════════════════
-# מנוע מסחר (Fakeout-Protected Trend Rider)
+# מנוע מסחר (v12.0 DYNAMIC REGIME ENGINE)
 # ═══════════════════════════════════════════════════════════
-def run_backtest_v9(df, params, capital=INITIAL_CAPITAL):
+def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
     fee_slip = FEE_PER_SIDE + SLIPPAGE_PER_SIDE
-    atr_trail = params.get('atr_trail_mult', 3.5)
-    donchian_col = 'Donchian30' if params.get('donchian_period', 30) == 30 else 'Donchian20'
-    use_fakeout_filter = params.get('use_fakeout_filter', True)
-    
     cash = capital
     in_pos = False
     entry_px = 0
@@ -114,42 +124,47 @@ def run_backtest_v9(df, params, capital=INITIAL_CAPITAL):
     trades = []
     equity_val = [capital]
     equity_idx = [df.index[0]]
+    mode = 'TREND'
     
     for i in range(50, len(df)):
         r = df.iloc[i]
         curr_price = r.Close
+        regime = r.RegimeV12
         
         if not in_pos:
-            trend_ok = r.Close > r.EMA50 > r.EMA200
-            
-            if use_fakeout_filter:
-                # Clean margin + ADX strength + Volume confirmation
-                breakout_ok = r.Close >= r[donchian_col] * 1.008
-                adx_ok = r.ADX >= 18.0
-                vol_ok = r.VolRatio >= 1.05
-                signal = trend_ok and breakout_ok and adx_ok and vol_ok
-            else:
-                breakout_ok = r.Close >= r[donchian_col]
-                signal = trend_ok and breakout_ok
-                
-            if signal:
-                in_pos = True
-                entry_px = r.Close * (1 + fee_slip)
-                units = (cash * POSITION_ALLOCATION) / entry_px
-                highest_px = entry_px
-                trades.append({
-                    'entry_date': df.index[i],
-                    'entry': entry_px
-                })
+            if regime == 'BEAR':
+                pass # Cash protection
+            elif regime in ['STRONG_BULL', 'BULL']:
+                if r.Close >= r.Donchian30:
+                    in_pos = True
+                    mode = 'TREND'
+                    entry_px = r.Close * (1 + fee_slip)
+                    units = (cash * POSITION_ALLOCATION) / entry_px
+                    highest_px = entry_px
+                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': 'TREND'})
+            elif regime == 'SIDEWAYS':
+                # Chop Dip-Buyer Logic (Mean Reversion at Range Floor)
+                if r.Close > r.EMA200 and r.RSI < 42 and r.Close > r.Open:
+                    in_pos = True
+                    mode = 'DIP'
+                    entry_px = r.Close * (1 + fee_slip)
+                    units = (cash * POSITION_ALLOCATION) / entry_px
+                    highest_px = entry_px
+                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': 'DIP'})
         else:
             highest_px = max(highest_px, r.High)
-            stop_px = highest_px - atr_trail * r.ATR
             
-            exit_signal = (r.Low <= stop_px) or (r.Close < r.EMA50)
-            
+            if mode == 'TREND':
+                stop_px = highest_px - 3.5 * r.ATR
+                exit_signal = (r.Low <= stop_px) or (r.Close < r.EMA50)
+            else: # DIP mode
+                target_px = entry_px + 1.8 * r.ATR
+                stop_px = entry_px - 2.0 * r.ATR
+                exit_signal = (r.High >= target_px) or (r.Low <= stop_px)
+                
             if exit_signal:
                 in_pos = False
-                exit_px = min(stop_px, r.Close) * (1 - fee_slip)
+                exit_px = min(stop_px, r.Close) * (1 - fee_slip) if r.Low <= stop_px else r.Close * (1 - fee_slip)
                 pnl = units * (exit_px - entry_px)
                 cash += pnl
                 
@@ -157,7 +172,6 @@ def run_backtest_v9(df, params, capital=INITIAL_CAPITAL):
                 trades[-1]['exit'] = exit_px
                 trades[-1]['pnl_usd'] = pnl
                 trades[-1]['return_pct'] = (exit_px - entry_px) / entry_px * 100
-                trades[-1]['reason'] = 'trend_exit'
                 units = 0
                 
         current_val = cash + (units * curr_price if in_pos else 0)
@@ -171,5 +185,5 @@ def run_backtest_v9(df, params, capital=INITIAL_CAPITAL):
 if __name__ == "__main__":
     df = load_real_data()
     df = add_indicators(df)
-    trades, eq = run_backtest_v9(df, {'atr_trail_mult': 3.5, 'use_fakeout_filter': True})
-    print(f"[SUCCESS] Strategy v11.0 execution completed. Trades: {len(trades)} | Final Capital: ${eq.iloc[-1]:,.2f}")
+    trades, eq = run_backtest_v9(df)
+    print(f"[SUCCESS] Strategy v12.0 Dynamic Regime Engine completed. Total Trades: {len(trades)} | Final Capital: ${eq.iloc[-1]:,.2f}")
