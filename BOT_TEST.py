@@ -1,4 +1,4 @@
-# Walk-Forward + Regime Detection + Trend Rider Engine (v12.0 DYNAMIC REGIME ENGINE)
+# Walk-Forward + Regime Detection + Trend Rider Engine (v12.0 OPTIMAL DYNAMIC REGIME ENGINE)
 
 import pandas as pd
 import numpy as np
@@ -8,16 +8,13 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ═══════════════════════════════════════════════════════════
-# הגדרות הון וסיכון (v12.0 DYNAMIC REGIME ENGINE)
+# הגדרות הון וסיכון (v12.0 OPTIMAL DYNAMIC REGIME ENGINE)
 # ═══════════════════════════════════════════════════════════
 INITIAL_CAPITAL = 1000.0
 FEE_PER_SIDE = 0.0006
 SLIPPAGE_PER_SIDE = 0.0002
 POSITION_ALLOCATION = 0.90
 
-# ═══════════════════════════════════════════════════════════
-# טעינת נתונים
-# ═══════════════════════════════════════════════════════════
 def load_real_data(filepath='BTC_USD_4h.csv'):
     import os
     if not os.path.exists(filepath) and os.path.exists('CBBTCUSD_4h.csv'):
@@ -50,9 +47,6 @@ def load_real_data(filepath='BTC_USD_4h.csv'):
     print(f"[INFO] Loaded {len(df)} candles | {df.index[0]} -> {df.index[-1]}")
     return df
 
-# ═══════════════════════════════════════════════════════════
-# אינדיקטורים וסיווג משטר שוק (v12.0 Regime State Classifier)
-# ═══════════════════════════════════════════════════════════
 def add_indicators(df):
     x = df.copy()
     x["EMA50"] = x.Close.ewm(span=50, adjust=False).mean()
@@ -93,7 +87,6 @@ def add_indicators(df):
     x["RangeToATR"] = x.Range30 / x.ATR
     x["Ret30"] = (x.Close - x.Close.shift(180)) / x.Close.shift(180)
     
-    # Classification Engine
     regimes = []
     for i in range(len(x)):
         r = x.iloc[i]
@@ -111,9 +104,6 @@ def add_indicators(df):
     x["RegimeV12"] = regimes
     return x.dropna()
 
-# ═══════════════════════════════════════════════════════════
-# מנוע מסחר (v12.0 DYNAMIC REGIME ENGINE)
-# ═══════════════════════════════════════════════════════════
 def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
     fee_slip = FEE_PER_SIDE + SLIPPAGE_PER_SIDE
     cash = capital
@@ -133,7 +123,7 @@ def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
         
         if not in_pos:
             if regime == 'BEAR':
-                pass # Cash protection
+                pass # Cash Protection (0% position)
             elif regime in ['STRONG_BULL', 'BULL']:
                 if r.Close >= r.Donchian30:
                     in_pos = True
@@ -143,7 +133,7 @@ def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
                     highest_px = entry_px
                     trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': 'TREND'})
             elif regime == 'SIDEWAYS':
-                # Chop Dip-Buyer Logic (Mean Reversion at Range Floor)
+                # Full 90% allocation for Sideways Dip-Buying
                 if r.Close > r.EMA200 and r.RSI < 42 and r.Close > r.Open:
                     in_pos = True
                     mode = 'DIP'
@@ -186,4 +176,4 @@ if __name__ == "__main__":
     df = load_real_data()
     df = add_indicators(df)
     trades, eq = run_backtest_v9(df)
-    print(f"[SUCCESS] Strategy v12.0 Dynamic Regime Engine completed. Total Trades: {len(trades)} | Final Capital: ${eq.iloc[-1]:,.2f}")
+    print(f"[SUCCESS] Strategy v12.0 Optimal Engine completed. Trades: {len(trades)} | Final Capital: ${eq.iloc[-1]:,.2f}")
