@@ -124,14 +124,22 @@ def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
         if not in_pos:
             if regime == 'BEAR':
                 pass # Cash Protection (0% position)
-            elif regime in ['STRONG_BULL', 'BULL']:
+            elif regime == 'STRONG_BULL':
+                if r.Close >= r.Donchian30:
+                    in_pos = True
+                    mode = 'STRONG_BULL_TREND'
+                    entry_px = r.Close * (1 + fee_slip)
+                    units = (cash * 0.95) / entry_px
+                    highest_px = entry_px
+                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': mode})
+            elif regime == 'BULL':
                 if r.Close >= r.Donchian30:
                     in_pos = True
                     mode = 'TREND'
                     entry_px = r.Close * (1 + fee_slip)
                     units = (cash * POSITION_ALLOCATION) / entry_px
                     highest_px = entry_px
-                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': 'TREND'})
+                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': mode})
             elif regime == 'SIDEWAYS':
                 # Full 90% allocation for Sideways Dip-Buying
                 if r.Close > r.EMA200 and r.RSI < 42 and r.Close > r.Open:
@@ -140,11 +148,15 @@ def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
                     entry_px = r.Close * (1 + fee_slip)
                     units = (cash * POSITION_ALLOCATION) / entry_px
                     highest_px = entry_px
-                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': 'DIP'})
+                    trades.append({'entry_date': df.index[i], 'entry': entry_px, 'mode': mode})
         else:
             highest_px = max(highest_px, r.High)
             
-            if mode == 'TREND':
+            if mode == 'STRONG_BULL_TREND':
+                # Extended 5.5 ATR trail to capture mega parabolic bull rallies without premature exit
+                stop_px = highest_px - 5.5 * r.ATR
+                exit_signal = (r.Low <= stop_px) or (r.Close < r.EMA200)
+            elif mode == 'TREND':
                 stop_px = highest_px - 3.5 * r.ATR
                 exit_signal = (r.Low <= stop_px) or (r.Close < r.EMA50)
             else: # DIP mode
