@@ -172,8 +172,31 @@ def run_backtest_v9(df, params=None, capital=INITIAL_CAPITAL):
     eq = pd.Series(equity_val, index=equity_idx, name='Equity')
     return trades_df, eq
 
+def run_portfolio_50_25_25(btc_df, eth_df, sol_df, capital=INITIAL_CAPITAL):
+    cap_btc = capital * 0.50 # 50% BTC ($500)
+    cap_eth = capital * 0.25 # 25% ETH ($250)
+    cap_sol = capital * 0.25 # 25% SOL ($250)
+    
+    tr_b, eq_b = run_backtest_v9(btc_df, capital=cap_btc)
+    tr_e, eq_e = run_backtest_v9(eth_df, capital=cap_eth)
+    tr_s, eq_s = run_backtest_v9(sol_df, capital=cap_sol) if len(sol_df) > 50 else (pd.DataFrame(), pd.Series(cap_sol, index=btc_df.index))
+    
+    comb_eq = pd.DataFrame({'BTC': eq_b, 'ETH': eq_e, 'SOL': eq_s}).ffill().fillna(cap_sol)
+    total_eq = comb_eq.sum(axis=1)
+    
+    return {'BTC': (tr_b, eq_b), 'ETH': (tr_e, eq_e), 'SOL': (tr_s, eq_s)}, total_eq
+
 if __name__ == "__main__":
     df = load_real_data()
     df = add_indicators(df)
     trades, eq = run_backtest_v9(df)
     print(f"[SUCCESS] Strategy v12.0 Optimal Engine completed. Trades: {len(trades)} | Final Capital: ${eq.iloc[-1]:,.2f}")
+    
+    import os
+    if os.path.exists('ETH_USD_4h.csv') and os.path.exists('SOL_USD_4h.csv'):
+        eth_df = add_indicators(load_real_data('ETH_USD_4h.csv'))
+        sol_df = add_indicators(load_real_data('SOL_USD_4h.csv'))
+        
+        _, port_eq = run_portfolio_50_25_25(df, eth_df, sol_df, capital=INITIAL_CAPITAL)
+        print(f"[PORTFOLIO 50/25/25] Final Capital (BTC 50% + ETH 25% + SOL 25%): ${port_eq.iloc[-1]:,.2f}")
+
