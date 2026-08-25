@@ -211,4 +211,3 @@ if __name__ == "__main__":
         
         _, port_eq = run_portfolio_50_25_25(df, eth_df, sol_df, capital=INITIAL_CAPITAL)
         print(f"[PORTFOLIO 50/25/25] Final Capital (BTC 50% + ETH 25% + SOL 25%): ${port_eq.iloc[-1]:,.2f}")
-
