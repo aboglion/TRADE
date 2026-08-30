@@ -14,7 +14,11 @@ help:
 gp:
 	git add .
 	@git commit -m "$(MSG)" || echo "No changes to commit"
-	git push
+	git push origin main
+pg:
+	git add .
+	@git commit -m "$(MSG)" || echo "No changes to commit"
+	git push origin main
 
 status:
 	git status
