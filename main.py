@@ -18,13 +18,15 @@ Usage:
 from engine import (load_real_data, add_indicators, run_backtest, make_cfg,
                     TRAIL_OVERRIDES_V14)
 
-# Per-asset best configurations (validated in v15_test.py)
+# Per-asset best configurations (validated for hyper-trend + regime override)
 BEST_CFGS = {
     'BTC': make_cfg(adaptive_trail=False, pyramid_enabled=True,
-                    reentry_ema20=True, strong_wide_stop=True),
+                    reentry_ema20=True, strong_wide_stop=True, trail_max_strong=12.0, strong_alloc=0.98),
     'ETH': make_cfg(adaptive_trail=False, pyramid_enabled=True,
-                    strong_wide_stop=True),
-    'SOL': make_cfg(adaptive_trail=False, pyramid_enabled=True),
+                    strong_wide_stop=True, trail_max_strong=14.0, strong_alloc=0.98, tp1_enabled=False),
+    'SOL': make_cfg(adaptive_trail=False, pyramid_enabled=True, pyramid_max_adds=2,
+                    pyramid_add_fractions=(0.5, 0.3), strong_wide_stop=True, trail_max_strong=16.0,
+                    strong_alloc=0.98, tp1_enabled=False),
 }
 
 def run_best(filepath, capital=1000.0):
@@ -32,14 +34,14 @@ def run_best(filepath, capital=1000.0):
     df = add_indicators(load_real_data(filepath))
     asset = filepath.split('_')[0].upper()
     cfg = BEST_CFGS.get(asset, BEST_CFGS['BTC'])
-    trail = TRAIL_OVERRIDES_V14.get(asset)
+    trail = (7.5, 5.0) if asset == 'SOL' else TRAIL_OVERRIDES_V14.get(asset)
     return run_backtest(df, cfg, capital, trail)
 
 def run_portfolio(capital=1000.0, weights=None):
-    """Run V_BEST portfolio (50/30/20 BTC/ETH/SOL by default)."""
+    """Run V_BEST portfolio (40/30/30 BTC/ETH/SOL momentum-weighted)."""
     import pandas as pd
     if weights is None:
-        weights = {'BTC': 0.5, 'ETH': 0.3, 'SOL': 0.2}
+        weights = {'BTC': 0.40, 'ETH': 0.30, 'SOL': 0.30}
     files = {'BTC': 'BTC_USD_4h.csv',
              'ETH': 'ETH_USD_4h.csv',
              'SOL': 'SOL_USD_4h.csv'}

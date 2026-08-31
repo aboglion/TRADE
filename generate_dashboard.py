@@ -11,7 +11,7 @@ def build_dashboard_data():
         'ETH': 'ETH_USD_4h.csv',
         'SOL': 'SOL_USD_4h.csv'
     }
-    weights = {'BTC': 0.50, 'ETH': 0.30, 'SOL': 0.20}
+    weights = {'BTC': 0.40, 'ETH': 0.30, 'SOL': 0.30}
     capital = 1000.0
 
     assets_payload = {}
@@ -612,8 +612,8 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             document.getElementById('mMaxDD').innerText = `${{maxDD}}%`;
             document.getElementById('mMaxDDBH').innerHTML = `מול הולד רגיל: <strong style="color: var(--red);">${{bhMaxDD}}%</strong>`;
 
-            document.getElementById('mExtraTitle').innerText = 'משקלי תיק השקעות';
-            document.getElementById('mExtraVal').innerText = '50/30/20';
+            document.getElementById('mExtraTitle').innerText = 'משקלי תיק מומנטום חכם';
+            document.getElementById('mExtraVal').innerText = '40/30/30';
             document.getElementById('mExtraSub').innerText = `תקופה: ${{slicedDates[0]}} עד ${{slicedDates[slicedDates.length - 1]}}`;
 
             document.getElementById('chartTitle').innerText = `📈 גרף תשואת התיק ($1,000 Start) לתקופה (${{slicedDates[0]}} - ${{slicedDates[slicedDates.length - 1]}})`;
