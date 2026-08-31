@@ -94,18 +94,17 @@ BTC still trails B&H in parabolic bull windows (2020-2021: +191% vs +305%). Root
 
 | File | Purpose |
 |------|---------|
-| `V_BEST.py` | Production entry point — import and run |
-| `v14.py` | Full engine with all variants (R1-R4, Long-Short) |
-| `v15_test.py` | A/B test suite that validated each component |
-| `v14_hybrid.py` | Core+Satellite hybrid (70/30) for risk-averse allocators |
-| `data/v15_portfolio_equity.csv` | Daily equity curve of best portfolio |
+| `main.py` | Production entry point — import and run portfolio strategy |
+| `engine.py` | Full calculation engine (indicators, regimes, backtest loop, risk sizing) |
+| `STRATEGY_REPORT.md` | Comprehensive strategy performance report |
+| `data/` | Historical OHLCV market data CSVs |
 
 ---
 
 ## Usage
 
 ```python
-from V_BEST import run_best, run_portfolio
+from main import run_best, run_portfolio
 
 # Single asset
 trades, equity, bh = run_best('BTC_USD_4h.csv', capital=10000)
