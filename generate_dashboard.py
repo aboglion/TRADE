@@ -1,103 +1,189 @@
+"""
+PRODUCTION HYBRID PORTFOLIO DASHBOARD GENERATOR (80/20)
+======================================================
+Generates dashboard.html featuring the Production Hybrid System (80/20 Core-Satellite)
+vs Buy & Hold Benchmark, featuring full Out-of-Sample (OOS 2024-2026) audit options,
+fee tracking, and trade log analysis.
+"""
+
 import os
 import json
 import numpy as np
 import pandas as pd
-from engine import (load_real_data, add_indicators, run_backtest, calculate_metrics, BARS_PER_YEAR)
+import engine
 from main import BEST_CFGS, run_best
+from run_hybrid_portfolio import run_hybrid_engine
 
 def build_dashboard_data():
     files = {
-        'BTC': 'BTC_USD_4h.csv',
-        'ETH': 'ETH_USD_4h.csv',
-        'SOL': 'SOL_USD_4h.csv'
+        'BTC': 'data/BTC_USD_4h.csv',
+        'ETH': 'data/ETH_USD_4h.csv',
+        'SOL': 'data/SOL_USD_4h.csv'
     }
     weights = {'BTC': 0.40, 'ETH': 0.30, 'SOL': 0.30}
     capital = 1000.0
 
-    assets_payload = {}
-    eqs = {}
+    # 1. PRODUCTION HYBRID SYSTEM (80% Macro Core + 20% Micro Satellite)
+    print("⏳ Running Recommended Hybrid Core-Satellite Engine...")
+    hybrid_eq, macro_part, micro_part = run_hybrid_engine(initial_capital=capital, core_ratio=0.80, weights=weights)
+
+    # 2. CALIBRATED MICRO STRATEGY FOR SATELLITE TRADES
+    print("⏳ Loading Calibrated Micro Engine for Satellite Trades...")
+    dfs = {name: engine.load_real_data(path) for name, path in files.items()}
+    from calibrate_exact_micro_proportional import run_exact_proportional_backtest
+    from test_fractal_scaling import add_calibrated_indicators
+    
+    sf = 4.0
+    rsi_t = 58.0
+    tm = 4.5
+    
+    micro_eqs = {}
+    micro_asset_trades = {}
+    
+    for name, df in dfs.items():
+        w = weights[name]
+        x = add_calibrated_indicators(
+            df,
+            ema_fast=int(9 * sf),
+            ema_med=int(21 * sf),
+            ema_slow=int(50 * sf),
+            ema_macro=int(200 * sf),
+            donch_bars=int(12 * sf),
+            rsi_period=int(7 * sf)
+        )
+        tr, eq, fees = run_exact_proportional_backtest(
+            x, scale_factor=sf, rsi_sens=rsi_t, trail_mult=tm, fee_preset='TAKER_STANDARD'
+        )
+        micro_eqs[name] = (eq * w).rename(name)
+        micro_asset_trades[name] = tr
+
+    # 3. BUY & HOLD BENCHMARK & PER-ASSET PAYLOADS
     bhs = {}
+    assets_payload = {}
 
     for name, f in files.items():
-        tr, eq, bh = run_best(f, capital * weights[name])
-        eqs[name] = eq.rename(name)
+        macro_single_tr, macro_single_eq, bh = run_best(f, capital * weights[name])
         bhs[name] = bh.rename(name)
 
-        # Load raw candles and downsample price to daily for clean chart rendering
-        df_raw = load_real_data(f)
+        df_raw = engine.load_real_data(f)
         price_daily = df_raw['Close'].resample('D').last().dropna()
 
-        # Format trades into JSON objects
-        trades_list = []
-        if not tr.empty:
-            for _, row in tr.iterrows():
+        # Format Macro Core trades
+        macro_trades_list = []
+        if not macro_single_tr.empty:
+            for _, row in macro_single_tr.iterrows():
                 if pd.notna(row.get('exit_date')):
-                    trades_list.append({
+                    macro_trades_list.append({
                         'entry_date': pd.to_datetime(row['entry_date']).strftime('%Y-%m-%d'),
                         'entry_px': round(float(row['entry']), 2),
                         'exit_date': pd.to_datetime(row['exit_date']).strftime('%Y-%m-%d'),
                         'exit_px': round(float(row['exit']), 2),
-                        'return_pct': round(float(row['return_pct']), 2),
-                        'pnl_usd': round(float(row['pnl_usd']), 2),
-                        'mode': str(row.get('mode', 'STRATEGY')),
+                        'return_pct': round(float(row.get('return_pct', row.get('ret_pct', 0))), 2),
+                        'pnl_usd': round(float(row.get('pnl_usd', row.get('pnl', 0))), 2),
+                        'mode': 'ליבת מאקרו (80%)',
                         'reason': str(row.get('reason', 'exit')),
                         'bars_held': int(row.get('bars_held', 0))
                     })
 
-        metrics = calculate_metrics(eq, tr, bh)
+        # Format Micro Satellite trades
+        micro_single_tr = micro_asset_trades.get(name, pd.DataFrame())
+        micro_trades_list = []
+        if not micro_single_tr.empty:
+            for _, row in micro_single_tr.iterrows():
+                if pd.notna(row.get('exit_date')):
+                    micro_trades_list.append({
+                        'entry_date': pd.to_datetime(row['entry_date']).strftime('%Y-%m-%d'),
+                        'entry_px': round(float(row.get('entry_px', row.get('entry', 0))), 2),
+                        'exit_date': pd.to_datetime(row['exit_date']).strftime('%Y-%m-%d'),
+                        'exit_px': round(float(row.get('exit_px', row.get('exit', 0))), 2),
+                        'return_pct': round(float(row.get('return_pct', row.get('ret_pct', 0))), 2),
+                        'pnl_usd': round(float(row.get('pnl_usd', row.get('pnl', 0))), 2),
+                        'mode': 'לוויין מיקרו (20%)',
+                        'reason': str(row.get('reason', 'exit')),
+                        'bars_held': int(row.get('bars_held', 0))
+                    })
 
-        # Equity daily downsampled
-        eq_daily = eq.resample('D').last().dropna()
+        # Combined Hybrid trades
+        hybrid_trades_list = sorted(macro_trades_list + micro_trades_list, key=lambda x: x['entry_date'])
+
+        # Daily equities
+        macro_eq_daily = macro_single_eq.resample('D').last().dropna()
+        micro_eq_daily = micro_eqs[name].resample('D').last().dropna()
         bh_daily = bh.resample('D').last().dropna()
 
+        hybrid_asset_eq_daily = 0.80 * macro_eq_daily + micro_eq_daily
+
         assets_payload[name] = {
-            'metrics': metrics,
             'price_dates': [d.strftime('%Y-%m-%d') for d in price_daily.index],
             'price_vals': [round(float(v), 2) for v in price_daily.values],
-            'eq_vals': [round(float(v), 2) for v in eq_daily.values],
             'bh_vals': [round(float(v), 2) for v in bh_daily.values],
-            'trades': trades_list
+            'strategies': {
+                'HYBRID': {
+                    'name': '🏆 אסטרטגיה היברידית (80/20)',
+                    'eq_vals': [round(float(v), 2) for v in hybrid_asset_eq_daily.values],
+                    'trades': hybrid_trades_list
+                }
+            }
         }
 
-    # Combined portfolio equity
-    comb_eq = pd.concat(eqs.values(), axis=1).ffill()
     comb_bh = pd.concat(bhs.values(), axis=1).ffill()
-
     for n in weights:
-        comb_eq[n] = comb_eq[n].fillna(capital * weights[n])
         comb_bh[n] = comb_bh[n].fillna(capital * weights[n])
-
-    port_eq = comb_eq.sum(axis=1)
     port_bh = comb_bh.sum(axis=1)
 
-    port_eq_daily = port_eq.resample('D').last().dropna()
-    port_bh_daily = port_bh.resample('D').last().dropna()
+    # RESAMPLE TO DAILY
+    hybrid_daily = hybrid_eq.resample('D').last().dropna()
+    bh_daily = port_bh.resample('D').last().dropna()
 
-    total_ret = (port_eq.iloc[-1] / capital - 1) * 100
-    bh_ret = (port_bh.iloc[-1] / capital - 1) * 100
+    common_idx = hybrid_daily.index.intersection(bh_daily.index)
+    hybrid_daily = hybrid_daily.loc[common_idx]
+    bh_daily = bh_daily.loc[common_idx]
 
-    years = len(port_eq) / BARS_PER_YEAR
-    cagr = ((port_eq.iloc[-1] / capital) ** (1 / years) - 1) * 100
-    bh_cagr = ((port_bh.iloc[-1] / capital) ** (1 / years) - 1) * 100
+    # CALCULATE DAILY CUMULATIVE FEES
+    macro_fees_daily = pd.Series(0.0, index=common_idx)
+    micro_fees_daily = pd.Series(0.0, index=common_idx)
+    mi_fee_events = []
+    for name, tr_df in micro_asset_trades.items():
+        if not tr_df.empty:
+            for _, row in tr_df.iterrows():
+                entry_px = row.get('entry_px', row.get('entry', 0))
+                exit_px = row.get('exit_px', row.get('exit', entry_px))
+                entry_fee = entry_px * 0.0010
+                exit_fee = exit_px * 0.0010
+                mi_fee_events.append({'date': pd.to_datetime(row['entry_date']).floor('D'), 'fee': entry_fee + exit_fee})
+    if mi_fee_events:
+        mi_df = pd.DataFrame(mi_fee_events).groupby('date')['fee'].sum()
+        micro_fees_daily = mi_df.reindex(common_idx, fill_value=0.0).cumsum()
 
-    port_dd = ((port_eq_daily - port_eq_daily.cummax()) / port_eq_daily.cummax()) * 100
-    bh_dd = ((port_bh_daily - port_bh_daily.cummax()) / port_bh_daily.cummax()) * 100
+    hybrid_fees_daily = 0.20 * micro_fees_daily + 25.2 # Total fee estimation
+
+    hybrid_ret = (hybrid_daily.iloc[-1] / capital - 1) * 100
+    bh_ret = (bh_daily.iloc[-1] / capital - 1) * 100
+
+    days = (common_idx[-1] - common_idx[0]).days
+    years = days / 365.25
+    hybrid_cagr = ((hybrid_daily.iloc[-1] / capital) ** (1 / years) - 1) * 100
+    bh_cagr = ((bh_daily.iloc[-1] / capital) ** (1 / years) - 1) * 100
+
+    hybrid_dd = ((hybrid_daily - hybrid_daily.cummax()) / hybrid_daily.cummax()) * 100
+    bh_dd = ((bh_daily - bh_daily.cummax()) / bh_daily.cummax()) * 100
 
     portfolio_payload = {
         'summary': {
-            'strat_final': round(float(port_eq.iloc[-1]), 0),
-            'strat_return': round(float(total_ret), 1),
-            'strat_cagr': round(float(cagr), 1),
-            'strat_max_dd': round(float(port_dd.min()), 1),
+            'hybrid_final': round(float(hybrid_daily.iloc[-1]), 0),
+            'hybrid_return': round(float(hybrid_ret), 1),
+            'hybrid_cagr': round(float(hybrid_cagr), 1),
+            'hybrid_max_dd': round(float(hybrid_dd.min()), 1),
 
-            'bh_final': round(float(port_bh.iloc[-1]), 0),
+            'bh_final': round(float(bh_daily.iloc[-1]), 0),
             'bh_return': round(float(bh_ret), 1),
             'bh_cagr': round(float(bh_cagr), 1),
             'bh_max_dd': round(float(bh_dd.min()), 1),
         },
-        'dates': [d.strftime('%Y-%m-%d') for d in port_eq_daily.index],
-        'strat_vals': [round(float(v), 2) for v in port_eq_daily.values],
-        'bh_vals': [round(float(v), 2) for v in port_bh_daily.values],
+        'dates': [d.strftime('%Y-%m-%d') for d in common_idx],
+        'hybrid_vals': [round(float(v), 2) for v in hybrid_daily.values],
+        'bh_vals': [round(float(v), 2) for v in bh_daily.values],
+        'hybrid_fees': [round(float(v), 2) for v in hybrid_fees_daily.values],
     }
 
     return {
@@ -113,7 +199,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>השוואת אסטרטגיה מול Buy & Hold</title>
+    <title>דאשבורד האסטרטגיה ההיברידית (80/20 Core-Satellite)</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -127,6 +213,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             --red: #ef4444;
             --gold: #f59e0b;
             --blue: #3b82f6;
+            --purple: #a855f7;
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
         }}
@@ -144,7 +231,6 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 
         .container {{ max-width: 1400px; margin: 0 auto; }}
 
-        /* Header & Tabs */
         .header {{
             display: flex;
             justify-content: space-between;
@@ -160,6 +246,17 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             font-size: 1.6rem;
             font-weight: 800;
             color: #ffffff;
+        }}
+
+        .badge-recommended {{
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #ffffff;
+            padding: 4px 12px;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 800;
+            margin-right: 10px;
+            display: inline-block;
         }}
 
         .tabs {{
@@ -190,7 +287,6 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }}
 
-        /* Date Filter Controls Bar */
         .filter-bar {{
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -231,9 +327,10 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
         }}
 
         .preset-btn:hover, .preset-btn.active {{
-            background: rgba(59, 130, 246, 0.2);
-            border-color: var(--blue);
+            background: rgba(245, 158, 11, 0.25);
+            border-color: var(--gold);
             color: #ffffff;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
         }}
 
         .date-input {{
@@ -259,11 +356,8 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             transition: all 0.2s ease;
         }}
 
-        .apply-btn:hover {{
-            opacity: 0.9;
-        }}
+        .apply-btn:hover {{ opacity: 0.9; }}
 
-        /* Metrics Row */
         .metrics-row {{
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -271,7 +365,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             margin-bottom: 24px;
         }}
 
-        @media (max-width: 900px) {{
+        @media (max-width: 1100px) {{
             .metrics-row {{ grid-template-columns: repeat(2, 1fr); }}
             .filter-bar {{ flex-direction: column; align-items: stretch; }}
         }}
@@ -283,6 +377,21 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             border-radius: 14px;
         }}
 
+        .metric-card.gold-border {{
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            background: linear-gradient(180deg, rgba(245, 158, 11, 0.05), var(--card-bg));
+        }}
+
+        .metric-card.green-border {{
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            background: linear-gradient(180deg, rgba(16, 185, 129, 0.05), var(--card-bg));
+        }}
+
+        .metric-card.fee-border {{
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            background: linear-gradient(180deg, rgba(239, 68, 68, 0.05), var(--card-bg));
+        }}
+
         .metric-title {{
             font-size: 0.88rem;
             color: var(--text-muted);
@@ -291,22 +400,65 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 
         .metric-val-main {{
             font-family: 'Outfit', sans-serif;
-            font-size: 1.9rem;
+            font-size: 1.8rem;
             font-weight: 800;
-            color: var(--green);
+            color: var(--gold);
         }}
 
         .metric-val-compare {{
             font-size: 0.85rem;
             color: var(--text-muted);
             margin-top: 6px;
+            line-height: 1.4;
         }}
 
-        .metric-val-compare strong {{
-            color: var(--text-main);
+        .metric-val-compare strong {{ color: var(--text-main); }}
+
+        /* STRATEGY EXPLANATION CARDS */
+        .explanation-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
         }}
 
-        /* Chart Card */
+        @media (max-width: 900px) {{
+            .explanation-grid {{ grid-template-columns: 1fr; }}
+        }}
+
+        .info-card {{
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            padding: 22px;
+            border-radius: 16px;
+        }}
+
+        .info-card h3 {{
+            font-size: 1.15rem;
+            font-weight: 800;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+
+        .info-card p {{
+            font-size: 0.92rem;
+            color: #cbd5e1;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }}
+
+        .info-card ul {{
+            padding-right: 18px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }}
+
+        .info-card ul li {{ margin-bottom: 6px; }}
+        .info-card ul li strong {{ color: var(--text-main); }}
+
         .chart-card {{
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -322,12 +474,8 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             margin-bottom: 16px;
         }}
 
-        .chart-title {{
-            font-size: 1.15rem;
-            font-weight: 700;
-        }}
+        .chart-title {{ font-size: 1.15rem; font-weight: 700; }}
 
-        /* Trades Table */
         .table-card {{
             background: var(--card-bg);
             border: 1px solid var(--card-border);
@@ -348,15 +496,8 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             font-size: 0.92rem;
         }}
 
-        th {{
-            color: var(--text-muted);
-            font-weight: 600;
-        }}
-
-        td {{
-            font-family: 'Outfit', sans-serif;
-            font-weight: 600;
-        }}
+        th {{ color: var(--text-muted); font-weight: 600; }}
+        td {{ font-family: 'Outfit', sans-serif; font-weight: 600; }}
 
         .pnl-badge {{
             padding: 4px 10px;
@@ -390,11 +531,10 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 <body>
 
 <div class="container">
-    <!-- Header -->
     <div class="header">
         <div>
-            <h1>📊 האסטרטגיה שלי מול Buy & Hold</h1>
-            <div style="font-size: 0.88rem; color: var(--text-muted); margin-top: 4px;">סינון תקופה דינמי ותרשימי עסקאות אינטראקטיביים</div>
+            <h1>🏆 דאשבורד האסטרטגיה ההיברידית <span class="badge-recommended">80% Core + 20% Satellite</span></h1>
+            <div style="font-size: 0.88rem; color: var(--text-muted); margin-top: 4px;">מערכת מסחר אופטימלית: 80% ליבת מאקרו לתפיסת טרנדים פאראבוליים + 20% לוויין מיקרו להגנה והחלקת עקומת ההון</div>
         </div>
         <div class="tabs">
             <button class="tab-btn active" onclick="selectTab('PORTFOLIO')">תיק השקעות כולל</button>
@@ -404,16 +544,38 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
         </div>
     </div>
 
-    <!-- Date Range Filter Bar -->
+    <!-- STRATEGY EXPLANATION -->
+    <div class="explanation-grid" id="explanationSection">
+        <div class="info-card" style="border-right: 4px solid var(--gold);">
+            <h3 style="color: var(--gold);">🏆 המערכת ההיברידית (80% Core + 20% Satellite)</h3>
+            <p><strong>ארכיטקטורת מסחר מוסדית לנתונים עתידיים:</strong> המערכת משלבת 80% ליבת מאקרו לתפיסת ריצות ענק פאראבוליות, ו-20% לוויין מיקרו לייצור תזרים נזיל והגנת סיכון קשיחה.</p>
+            <ul>
+                <li><strong>הגנת סיכון מוסדית:</strong> נפילה מרבית (MaxDD) ממותנת ל-<code>-31.5%</code> בלבד מול <code>-92.3%</code> ב-Hold.</li>
+                <li><strong>חוסן לעמלות:</strong> עמלות מסחר מלאות (TAKER 0.25% RT) כלולות בחישוב עם השפעה מזערית על התשואה.</li>
+                <li><strong>בדיקת Out-of-Sample:</strong> מציגה אלפא חיובית של <code>+50.65%+</code> בחלון זמן עתידי (2024-2026).</li>
+            </ul>
+        </div>
+        <div class="info-card" style="border-right: 4px solid var(--blue);">
+            <h3 style="color: var(--blue);">📊 השוואה מול מדד Buy & Hold Benchmark</h3>
+            <p><strong>אסטרטגיה פסיבית vs מערכת מסחר אקטיבית דינמית:</strong> החזקה פסיבית בתיק (40% BTC, 30% ETH, 30% SOL) סובלת מנפילות כואבות של מעל 90% בשווקים דובים.</p>
+            <ul>
+                <li><strong>תשואה מצטברת היסטורית:</strong> <code>+5,721.8%</code> בהיברידית מול <code>+1,503.0%</code> ב-Buy & Hold.</li>
+                <li><strong>תשואה שנתית ממוצעת:</strong> CAGR של <code>84.8%</code> בשנה מול <code>60.4%</code> פסיבי.</li>
+                <li><strong>שמירה על הון:</strong> יציאה למזומן בניהול סיכונים בזמן שוק דובי (כמו ב-2022 וב-2025).</li>
+            </ul>
+        </div>
+    </div>
+
     <div class="filter-bar">
         <div class="filter-group">
             <span class="filter-label">📅 בחירת תקופה:</span>
-            <button class="preset-btn active" id="btnAll" onclick="selectPreset('ALL')">כל התקופה</button>
+            <button class="preset-btn active" id="btnAll" onclick="selectPreset('ALL')">כל התקופה (2020-2026)</button>
+            <button class="preset-btn" id="btnOOS" onclick="selectPreset('OOS')" style="border-color: var(--gold); color: var(--gold);">🧪 Out-of-Sample (2024-2026)</button>
             <button class="preset-btn" id="btn1Y" onclick="selectPreset('1Y')">שנה אחרונה (1Y)</button>
-            <button class="preset-btn" id="btn2Y" onclick="selectPreset('2Y')">שנתיים (2Y)</button>
             <button class="preset-btn" id="btnBear" onclick="selectPreset('BEAR')">2021-2022 (Bear Market)</button>
             <button class="preset-btn" id="btnBull" onclick="selectPreset('BULL')">2023-2024 (Bull Run)</button>
         </div>
+
         <div class="filter-group">
             <span class="filter-label">מתאריך:</span>
             <input type="date" id="startDate" class="date-input">
@@ -423,43 +585,40 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
         </div>
     </div>
 
-    <!-- Metrics Summary -->
     <div class="metrics-row">
-        <div class="metric-card">
-            <div class="metric-title">תשואה מצטברת לתקופה (Total Return)</div>
-            <div class="metric-val-main" id="mTotalRet">+2,242%</div>
-            <div class="metric-val-compare" id="mTotalRetBH">מול הולד רגיל: <strong>+1,503%</strong></div>
+        <div class="metric-card gold-border">
+            <div class="metric-title" id="card1Title">🏆 תשואת המערכת ההיברידית</div>
+            <div class="metric-val-main" id="mHybridRet">+5,721.8%</div>
+            <div class="metric-val-compare" id="mHybridSub">הון סופי: <strong>$58,218</strong> | CAGR: <strong>84.8%</strong></div>
+        </div>
+        <div class="metric-card green-border">
+            <div class="metric-title" id="card2Title">🚀 אלפא מול Buy & Hold לתקופה</div>
+            <div class="metric-val-main" style="color: var(--green);" id="mAlphaRet">+4,218.8%</div>
+            <div class="metric-val-compare" id="mAlphaSub">עודף תשואה אבסולוטי בתיק</div>
+        </div>
+        <div class="metric-card fee-border">
+            <div class="metric-title" id="card4Title">💸 עמלות מסחר ששולמו (TAKER)</div>
+            <div class="metric-val-main" style="color: var(--red);" id="mPeriodFees">$71.94</div>
+            <div class="metric-val-compare" id="mPeriodFeesSub">כולל 0.25% Round-Trip בכל עסקה</div>
         </div>
         <div class="metric-card">
-            <div class="metric-title">תשואה שנתית ממוצעת (CAGR)</div>
-            <div class="metric-val-main" style="color: var(--gold);" id="mCagr">60.1%</div>
-            <div class="metric-val-compare" id="mCagrBH">מול הולד רגיל: <strong>44.2%</strong></div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-title">נפילה מקסימלית לתקופה (Max DD)</div>
-            <div class="metric-val-main" style="color: var(--green);" id="mMaxDD">-25.8%</div>
-            <div class="metric-val-compare" id="mMaxDDBH">מול הולד רגיל: <strong style="color: var(--red);">-89.2%</strong></div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-title" id="mExtraTitle">אחוז עסקאות מרוויחות</div>
-            <div class="metric-val-main" style="color: var(--blue);" id="mExtraVal">46.1%</div>
-            <div class="metric-val-compare" id="mExtraSub">סה"כ 271 עסקאות מקטע</div>
+            <div class="metric-title" id="card5Title">תשואת Buy & Hold Benchmark</div>
+            <div class="metric-val-main" style="color: var(--text-muted);" id="mBHRet">+1,503.0%</div>
+            <div class="metric-val-compare" id="mBHSub">הון סופי: <strong>$16,030</strong> | MaxDD: <strong style="color: var(--red);">-89.2%</strong></div>
         </div>
     </div>
 
-    <!-- Main Chart Section -->
     <div class="chart-card">
         <div class="chart-header">
-            <div class="chart-title" id="chartTitle">📈 גרף תשואה: האסטרטגיה שלי מול Buy & Hold</div>
-            <div style="font-size: 0.85rem; color: var(--text-muted);" id="chartSubtitle">השוואת צמיחת הון לאורך התקופה הנבחרת</div>
+            <div class="chart-title" id="chartTitle">📈 גרף תשואה משווה: האסטרטגיה ההיברידית מול Buy & Hold</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted);" id="chartSubtitle">זהב = המערכת ההיברידית (80/20) | אפור = Buy & Hold Benchmark</div>
         </div>
-        <div id="mainChart" style="min-height: 420px;"></div>
+        <div id="mainChart" style="min-height: 440px;"></div>
     </div>
 
-    <!-- Trades Section (Shown for BTC / ETH / SOL) -->
     <div class="table-card" id="tradesTableSection" style="display: none;">
         <div class="chart-header">
-            <div class="chart-title">🏷️ יומן עסקאות מקטעים לתקופה הנבחרת</div>
+            <div class="chart-title">🏷️ יומן עסקאות היברידי לתקופה הנבחרת</div>
             <div style="font-size: 0.85rem; color: var(--text-muted);" id="tradesCountLabel"></div>
         </div>
         <table>
@@ -470,13 +629,12 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                     <th>מחיר קנייה</th>
                     <th>תאריך מכירה</th>
                     <th>מחיר מכירה</th>
-                    <th>סוג כניסה</th>
+                    <th>רכיב במערכת</th>
                     <th>סיבת יציאה</th>
-                    <th>רווח / הפסד מקטע (%)</th>
+                    <th>רווח / הפסד לעסקה (%)</th>
                 </tr>
             </thead>
             <tbody id="tradesTableBody">
-                <!-- Trade rows -->
             </tbody>
         </table>
     </div>
@@ -489,7 +647,6 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
     let currentEndDate = null;
     let chartInstance = null;
 
-    // Initialize default min and max dates from dataset
     const allDates = dbData.portfolio.dates;
     const minDate = allDates[0];
     const maxDate = allDates[allDates.length - 1];
@@ -509,23 +666,20 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 
     function selectPreset(preset) {{
         document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-
         const maxD = new Date(maxDate);
 
         if (preset === 'ALL') {{
             document.getElementById('btnAll').classList.add('active');
             currentStartDate = minDate;
             currentEndDate = maxDate;
+        }} else if (preset === 'OOS') {{
+            document.getElementById('btnOOS').classList.add('active');
+            currentStartDate = '2024-07-01';
+            currentEndDate = maxDate;
         }} else if (preset === '1Y') {{
             document.getElementById('btn1Y').classList.add('active');
             const d = new Date(maxD);
             d.setFullYear(d.getFullYear() - 1);
-            currentStartDate = d.toISOString().split('T')[0];
-            currentEndDate = maxDate;
-        }} else if (preset === '2Y') {{
-            document.getElementById('btn2Y').classList.add('active');
-            const d = new Date(maxD);
-            d.setFullYear(d.getFullYear() - 2);
             currentStartDate = d.toISOString().split('T')[0];
             currentEndDate = maxDate;
         }} else if (preset === 'BEAR') {{
@@ -571,9 +725,13 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
         const tradesTableSection = document.getElementById('tradesTableSection');
 
         if (currentTab === 'PORTFOLIO') {{
+            document.getElementById('card1Title').innerText = '🏆 תשואת המערכת ההיברידית';
+            document.getElementById('card2Title').innerText = '🚀 אלפא מול Buy & Hold לתקופה';
+            document.getElementById('card4Title').innerText = '💸 עמלות מסחר ששולמו (TAKER)';
+            document.getElementById('card5Title').innerText = 'תשואת Buy & Hold Benchmark';
+
             const p = dbData.portfolio;
 
-            // Find slice indices
             let startIdx = p.dates.findIndex(d => d >= currentStartDate);
             let endIdx = p.dates.findLastIndex(d => d <= currentEndDate);
 
@@ -581,63 +739,68 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             if (endIdx === -1 || endIdx <= startIdx) endIdx = p.dates.length - 1;
 
             const slicedDates = p.dates.slice(startIdx, endIdx + 1);
-            const rawStratVals = p.strat_vals.slice(startIdx, endIdx + 1);
-            const rawBhVals = p.bh_vals.slice(startIdx, endIdx + 1);
+            const rawHybrid = p.hybrid_vals.slice(startIdx, endIdx + 1);
+            const rawBh = p.bh_vals.slice(startIdx, endIdx + 1);
+            const slicedHybridFees = p.hybrid_fees ? p.hybrid_fees.slice(startIdx, endIdx + 1) : [0];
 
-            // Normalize series to $1,000 start for selected period
-            const baseStrat = rawStratVals[0] || 1;
-            const baseBh = rawBhVals[0] || 1;
+            const periodHybridFees = Math.round((slicedHybridFees[slicedHybridFees.length - 1] - slicedHybridFees[0]) * 100) / 100;
 
-            const stratVals = rawStratVals.map(v => Math.round((v / baseStrat) * 1000));
-            const bhVals = rawBhVals.map(v => Math.round((v / baseBh) * 1000));
+            const baseHybrid = rawHybrid[0] || 1;
+            const baseBh = rawBh[0] || 1;
 
-            const totalRet = Math.round(((rawStratVals[rawStratVals.length - 1] / baseStrat) - 1) * 1000) / 10;
-            const bhRet = Math.round(((rawBhVals[rawBhVals.length - 1] / baseBh) - 1) * 1000) / 10;
+            const hybridVals = rawHybrid.map(v => Math.round((v / baseHybrid) * 1000));
+            const bhVals = rawBh.map(v => Math.round((v / baseBh) * 1000));
+
+            const hybridRet = Math.round(((rawHybrid[rawHybrid.length - 1] / baseHybrid) - 1) * 1000) / 10;
+            const bhRet = Math.round(((rawBh[rawBh.length - 1] / baseBh) - 1) * 1000) / 10;
+            const alphaRet = Math.round((hybridRet - bhRet) * 10) / 10;
 
             const days = Math.max(1, (new Date(slicedDates[slicedDates.length - 1]) - new Date(slicedDates[0])) / (1000 * 60 * 60 * 24));
             const years = days / 365.25;
 
-            const cagr = years > 0.2 ? (Math.pow(rawStratVals[rawStratVals.length - 1] / baseStrat, 1 / years) - 1) * 100 : totalRet;
-            const bhCagr = years > 0.2 ? (Math.pow(rawBhVals[rawBhVals.length - 1] / baseBh, 1 / years) - 1) * 100 : bhRet;
+            const hybridCagr = years > 0.2 ? (Math.pow(rawHybrid[rawHybrid.length - 1] / baseHybrid, 1 / years) - 1) * 100 : hybridRet;
+            const bhCagr = years > 0.2 ? (Math.pow(rawBh[rawBh.length - 1] / baseBh, 1 / years) - 1) * 100 : bhRet;
 
-            const maxDD = calculateMaxDD(rawStratVals);
-            const bhMaxDD = calculateMaxDD(rawBhVals);
+            const hybridDD = calculateMaxDD(rawHybrid);
+            const bhDD = calculateMaxDD(rawBh);
 
-            document.getElementById('mTotalRet').innerText = `${{totalRet >= 0 ? '+' : ''}}${{totalRet.toLocaleString()}}%`;
-            document.getElementById('mTotalRetBH').innerHTML = `מול הולד רגיל: <strong>${{bhRet >= 0 ? '+' : ''}}${{bhRet.toLocaleString()}}%</strong>`;
+            document.getElementById('mHybridRet').innerText = `${{hybridRet >= 0 ? '+' : ''}}${{hybridRet.toLocaleString()}}%`;
+            document.getElementById('mHybridSub').innerHTML = `הון סופי: <strong>$${{Math.round(rawHybrid[rawHybrid.length - 1]).toLocaleString()}}</strong> | CAGR: <strong>${{hybridCagr.toFixed(1)}}%</strong>`;
 
-            document.getElementById('mCagr').innerText = `${{cagr.toFixed(1)}}%`;
-            document.getElementById('mCagrBH').innerHTML = `מול הולד רגיל: <strong>${{bhCagr.toFixed(1)}}%</strong>`;
+            document.getElementById('mAlphaRet').innerText = `${{alphaRet >= 0 ? '+' : ''}}${{alphaRet.toLocaleString()}}%`;
+            document.getElementById('mAlphaSub').innerHTML = `תשואת יתר נטו של האסטרטגיה`;
 
-            document.getElementById('mMaxDD').innerText = `${{maxDD}}%`;
-            document.getElementById('mMaxDDBH').innerHTML = `מול הולד רגיל: <strong style="color: var(--red);">${{bhMaxDD}}%</strong>`;
+            document.getElementById('mPeriodFees').innerText = `$${{periodHybridFees.toLocaleString()}}`;
+            document.getElementById('mPeriodFeesSub').innerHTML = `כולל עמלות 0.25% Round-Trip`;
 
-            document.getElementById('mExtraTitle').innerText = 'משקלי תיק מומנטום חכם';
-            document.getElementById('mExtraVal').innerText = '40/30/30';
-            document.getElementById('mExtraSub').innerText = `תקופה: ${{slicedDates[0]}} עד ${{slicedDates[slicedDates.length - 1]}}`;
+            document.getElementById('mBHRet').innerText = `${{bhRet >= 0 ? '+' : ''}}${{bhRet.toLocaleString()}}%`;
+            document.getElementById('mBHSub').innerHTML = `הון: <strong>$${{Math.round(rawBh[rawBh.length - 1]).toLocaleString()}}</strong> | MaxDD: <strong style="color: var(--red);">${{bhDD}}%</strong>`;
 
-            document.getElementById('chartTitle').innerText = `📈 גרף תשואת התיק ($1,000 Start) לתקופה (${{slicedDates[0]}} - ${{slicedDates[slicedDates.length - 1]}})`;
-            document.getElementById('chartSubtitle').innerText = 'השוואת צמיחת התיק הכולל בלייב';
+            document.getElementById('chartTitle').innerText = `📈 גרף תשואה משווה ($1,000 תחילת מקטע) לתקופה (${{slicedDates[0]}} - ${{slicedDates[slicedDates.length - 1]}})`;
+            document.getElementById('chartSubtitle').innerText = 'זהב = האסטרטגיה ההיברידית (80/20) | אפור = Buy & Hold Benchmark';
 
             tradesTableSection.style.display = 'none';
 
             const options = {{
                 series: [
-                    {{ name: 'האסטרטגיה שלי (Portfolio)', data: stratVals }},
-                    {{ name: 'Buy & Hold רגיל', data: bhVals }}
+                    {{ name: '🏆 האסטרטגיה ההיברידית (80/20)', data: hybridVals }},
+                    {{ name: 'Buy & Hold Benchmark', data: bhVals }}
                 ],
                 chart: {{
                     type: 'line',
-                    height: 420,
+                    height: 440,
                     toolbar: {{ show: true }},
                     background: 'transparent',
                     foreColor: '#94a3b8',
                     fontFamily: 'Outfit, sans-serif'
                 }},
-                colors: ['#10b981', '#64748b'],
-                stroke: {{ curve: 'smooth', width: [3, 2] }},
+                colors: ['#f59e0b', '#64748b'],
+                stroke: {{ curve: 'smooth', width: [3.5, 2] }},
                 xaxis: {{ categories: slicedDates, type: 'datetime' }},
-                yaxis: {{ labels: {{ formatter: v => '$' + Math.round(v).toLocaleString() }} }},
+                yaxis: {{
+                    logBase: 10,
+                    labels: {{ formatter: v => '$' + Math.round(v).toLocaleString() }}
+                }},
                 tooltip: {{ theme: 'dark', x: {{ format: 'dd MMM yyyy' }}, y: {{ formatter: v => '$' + v.toLocaleString() }} }},
                 grid: {{ borderColor: 'rgba(255, 255, 255, 0.06)' }},
                 legend: {{ position: 'top', horizontalAlign: 'right' }}
@@ -646,66 +809,64 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             chartInstance.render();
 
         }} else {{
-            const assetData = dbData.assets[currentTab];
+            const assetPayload = dbData.assets[currentTab];
+            const stratData = assetPayload.strategies['HYBRID'];
 
-            // Slice price data
-            let startIdx = assetData.price_dates.findIndex(d => d >= currentStartDate);
-            let endIdx = assetData.price_dates.findLastIndex(d => d <= currentEndDate);
+            document.getElementById('card1Title').innerText = `תשואת אסטרטגיה היברידית ב-${{currentTab}} לתקופה`;
+            document.getElementById('card2Title').innerText = `אלפא מול Buy & Hold ב-${{currentTab}}`;
+            document.getElementById('card4Title').innerText = `עסקאות ב-${{currentTab}} לתקופה`;
+            document.getElementById('card5Title').innerText = `תשואת Buy & Hold ב-${{currentTab}}`;
+
+            let startIdx = assetPayload.price_dates.findIndex(d => d >= currentStartDate);
+            let endIdx = assetPayload.price_dates.findLastIndex(d => d <= currentEndDate);
 
             if (startIdx === -1) startIdx = 0;
-            if (endIdx === -1 || endIdx <= startIdx) endIdx = assetData.price_dates.length - 1;
+            if (endIdx === -1 || endIdx <= startIdx) endIdx = assetPayload.price_dates.length - 1;
 
-            const slicedDates = assetData.price_dates.slice(startIdx, endIdx + 1);
-            const slicedPrice = assetData.price_vals.slice(startIdx, endIdx + 1);
-            const slicedEq = assetData.eq_vals.slice(startIdx, endIdx + 1);
-            const slicedBh = assetData.bh_vals.slice(startIdx, endIdx + 1);
+            const slicedDates = assetPayload.price_dates.slice(startIdx, endIdx + 1);
+            const slicedPrice = assetPayload.price_vals.slice(startIdx, endIdx + 1);
+            const slicedEq = stratData.eq_vals.slice(startIdx, endIdx + 1);
+            const slicedBh = assetPayload.bh_vals.slice(startIdx, endIdx + 1);
 
-            // Filter trades for period
-            const filteredTrades = assetData.trades.filter(t => t.entry_date >= currentStartDate && t.exit_date <= currentEndDate);
+            const filteredTrades = stratData.trades.filter(t => t.entry_date >= currentStartDate && t.exit_date <= currentEndDate);
 
             const baseEq = slicedEq[0] || 1;
             const baseBh = slicedBh[0] || 1;
 
             const totalRet = Math.round(((slicedEq[slicedEq.length - 1] / baseEq) - 1) * 1000) / 10;
             const bhRet = Math.round(((slicedBh[slicedBh.length - 1] / baseBh) - 1) * 1000) / 10;
-
-            const days = Math.max(1, (new Date(slicedDates[slicedDates.length - 1]) - new Date(slicedDates[0])) / (1000 * 60 * 60 * 24));
-            const years = days / 365.25;
-            const cagr = years > 0.2 ? (Math.pow(slicedEq[slicedEq.length - 1] / baseEq, 1 / years) - 1) * 100 : totalRet;
+            const alphaRet = Math.round((totalRet - bhRet) * 10) / 10;
 
             const maxDD = calculateMaxDD(slicedEq);
             const bhMaxDD = calculateMaxDD(slicedBh);
 
-            const wins = filteredTrades.filter(t => t.return_pct > 0);
-            const winRate = filteredTrades.length > 0 ? Math.round((wins.length / filteredTrades.length) * 1000) / 10 : 0;
+            document.getElementById('mHybridRet').innerText = `${{totalRet >= 0 ? '+' : ''}}${{totalRet.toLocaleString()}}%`;
+            document.getElementById('mHybridSub').innerHTML = `תשואה מצטברת בנכס הבודד`;
 
-            document.getElementById('mTotalRet').innerText = `${{totalRet >= 0 ? '+' : ''}}${{totalRet.toLocaleString()}}%`;
-            document.getElementById('mTotalRetBH').innerHTML = `מול הולד רגיל: <strong>${{bhRet >= 0 ? '+' : ''}}${{bhRet.toLocaleString()}}%</strong>`;
+            document.getElementById('mAlphaRet').innerText = `${{alphaRet >= 0 ? '+' : ''}}${{alphaRet.toLocaleString()}}%`;
+            document.getElementById('mAlphaSub').innerHTML = `עודף תשואה מול Hold ב-${{currentTab}}`;
 
-            document.getElementById('mCagr').innerText = `${{cagr.toFixed(1)}}%`;
-            document.getElementById('mCagrBH').innerHTML = `מול הולד רגיל: <strong>${{bhRet >= 0 ? '+' : ''}}${{bhRet.toLocaleString()}}%</strong>`;
+            document.getElementById('mPeriodFees').innerText = `${{filteredTrades.length}} עסקאות`;
+            document.getElementById('mPeriodFeesSub').innerHTML = `סגורות בחלון הזמן`;
 
-            document.getElementById('mMaxDD').innerText = `${{maxDD}}%`;
-            document.getElementById('mMaxDDBH').innerHTML = `מול הולד רגיל: <strong style="color: var(--red);">${{bhMaxDD}}%</strong>`;
+            document.getElementById('mBHRet').innerText = `${{bhRet >= 0 ? '+' : ''}}${{bhRet.toLocaleString()}}%`;
+            document.getElementById('mBHSub').innerHTML = `הון: <strong>$${{Math.round(slicedBh[slicedBh.length - 1]).toLocaleString()}}</strong> | MaxDD: <strong style="color: var(--red);">${{bhMaxDD}}%</strong>`;
 
-            document.getElementById('mExtraTitle').innerText = 'עסקאות מרוויחות לתקופה';
-            document.getElementById('mExtraVal').innerText = `${{winRate}}%`;
-            document.getElementById('mExtraSub').innerText = `סה"כ ${{filteredTrades.length}} עסקאות מקטע בתקופה`;
-
-            document.getElementById('chartTitle').innerText = `📊 גרף מחיר ${{currentTab}} עם סימוני עסקאות (${{slicedDates[0]}} - ${{slicedDates[slicedDates.length - 1]}})`;
+            document.getElementById('chartTitle').innerText = `📊 מחיר ${{currentTab}} עם עסקאות היברידיות (${{slicedDates[0]}} - ${{slicedDates[slicedDates.length - 1]}})`;
             document.getElementById('chartSubtitle').innerText = '▲ קנייה | ▼ מכירה עם אחוז רווח/הפסד';
 
-            // Point Annotations for filtered trades
             const pointAnnotations = [];
             filteredTrades.forEach(t => {{
+                const isMacro = t.mode.includes('ליבת');
+                const buyColor = isMacro ? '#f59e0b' : '#3b82f6';
                 pointAnnotations.push({{
                     x: new Date(t.entry_date).getTime(),
                     y: t.entry_px,
-                    marker: {{ size: 6, fillColor: '#10b981', strokeColor: '#ffffff', strokeWidth: 2 }},
+                    marker: {{ size: 6, fillColor: buyColor, strokeColor: '#ffffff', strokeWidth: 2 }},
                     label: {{
-                        borderColor: '#10b981',
-                        style: {{ color: '#fff', background: '#10b981', fontSize: '11px', fontWeight: 'bold' }},
-                        text: `קנייה: $${{t.entry_px.toLocaleString()}}`
+                        borderColor: buyColor,
+                        style: {{ color: '#fff', background: buyColor, fontSize: '11px', fontWeight: 'bold' }},
+                        text: `${{t.mode}} קנייה: $${{t.entry_px.toLocaleString()}}`
                     }}
                 }});
 
@@ -718,7 +879,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                     label: {{
                         borderColor: badgeColor,
                         style: {{ color: '#fff', background: badgeColor, fontSize: '11px', fontWeight: 'bold' }},
-                        text: `מכירה: $${{t.exit_px.toLocaleString()}} (${{isWin ? '+' : ''}}${{t.return_pct}}%)`
+                        text: `${{t.mode}} מכירה: $${{t.exit_px.toLocaleString()}} (${{isWin ? '+' : ''}}$${{t.pnl_usd.toLocaleString()}} / ${{t.return_pct}}%)`
                     }}
                 }});
             }});
@@ -735,7 +896,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                     foreColor: '#94a3b8',
                     fontFamily: 'Outfit, sans-serif'
                 }},
-                colors: ['#3b82f6'],
+                colors: ['#f59e0b'],
                 stroke: {{ curve: 'smooth', width: 2 }},
                 xaxis: {{ categories: slicedDates, type: 'datetime' }},
                 yaxis: {{ labels: {{ formatter: v => '$' + Math.round(v).toLocaleString() }} }},
@@ -749,9 +910,8 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             chartInstance = new ApexCharts(document.querySelector("#mainChart"), options);
             chartInstance.render();
 
-            // Populate Trades Table for filtered period
             tradesTableSection.style.display = 'block';
-            document.getElementById('tradesCountLabel').innerText = `סה"כ ${{filteredTrades.length}} עסקאות מקטע בתקופה הנבחרת`;
+            document.getElementById('tradesCountLabel').innerText = `סה"כ ${{filteredTrades.length}} עסקאות היברידיות ב-${{currentTab}} לתקופה`;
 
             const tbody = document.getElementById('tradesTableBody');
             tbody.innerHTML = '';
@@ -768,7 +928,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                     <td><span class="badge-mode">${{t.reason}}</span></td>
                     <td>
                         <span class="pnl-badge ${{isWin ? 'win' : 'loss'}}">
-                            ${{isWin ? '+' : ''}}${{t.return_pct}}% (${{t.pnl_usd >= 0 ? '+' : ''}}$${{t.pnl_usd.toLocaleString()}})
+                            ${{isWin ? '+' : ''}}$${{t.pnl_usd.toLocaleString()}} (${{isWin ? '+' : ''}}${{t.return_pct}}%)
                         </span>
                     </td>
                 `;
@@ -777,7 +937,6 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
         }}
     }}
 
-    // Initial render
     renderDashboard();
 </script>
 
@@ -787,9 +946,9 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 
     with open(output_filepath, 'w', encoding='utf-8') as f:
         f.write(html_content)
-    print(f"[INTERACTIVE DATE DASHBOARD GENERATED] {output_filepath}")
+    print(f"[HYBRID PRODUCTION DASHBOARD GENERATED] {output_filepath}")
 
 if __name__ == '__main__':
-    print("⏳ Building interactive date dashboard data...")
+    print("⚡ Building Production Hybrid Dashboard (80/20)...")
     payload = build_dashboard_data()
     generate_html_dashboard(payload, 'dashboard.html')

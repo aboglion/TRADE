@@ -1,72 +1,66 @@
 """
-Strategy Execution — Production Portfolio Runner
-=================================================
-Best performing variant across all tests:
-  • Per-asset optimized long-only (no shorts)
-  • BTC: R3 (reentry_ema20 + strong_wide_stop)
-  • ETH: R2 (strong_wide_stop)
-  • SOL: BASE (pyramiding enabled)
-
-Portfolio (50/30/20) results:
-  $1,000 → $23,422  (+2,242%)
-  CAGR: 60.1%  |  MaxDD: -26.6%  |  Sharpe: 1.46
+Production Hybrid Core-Satellite (80/20) Portfolio Runner
+==========================================================
+Recommended Production System:
+  • 80% Core Capital ($800)  -> Regime-Aware Macro Engine (v14 / V_BEST)
+  • 20% Satellite Capital ($200) -> Calibrated Micro Engine
+  • Full TAKER_STANDARD fee included (0.125% per side = 0.25% Round-Trip)
 
 Usage:
-    from main import run_best, run_portfolio
-    portfolio_equity = run_portfolio()
+    from main import run_portfolio
+    hybrid_eq = run_portfolio()
 """
-from engine import (load_real_data, add_indicators, run_backtest, make_cfg,
-                    TRAIL_OVERRIDES_V14)
+
+import sys
+import pandas as pd
+import numpy as np
+import engine
+from run_hybrid_portfolio import run_hybrid_engine, run_macro_with_fee
 
 # Per-asset best configurations (validated for hyper-trend + regime override)
 BEST_CFGS = {
-    'BTC': make_cfg(adaptive_trail=False, pyramid_enabled=True,
-                    reentry_ema20=True, strong_wide_stop=True, trail_max_strong=12.0, strong_alloc=0.98),
-    'ETH': make_cfg(adaptive_trail=False, pyramid_enabled=True,
-                    strong_wide_stop=True, trail_max_strong=14.0, strong_alloc=0.98, tp1_enabled=False),
-    'SOL': make_cfg(adaptive_trail=False, pyramid_enabled=True, pyramid_max_adds=2,
-                    pyramid_add_fractions=(0.5, 0.3), strong_wide_stop=True, trail_max_strong=16.0,
-                    strong_alloc=0.98, tp1_enabled=False),
+    'BTC': engine.make_cfg(adaptive_trail=False, pyramid_enabled=True,
+                           reentry_ema20=True, strong_wide_stop=True, trail_max_strong=12.0, strong_alloc=0.98),
+    'ETH': engine.make_cfg(adaptive_trail=False, pyramid_enabled=True,
+                           strong_wide_stop=True, trail_max_strong=14.0, strong_alloc=0.98, tp1_enabled=False),
+    'SOL': engine.make_cfg(adaptive_trail=False, pyramid_enabled=True, pyramid_max_adds=2,
+                           pyramid_add_fractions=(0.5, 0.3), strong_wide_stop=True, trail_max_strong=16.0,
+                           strong_alloc=0.98, tp1_enabled=False),
 }
 
 def run_best(filepath, capital=1000.0):
-    """Run V_BEST on a single asset file."""
-    df = add_indicators(load_real_data(filepath))
-    asset = filepath.split('_')[0].upper()
-    cfg = BEST_CFGS.get(asset, BEST_CFGS['BTC'])
-    trail = (7.5, 5.0) if asset == 'SOL' else TRAIL_OVERRIDES_V14.get(asset)
-    return run_backtest(df, cfg, capital, trail)
+    """Run V_BEST on a single asset file (Macro Core component)."""
+    df = engine.add_indicators(engine.load_real_data(filepath))
+    asset_name = filepath.split('/')[-1].split('_')[0].upper()
+    cfg = BEST_CFGS.get(asset_name, BEST_CFGS['BTC'])
+    trail = (7.5, 5.0) if asset_name == 'SOL' else engine.TRAIL_OVERRIDES_V14.get(asset_name)
+    return engine.run_backtest(df, cfg, capital, trail)
 
 def run_portfolio(capital=1000.0, weights=None):
-    """Run V_BEST portfolio (40/30/30 BTC/ETH/SOL momentum-weighted)."""
-    import pandas as pd
-    if weights is None:
-        weights = {'BTC': 0.40, 'ETH': 0.30, 'SOL': 0.30}
-    files = {'BTC': 'BTC_USD_4h.csv',
-             'ETH': 'ETH_USD_4h.csv',
-             'SOL': 'SOL_USD_4h.csv'}
-    eqs = {}
-    for name, f in files.items():
-        _, eq, _ = run_best(f, capital * weights[name])
-        eqs[name] = eq.rename(name)
-    comb = pd.concat(eqs.values(), axis=1).ffill()
-    for n in weights:
-        comb[n] = comb[n].fillna(capital * weights[n])
-    return comb.sum(axis=1)
+    """Production entry point: Runs the Hybrid 80/20 portfolio with full fees."""
+    hybrid_eq, macro_part, micro_part = run_hybrid_engine(initial_capital=capital, weights=weights)
+    return hybrid_eq
 
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        tr, eq, bh = run_best(sys.argv[1])
-        print(f"Final: ${eq.iloc[-1]:,.0f}  Return: {(eq.iloc[-1]/eq.iloc[0]-1)*100:.1f}%")
-        print(f"MaxDD: {((eq-eq.cummax())/eq.cummax()).min()*100:.1f}%")
-    else:
-        port = run_portfolio()
-        print(f"Portfolio: ${port.iloc[-1]:,.0f}  ({(port.iloc[-1]/1000-1)*100:.1f}%)")
-        try:
-            from generate_dashboard import build_dashboard_data, generate_html_dashboard
-            print("⏳ Generating interactive dashboard...")
-            payload = build_dashboard_data()
-            generate_html_dashboard(payload, 'dashboard.html')
-        except Exception as e:
-            print(f"Notice: Dashboard generation skipped ({e})")
+    print("=" * 80)
+    print("🏆 RUNNING PRODUCTION HYBRID (80/20) PORTFOLIO STRATEGY")
+    print("=" * 80)
+    
+    port = run_portfolio()
+    cap = 1000.0
+    final_val = port.iloc[-1]
+    ret_pct = (final_val / cap - 1) * 100
+    cummax = port.cummax()
+    max_dd = ((port - cummax) / cummax).min() * 100
+    
+    print(f"Hybrid Portfolio Final Value: ${final_val:,.2f}  (+{ret_pct:,.2f}%)")
+    print(f"Max Drawdown:                 {max_dd:.2f}%")
+    
+    try:
+        from generate_dashboard import build_dashboard_data, generate_html_dashboard
+        print("⏳ Updating interactive dashboard with Hybrid Portfolio data...")
+        payload = build_dashboard_data()
+        generate_html_dashboard(payload, 'dashboard.html')
+        print("✅ Dashboard updated successfully: dashboard.html")
+    except Exception as e:
+        print(f"Notice: Dashboard generation skipped ({e})")
