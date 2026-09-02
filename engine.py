@@ -72,10 +72,10 @@ V14_CFG = dict(
     trend_adx_min=20.0,
 
     # ── exits ──────────────────────────────────────────────
-    trail_base_strong=5.5,      # v13-proven base trails
-    trail_base_trend=3.5,
-    trail_max_strong=9.0,       # adaptive widening cap
-    trail_max_trend=6.0,
+    trail_base_strong=4.5,      # active ATR trail
+    trail_base_trend=3.0,
+    trail_max_strong=6.5,       # adaptive widening cap
+    trail_max_trend=4.5,
     parabolic_r=3.0,            # open-profit R that starts widening
     adaptive_trail=True,        # A/B flag
     ema_exit_strong=True,       # EMA200 catastrophic exit (STRONG)
@@ -141,6 +141,17 @@ def make_cfg(**overrides):
     c = dict(V14_CFG)
     c.update(overrides)
     return c
+
+# Per-asset best configurations (validated for hyper-trend + regime override)
+BEST_CFGS = {
+    'BTC': make_cfg(adaptive_trail=False, pyramid_enabled=True,
+                   reentry_ema20=True, strong_wide_stop=True, trail_max_strong=12.0, strong_alloc=0.98),
+    'ETH': make_cfg(adaptive_trail=False, pyramid_enabled=True,
+                   strong_wide_stop=True, trail_max_strong=14.0, strong_alloc=0.98, tp1_enabled=False),
+    'SOL': make_cfg(adaptive_trail=False, pyramid_enabled=True, pyramid_max_adds=2,
+                   pyramid_add_fractions=(0.5, 0.3), strong_wide_stop=True, trail_max_strong=16.0,
+                   strong_alloc=0.98, tp1_enabled=False),
+}
 
 # Per-asset trail overrides (strong, trend) — matches v13's proven overrides
 TRAIL_OVERRIDES_V14 = {'SOL': (6.5, 4.0)}
@@ -260,7 +271,7 @@ def entry_score(r, cfg):
 # ═══════════════════════════════════════════════════════════
 # 4. BACKTEST ENGINE (adaptive trails + pyramiding + dyn sizing)
 # ═══════════════════════════════════════════════════════════
-def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
+def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None, fee_side=FEE_SLIP):
     """
     Returns (trades_df, equity_series, buyhold_series).
 
@@ -277,7 +288,8 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
     pos_cost = 0.0             # total $ cost basis of open units
     mode = None
     entry_px_avg = 0.0
-    extreme_px = 0.0
+    extreme_high = 0.0
+    extreme_low = float('inf')
     init_risk_px = 0.0         # $ risk per unit at entry (for R multiple)
     invested_total = 0.0
     be_px = 0.0
@@ -297,10 +309,12 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
     def close_trade(i, raw_exit_px, reason):
         nonlocal cash, pos_units, pos_cost, trade_pnl, last_loss_i, loss_streak
         nonlocal last_exit_i, last_mode
-        final_px = raw_exit_px * (1 - FEE_SLIP)
-        # PnL works for both long (pos_units>0) and short (pos_units<0)
-        pnl = pos_units * (final_px - entry_px_avg)
-        cash += pos_units * final_px
+        final_px = raw_exit_px * (1 - fee_side) if pos_units > 0 else raw_exit_px * (1 + fee_side)
+        pnl = pos_units * (final_px - entry_px_avg) if pos_units > 0 else abs(pos_units) * (entry_px_avg - final_px)
+        if pos_units > 0:
+            cash += pos_units * final_px
+        else:
+            cash -= abs(pos_units) * final_px
         trade_pnl += pnl
         if trade_pnl < 0:
             last_loss_i = i
@@ -335,8 +349,6 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
             entered, mode = False, None
 
             if cooldown_ok and r.Regime != 'BEAR':
-                # Multi-factor score is OPTIONAL (entry_score_min > 0);
-                # DIP has its own strict conditions and bypasses it.
                 score_ok = (cfg['entry_score_min'] <= 0 or
                             entry_score(r, cfg) >= cfg['entry_score_min'])
                 rsi_ok = r.RSI < cfg['rsi_overbought_max']
@@ -357,9 +369,6 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
                           and r.Volume > r.VolSMA20 * cfg['dip_vol_mult']):
                         entered, mode = True, 'DIP'
 
-                # ── R1: fast re-entry after stop-out in intact STRONG_BULL ──
-                # (don't wait for a fresh Donchian high — reclaim of EMA20
-                #  with a green candle is enough to get back on the horse)
                 if (not entered and cfg.get('reentry_ema20', False)
                         and last_mode == 'STRONG_BULL_TREND'
                         and last_exit_i > -(10 ** 9)
@@ -368,9 +377,6 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
                         and r.Close > r.EMA20 and r.Close > r.Open):
                     entered, mode = True, 'STRONG_BULL_TREND'
 
-                # ── R4: post-BEAR recovery entry ──
-                # regime just left BEAR -> enter on first close above EMA50
-                # with a green candle; don't wait months for a Donchian high.
                 if (not entered and cfg.get('recovery_entry', False)
                         and last_bear_i > -(10 ** 9)
                         and (i - last_bear_i) <= cfg.get('recovery_window_bars', 90)
@@ -384,11 +390,10 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
                     and r.Regime == 'BEAR'
                     and not np.isnan(r.Donchian30Low)
                     and r.Close <= r.Donchian30Low
-                    and r.Close < r.EMA50           # stricter: below EMA50
+                    and r.Close < r.EMA50
                     and r.Close < r.EMA200
-                    and r.ADX > 25                  # stronger trend filter
+                    and r.ADX > 25
                     and r.Volume > r.VolSMA20 * cfg.get('ls_vol_mult', 1.2)):
-                # check bear episode length
                 bear_start = i
                 while bear_start > WARMUP and df.iloc[bear_start].Regime == 'BEAR':
                     bear_start -= 1
@@ -403,21 +408,21 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
                                  cfg['max_loss_streak_scale'])
                 alloc = float(np.clip(alloc, 0.05, 0.99))
 
-                entry_px = r.Close * (1 + FEE_SLIP)
+                entry_px = r.Close * (1 + fee_side)
                 invested = cash * alloc
                 if mode == 'SHORT':
-                    pos_units = -invested / entry_px   # negative = short
+                    pos_units = -invested / entry_px
                     pos_cost = -invested
-                    cash += invested   # receive cash from short sale
+                    extreme_low = entry_px
                 else:
                     pos_units = invested / entry_px
                     pos_cost = invested
                     cash -= invested
+                    extreme_high = entry_px
                 invested_total = invested
                 entry_px_avg = entry_px
-                extreme_px = entry_px
                 init_risk_px = cfg['init_risk_atr'] * r.ATR
-                be_px = entry_px * (1 + FEE_SLIP) / (1 - FEE_SLIP)
+                be_px = entry_px * (1 + fee_side) / (1 - fee_side)
                 tp1_done, adds_done = False, 0
                 entry_i, trade_pnl = i, 0.0
                 trades.append({'entry_date': df.index[i], 'entry': round(entry_px, 4),
@@ -425,17 +430,14 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
 
         # ══ IN POSITION: manage exits / TP1 / pyramids ══
         else:
-            extreme_px = max(extreme_px, r.High)
-
             # ── SHORT: trail from extreme low, exit on EMA200 reclaim ──
             if mode == 'SHORT':
-                extreme_px = min(extreme_px, r.Low)
-                trail_px = extreme_px + cfg['ls_trail_atr'] * r.ATR
-                # initial stop
+                extreme_low = min(extreme_low, r.Low)
+                trail_px = extreme_low + cfg['ls_trail_atr'] * r.ATR
                 if i == entry_i:
                     trail_px = min(trail_px, entry_px_avg + cfg['ls_short_atr'] * r.ATR)
                 if r.High >= trail_px:
-                    close_trade(i, max(trail_px, r.Close), 'short_trail')
+                    close_trade(i, max(trail_px, r.Open, r.Close), 'short_trail')
                 elif r.Close > r.EMA200:
                     close_trade(i, r.Close, 'short_ema200')
                 elif r.Regime != 'BEAR':
@@ -444,35 +446,33 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
                 eq_idx.append(df.index[i])
                 continue
 
+            extreme_high = max(extreme_high, r.High)
+
             # ── DIP: fixed ATR target/stop (v13-exact), no trail ──
             if mode == 'DIP':
                 target_px = entry_px_avg + cfg['dip_tp_atr'] * r.ATR
                 stop_dip = entry_px_avg - cfg['dip_sl_atr'] * r.ATR
                 if r.Low <= stop_dip:
-                    close_trade(i, min(stop_dip, r.Close), 'dip_stop')
+                    close_trade(i, min(stop_dip, r.Open, r.Close), 'dip_stop')
                 elif r.High >= target_px:
                     close_trade(i, target_px, 'dip_target')
                 eq_val.append(cash + pos_units * r.Close)
                 eq_idx.append(df.index[i])
                 continue
 
-            # ── ADAPTIVE TRAILING STOP (flag-controlled) ──
-            # v13-exact ordering: EXIT CHECKS FIRST, then TP1/pyramid.
+            # ── ADAPTIVE TRAILING STOP ──
             m_base = ts_base if mode == 'STRONG_BULL_TREND' else tt_base
             m_max = ts_max if mode == 'STRONG_BULL_TREND' else tt_max
             mult = m_base
-            # R2: STRONG_BULL rides only the wide catastrophic trail —
-            # normal corrections must not eject us from the regime trade.
             if cfg.get('strong_wide_stop', False) and mode == 'STRONG_BULL_TREND':
                 mult = m_max
             elif cfg.get('adaptive_trail', False) and init_risk_px > 0 and \
                (r.Close - entry_px_avg) >= cfg['parabolic_r'] * init_risk_px:
-                # widen trail once open profit exceeds parabolic_r × initial risk
                 progress = min((r.Close - entry_px_avg) /
                                max(cfg['parabolic_r'] * init_risk_px, 1e-9) - 1.0, 1.0)
                 mult = m_base + (m_max - m_base) * progress
 
-            raw_trail = extreme_px - mult * r.ATR
+            raw_trail = extreme_high - mult * r.ATR
             risk_capped = (cfg['init_risk_atr'] > 0 and
                            mode in cfg.get('init_risk_modes',
                                            ('STRONG_BULL_TREND', 'TREND')))
@@ -486,7 +486,7 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
             exit_now, exit_px, reason = False, None, None
             if r.Low <= stop_px:
                 exit_now = True
-                exit_px = min(stop_px, r.Close)
+                exit_px = min(stop_px, r.Open, r.Close)
                 reason = 'be_stop' if (tp1_done and stop_px >= raw_trail) else \
                          ('risk_cap' if (not tp1_done and risk_capped and
                           stop_px >= entry_px_avg - cfg['init_risk_atr'] * r.ATR) else 'atr_trail')
@@ -498,30 +498,28 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
             if exit_now:
                 close_trade(i, exit_px, reason)
             else:
-                # ── PARTIAL TP1 (only on bars that did NOT stop out) ──
                 if cfg['tp1_enabled'] and not tp1_done:
                     trigger = entry_px_avg + cfg['tp1_trigger_atr'] * r.ATR
                     if r.High >= trigger:
                         sell_u = pos_units * cfg['tp1_fraction']
-                        fill = trigger * (1 - FEE_SLIP)
+                        fill = trigger * (1 - fee_side)
                         cash += sell_u * fill
                         trade_pnl += sell_u * (fill - entry_px_avg)
                         pos_units -= sell_u
                         pos_cost -= sell_u * entry_px_avg
                         tp1_done = True
 
-                # ── PYRAMID ADDS (only STRONG_BULL_TREND, after exit checks) ──
                 if (cfg['pyramid_enabled'] and mode == 'STRONG_BULL_TREND'
                         and adds_done < cfg['pyramid_max_adds']
                         and r.Regime == 'STRONG_BULL'
                         and init_risk_px > 0
-                        and (extreme_px - entry_px_avg) >= cfg['pyramid_min_profit_r'] * init_risk_px
-                        and (extreme_px - r.Close) >= cfg['pyramid_pullback_atr'] * r.ATR
+                        and (extreme_high - entry_px_avg) >= cfg['pyramid_min_profit_r'] * init_risk_px
+                        and (extreme_high - r.Close) >= cfg['pyramid_pullback_atr'] * r.ATR
                         and r.Close > r.EMA20):
                     frac = cfg['pyramid_add_fractions'][adds_done]
                     add_invested = min(cash, invested_total * frac)
                     if add_invested > cash * 0.05:
-                        add_px = r.Close * (1 + FEE_SLIP)
+                        add_px = r.Close * (1 + fee_side)
                         add_units = add_invested / add_px
                         entry_px_avg = ((entry_px_avg * pos_units + add_px * add_units)
                                         / (pos_units + add_units))
@@ -531,7 +529,6 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
                         invested_total += add_invested
                         adds_done += 1
 
-        # track regime history for R4 recovery entries
         if r.Regime == 'BEAR':
             last_bear_i = i
         prev_regime = r.Regime
@@ -539,7 +536,7 @@ def run_backtest(df, cfg, capital=INITIAL_CAPITAL, trail_override=None):
         eq_val.append(cash + pos_units * r.Close)
         eq_idx.append(df.index[i])
 
-    if pos_units > 0 and trades:
+    if pos_units != 0 and trades:
         close_trade(len(df) - 1, df.Close.iloc[-1], 'end_of_test')
 
     equity = pd.Series(eq_val, index=eq_idx, name='Equity')
@@ -556,7 +553,13 @@ def calculate_metrics(equity, trades_df, bh=None, periods_per_year=BARS_PER_YEAR
     rets = equity.pct_change().dropna()
     total_ret = equity.iloc[-1] / equity.iloc[0] - 1
     years = len(equity) / periods_per_year
-    cagr = (1 + total_ret) ** (1 / years) - 1 if years > 0 and total_ret > 0 else np.nan
+    if years > 0:
+        if total_ret > -1.0:
+            cagr = (1 + total_ret) ** (1 / years) - 1
+        else:
+            cagr = -1.0
+    else:
+        cagr = np.nan
     sharpe = rets.mean() / rets.std() * np.sqrt(periods_per_year) if rets.std() > 0 else 0
     downside = rets[rets < 0]
     sortino = rets.mean() / downside.std() * np.sqrt(periods_per_year) \
@@ -599,14 +602,14 @@ WF_TEST_MONTHS = 3
 
 # Small parameter grid — selection happens ONLY on train data
 WF_GRID = [
-    dict(trail_base_strong=5.0, trail_base_trend=4.0, tp1_trigger_atr=2.6),
-    dict(trail_base_strong=6.0, trail_base_trend=5.0, tp1_trigger_atr=3.0),
-    dict(trail_base_strong=4.5, trail_base_trend=3.5, tp1_trigger_atr=2.2),
-    dict(trail_max_strong=11.0, trail_max_trend=8.0, parabolic_r=2.0),
-    dict(pyramid_enabled=False),
+    dict(trail_base_strong=4.5, trail_base_trend=3.0, tp1_trigger_atr=3.5, strong_alloc=0.95),
+    dict(trail_base_strong=5.0, trail_base_trend=3.5, tp1_trigger_atr=4.0, strong_alloc=0.90),
+    dict(trail_base_strong=4.0, trail_base_trend=2.5, tp1_trigger_atr=3.0, strong_alloc=0.85),
+    dict(trail_base_strong=5.5, trail_base_trend=4.0, tp1_trigger_atr=4.5, strong_alloc=0.95),
+    dict(pyramid_enabled=False, strong_alloc=0.90),
 ]
 
-def walk_forward(df, grid=WF_GRID, trail_override=None):
+def walk_forward(df, grid=WF_GRID, trail_override=None, fee_side=FEE_SLIP):
     """
     Rolling walk-forward: pick best params on TRAIN window (by Calmar),
     apply to following TEST window. Returns (oos_equity, wf_rows).
@@ -628,21 +631,21 @@ def walk_forward(df, grid=WF_GRID, trail_override=None):
         test_slice = df.iloc[max(0, te - WARMUP):min(se, end_pos)]
 
         # 1) select on train ONLY
-        best_cfg, best_score = None, -np.inf
+        best_cfg, best_grid, best_score = None, None, -np.inf
         for g in grid:
             cfg = make_cfg(**g)
-            _, eq_tr, _ = run_backtest(train_slice, cfg, INITIAL_CAPITAL, trail_override)
+            _, eq_tr, _ = run_backtest(train_slice, cfg, INITIAL_CAPITAL, trail_override, fee_side=fee_side)
             m = calculate_metrics(eq_tr, pd.DataFrame())
             if not m or m.get('MaxDD (%)') in (None, 0):
                 continue
             calmar = m['Return (%)'] / abs(m['MaxDD (%)']) if m.get('MaxDD (%)') else 0
             if calmar > best_score:
-                best_score, best_cfg = calmar, cfg
+                best_score, best_cfg, best_grid = calmar, cfg, g
 
         # 2) evaluate on untouched test window
         if best_cfg is not None:
             tr_te, eq_te, bh_te = run_backtest(test_slice, best_cfg,
-                                               INITIAL_CAPITAL, trail_override)
+                                               INITIAL_CAPITAL, trail_override, fee_side=fee_side)
             eval_start = test_slice.index[WARMUP]
             eq_w = eq_te[eq_te.index >= eval_start]
             m_te = calculate_metrics(eq_w, tr_te, bh_te)
@@ -651,8 +654,7 @@ def walk_forward(df, grid=WF_GRID, trail_override=None):
                 oos_pieces.append(norm_eq)
                 rows.append({'TestStart': eval_start.date(),
                              'TestEnd': eq_w.index[-1].date(),
-                             'Selected': str({k: v for k, v in best_cfg.items()
-                                              if k in g})[:60],
+                             'Selected': str(best_grid)[:60],
                              **{k: m_te.get(k) for k in
                                 ['Return (%)', 'B&H (%)', 'Alpha vs B&H',
                                  'MaxDD (%)', 'Sharpe', 'Trades', 'WinRate (%)']}})
@@ -662,11 +664,12 @@ def walk_forward(df, grid=WF_GRID, trail_override=None):
         return pd.Series(dtype=float), pd.DataFrame(rows)
 
     stitched = pd.concat(oos_pieces)
-    # compound overlapping boundaries
     out = [stitched.iloc[0]]
-    for v in stitched.iloc[1:]:
-        out.append(out[-1] * v / stitched.index.to_series().shift(1).iloc[-1]
-                   if False else v)
+    for idx in range(1, len(stitched)):
+        prev_val = stitched.iloc[idx - 1]
+        curr_val = stitched.iloc[idx]
+        step = (curr_val / prev_val) if prev_val > 0 else 1.0
+        out.append(out[-1] * step)
     oos_equity = pd.Series(out, index=stitched.index)
     return oos_equity, pd.DataFrame(rows)
 
@@ -719,12 +722,12 @@ def yearly_runs(df, cfg, trail_override=None, min_bars=600):
 # ═══════════════════════════════════════════════════════════
 # 8. PORTFOLIO 50/30/20
 # ═══════════════════════════════════════════════════════════
-def run_portfolio(dfs, cfg, weights, capital=INITIAL_CAPITAL, apply_overrides=True):
+def run_portfolio(dfs, cfg, weights, capital=INITIAL_CAPITAL, apply_overrides=True, fee_side=FEE_SLIP):
     eqs = {}
     all_tr = []
     for name, df in dfs.items():
         ov = TRAIL_OVERRIDES_V14.get(name) if apply_overrides else None
-        tr, eq, _ = run_backtest(df, cfg, capital * weights[name], ov)
+        tr, eq, _ = run_backtest(df, cfg, capital * weights[name], ov, fee_side=fee_side)
         eqs[name] = eq.rename(name)
         all_tr.append(tr.assign(asset=name))
     comb = pd.concat(eqs.values(), axis=1).ffill()

@@ -15,18 +15,8 @@ import sys
 import pandas as pd
 import numpy as np
 import engine
-from run_hybrid_portfolio import run_hybrid_engine, run_macro_with_fee
-
-# Per-asset best configurations (validated for hyper-trend + regime override)
-BEST_CFGS = {
-    'BTC': engine.make_cfg(adaptive_trail=False, pyramid_enabled=True,
-                           reentry_ema20=True, strong_wide_stop=True, trail_max_strong=12.0, strong_alloc=0.98),
-    'ETH': engine.make_cfg(adaptive_trail=False, pyramid_enabled=True,
-                           strong_wide_stop=True, trail_max_strong=14.0, strong_alloc=0.98, tp1_enabled=False),
-    'SOL': engine.make_cfg(adaptive_trail=False, pyramid_enabled=True, pyramid_max_adds=2,
-                           pyramid_add_fractions=(0.5, 0.3), strong_wide_stop=True, trail_max_strong=16.0,
-                           strong_alloc=0.98, tp1_enabled=False),
-}
+from engine import BEST_CFGS
+from run_hybrid_portfolio import run_hybrid_engine
 
 def run_best(filepath, capital=1000.0):
     """Run V_BEST on a single asset file (Macro Core component)."""

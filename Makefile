@@ -1,23 +1,29 @@
 # Makefile for TRADE repository
 
-# Default commit message if not specified (usage: make gp MSG="your message")
-MSG ?= update
-
-.PHONY: gp status help
+.PHONY: test oos dashboard clean help gp status
 
 help:
 	@echo "Available commands:"
-	@echo "  make gp [MSG=\"your message\"]  - Stage all changes, commit, and git push"
-	@echo "  make status                    - Run git status"
+	@echo "  make test       - Run unit and regression tests"
+	@echo "  make oos        - Run true leak-free Out-of-Sample validation"
+	@echo "  make dashboard  - Build and update the production HTML dashboard"
+	@echo "  make clean      - Remove bytecode and temporary cache files"
+	@echo "  make gp         - Git push committed changes to origin/main"
 
-# Shortcut for Git Add, Commit, and Push
+test:
+	PYTHONPATH=. .venv/bin/pytest tests/
+
+oos:
+	.venv/bin/python3 run_true_oos_validation.py
+
+dashboard:
+	.venv/bin/python3 generate_dashboard.py
+
+clean:
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+	find . -type f -name "*.pyc" -delete
+
 gp:
-	git add .
-	@git commit -m "$(MSG)" || echo "No changes to commit"
-	git push origin main
-pg:
-	git add .
-	@git commit -m "$(MSG)" || echo "No changes to commit"
 	git push origin main
 
 status:

@@ -30,31 +30,16 @@ def build_dashboard_data():
     # 2. CALIBRATED MICRO STRATEGY FOR SATELLITE TRADES
     print("⏳ Loading Calibrated Micro Engine for Satellite Trades...")
     dfs = {name: engine.load_real_data(path) for name, path in files.items()}
-    from calibrate_exact_micro_proportional import run_exact_proportional_backtest
-    from test_fractal_scaling import add_calibrated_indicators
-    
-    sf = 4.0
-    rsi_t = 58.0
-    tm = 4.5
-    
+    import micro_engine
+
     micro_eqs = {}
     micro_asset_trades = {}
-    
+
     for name, df in dfs.items():
         w = weights[name]
-        x = add_calibrated_indicators(
-            df,
-            ema_fast=int(9 * sf),
-            ema_med=int(21 * sf),
-            ema_slow=int(50 * sf),
-            ema_macro=int(200 * sf),
-            donch_bars=int(12 * sf),
-            rsi_period=int(7 * sf)
-        )
-        tr, eq, fees = run_exact_proportional_backtest(
-            x, scale_factor=sf, rsi_sens=rsi_t, trail_mult=tm, fee_preset='TAKER_STANDARD'
-        )
-        micro_eqs[name] = (eq * w).rename(name)
+        x = micro_engine.add_micro_indicators(df)
+        tr, eq, bh, fees = micro_engine.run_micro_backtest(x, capital=capital * w)
+        micro_eqs[name] = eq.rename(name)
         micro_asset_trades[name] = tr
 
     # 3. BUY & HOLD BENCHMARK & PER-ASSET PAYLOADS
@@ -168,6 +153,21 @@ def build_dashboard_data():
     hybrid_dd = ((hybrid_daily - hybrid_daily.cummax()) / hybrid_daily.cummax()) * 100
     bh_dd = ((bh_daily - bh_daily.cummax()) / bh_daily.cummax()) * 100
 
+    from run_true_oos_validation import run_true_oos_evaluation
+    oos_summary = {}
+    try:
+        port_oos_m, out_oos_df = run_true_oos_evaluation()
+        oos_summary = {
+            'hybrid_return': port_oos_m.get('Return (%)', 0),
+            'hybrid_cagr': port_oos_m.get('CAGR (%)', 0),
+            'hybrid_max_dd': port_oos_m.get('MaxDD (%)', 0),
+            'hybrid_sharpe': port_oos_m.get('Sharpe', 0),
+            'bh_return': port_oos_m.get('B&H (%)', 0),
+            'alpha': port_oos_m.get('Alpha vs B&H', 0),
+        }
+    except Exception as e:
+        print(f"OOS evaluation notice: {e}")
+
     portfolio_payload = {
         'summary': {
             'hybrid_final': round(float(hybrid_daily.iloc[-1]), 0),
@@ -179,6 +179,7 @@ def build_dashboard_data():
             'bh_return': round(float(bh_ret), 1),
             'bh_cagr': round(float(bh_cagr), 1),
             'bh_max_dd': round(float(bh_dd.min()), 1),
+            'true_oos': oos_summary,
         },
         'dates': [d.strftime('%Y-%m-%d') for d in common_idx],
         'hybrid_vals': [round(float(v), 2) for v in hybrid_daily.values],
@@ -192,7 +193,7 @@ def build_dashboard_data():
     }
 
 def generate_html_dashboard(data, output_filepath='dashboard.html'):
-    json_str = json.dumps(data)
+    json_str = json.dumps(data).replace("</", "<\\/")
 
     html_content = f"""<!DOCTYPE html>
 <html lang="he" dir="rtl">
@@ -203,7 +204,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
     <style>
         :root {{
             --bg-dark: #0b0f19;
@@ -674,7 +675,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
             currentEndDate = maxDate;
         }} else if (preset === 'OOS') {{
             document.getElementById('btnOOS').classList.add('active');
-            currentStartDate = '2024-07-01';
+            currentStartDate = '2024-04-01';
             currentEndDate = maxDate;
         }} else if (preset === '1Y') {{
             document.getElementById('btn1Y').classList.add('active');
@@ -781,10 +782,13 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
 
             tradesTableSection.style.display = 'none';
 
+            const hybridSeriesData = slicedDates.map((d, idx) => ({{ x: new Date(d).getTime(), y: hybridVals[idx] }}));
+            const bhSeriesData = slicedDates.map((d, idx) => ({{ x: new Date(d).getTime(), y: bhVals[idx] }}));
+
             const options = {{
                 series: [
-                    {{ name: '🏆 האסטרטגיה ההיברידית (80/20)', data: hybridVals }},
-                    {{ name: 'Buy & Hold Benchmark', data: bhVals }}
+                    {{ name: '🏆 האסטרטגיה ההיברידית (80/20)', data: hybridSeriesData }},
+                    {{ name: 'Buy & Hold Benchmark', data: bhSeriesData }}
                 ],
                 chart: {{
                     type: 'line',
@@ -796,7 +800,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                 }},
                 colors: ['#f59e0b', '#64748b'],
                 stroke: {{ curve: 'smooth', width: [3.5, 2] }},
-                xaxis: {{ categories: slicedDates, type: 'datetime' }},
+                xaxis: {{ type: 'datetime' }},
                 yaxis: {{
                     logBase: 10,
                     labels: {{ formatter: v => '$' + Math.round(v).toLocaleString() }}
@@ -884,9 +888,11 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                 }});
             }});
 
+            const assetSeriesData = slicedDates.map((d, idx) => ({{ x: new Date(d).getTime(), y: slicedPrice[idx] }}));
+
             const options = {{
                 series: [
-                    {{ name: `מחיר ${{currentTab}} ($)`, data: slicedPrice }}
+                    {{ name: `מחיר ${{currentTab}} ($)`, data: assetSeriesData }}
                 ],
                 chart: {{
                     type: 'line',
@@ -898,7 +904,7 @@ def generate_html_dashboard(data, output_filepath='dashboard.html'):
                 }},
                 colors: ['#f59e0b'],
                 stroke: {{ curve: 'smooth', width: 2 }},
-                xaxis: {{ categories: slicedDates, type: 'datetime' }},
+                xaxis: {{ type: 'datetime' }},
                 yaxis: {{ labels: {{ formatter: v => '$' + Math.round(v).toLocaleString() }} }},
                 annotations: {{
                     points: pointAnnotations
