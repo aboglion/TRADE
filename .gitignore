@@ -27,4 +27,6 @@ htmlcov/
 .idea/
 
 # Data artifacts generated dynamically if needed
-# data/v14_*.csv
+# data/true_oos_*.csv
+data/oos_test_results.txt
+*.html
