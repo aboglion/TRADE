@@ -14,10 +14,10 @@ test:
 	PYTHONPATH=. .venv/bin/pytest tests/
 
 oos:
-	.venv/bin/python3 run_true_oos_validation.py
+	.venv/bin/python3 main.py --oos
 
 dashboard:
-	.venv/bin/python3 generate_dashboard.py
+	.venv/bin/python3 main.py --dashboard
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
