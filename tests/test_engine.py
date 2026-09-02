@@ -66,3 +66,11 @@ def test_gap_down_stop_execution():
     cfg = engine.make_cfg(entry_score_min=0)
     tr, eq, bh = engine.run_backtest(warmup_df, cfg, capital=1000.0, fee_side=0.00125)
     assert not eq.empty
+
+def test_run_dynamic_adaptive_20x_engine():
+    dyn_eq, hy_aligned, bh_aligned = engine.run_dynamic_adaptive_20x_engine(initial_capital=1000.0, bull_leverage=2.0)
+    assert not dyn_eq.empty
+    assert len(dyn_eq) > 100
+    assert dyn_eq.iloc[-1] > 0
+    assert not dyn_eq.isna().any()
+
