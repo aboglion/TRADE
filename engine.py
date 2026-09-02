@@ -37,38 +37,38 @@ FILES = {
 }
 DEFAULT_WEIGHTS = {'BTC': 0.40, 'ETH': 0.30, 'SOL': 0.30}
 
-# ── Macro Configurations (V_BEST / v14) ────────────────────
+# ── Macro Configurations (V_ADAPTIVE_SMART_CHOP_PROOF) ───────
 BASE_CFG = dict(
     entry_score_min=0,
     rsi_overbought_max=100.0,
-    dip_rsi_max=35.0,
+    dip_rsi_max=0.0,             # No dip buying in bear crashes
     dip_vol_mult=1.5,
     vol_filter_mult=1.0,
-    trend_adx_min=20.0,
-    trail_base_strong=4.5,
+    trend_adx_min=22.0,          # ADX Chop Gate: Require ADX >= 22 for trend entries
+    trail_base_strong=8.0,       # Wide trailing stop in Strong Bull
     trail_base_trend=2.5,
-    trail_max_strong=6.5,
+    trail_max_strong=10.0,
     trail_max_trend=4.5,
     parabolic_r=3.0,
     adaptive_trail=True,
-    ema_exit_strong=True,
+    ema_exit_strong=False,       # Ride entire bull trend
     ema_exit_trend=True,
-    tp1_enabled=True,
+    tp1_enabled=False,           # No early profit cutting
     tp1_trigger_atr=4.5,
     tp1_fraction=0.30,
     tp1_be_floor_atr=1.0,
-    init_risk_atr=2.2,
+    init_risk_atr=1.8,           # Fast 1.8 ATR Fail-Safe Stop Loss against Fakeouts
     init_risk_modes=('STRONG_BULL_TREND', 'TREND'),
     cooldown_bars=0,
     dip_tp_atr=1.8,
     dip_sl_atr=2.0,
     highvol_atr_pct=0.08,
     vol_q=0.70,
-    highvol_alloc=0.40,
-    base_alloc=0.60,
-    strong_alloc=1.0,
+    highvol_alloc=0.0,
+    base_alloc=0.0,              # 100% Cash / USDT Protection in Chop
+    strong_alloc=3.2,            # 3.2x Bull Rocket Leverage in confirmed Strong Bull
     max_add_entries=2,
-    pyramid_profit_r=1.2,
+    pyramid_profit_r=0.6,
     pyramid_pullback_atr=1.5,
     add1_frac=0.50,
     add2_frac=0.30,
@@ -79,15 +79,15 @@ CFG_ETH_R2 = dict(BASE_CFG, tp1_enabled=False)
 CFG_SOL_BASE = dict(BASE_CFG)
 
 BEST_CFGS = {
-    'BTC': CFG_BTC_R3,
-    'ETH': CFG_ETH_R2,
-    'SOL': CFG_SOL_BASE,
+    'BTC': dict(BASE_CFG),
+    'ETH': dict(BASE_CFG),
+    'SOL': dict(BASE_CFG),
 }
 
 TRAIL_OVERRIDES_V14 = {
-    'BTC': (4.5, 3.5),
-    'ETH': (6.5, 4.5),
-    'SOL': (7.5, 5.0),
+    'BTC': (8.0, 2.5),
+    'ETH': (8.0, 2.5),
+    'SOL': (8.0, 2.5),
 }
 
 # ── Micro Satellite Configurations ─────────────────────────
@@ -188,13 +188,13 @@ def add_indicators(df, vol_q=0.70):
         vol = vol_v[i]
         volsma = volsma_v[i] if not np.isnan(volsma_v[i]) else 1e6
         atr = atr_v[i] if not np.isnan(atr_v[i]) else 1.0
+        adx = x.ADX.values[i] if not np.isnan(x.ADX.values[i]) else 0.0
 
-        if (c > e20 > e50 > e200) and (c > o) and (rsi > 50) and (vol > volsma * 1.2):
+        # ADX Chop Gate: Require ADX >= 22.0 for STRONG_BULL_TREND
+        if (c > e20 > e50 > e200) and (rsi > 50) and (adx >= 22.0):
             regimes.append('STRONG_BULL_TREND')
-        elif (c > e50 > e200) and (c > e20):
+        elif (c > e50 > e200) and (c > e20) and (adx >= 20.0):
             regimes.append('TREND')
-        elif (c < e50) and (rsi < 35) and (vol > volsma * 1.5):
-            regimes.append('DIP_OVER_SOLD')
         elif (c < e50 < e200):
             regimes.append('BEAR')
         else:
