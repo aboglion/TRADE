@@ -74,20 +74,20 @@ BASE_CFG = dict(
     add2_frac=0.30,
 )
 
-CFG_BTC_R3 = dict(BASE_CFG, ema20_reentry=True, reentry_lookback=12)
-CFG_ETH_R2 = dict(BASE_CFG, tp1_enabled=False)
-CFG_SOL_BASE = dict(BASE_CFG)
+CFG_BTC = dict(BASE_CFG, strong_alloc=1.5, trail_base_trend=5.0, trail_base_strong=10.0, ema20_reentry=True, reentry_lookback=16, trend_adx_min=20.0, init_risk_atr=4.0)
+CFG_ETH = dict(BASE_CFG, strong_alloc=1.5, trail_base_trend=4.5, trail_base_strong=9.0, trend_adx_min=22.0, init_risk_atr=4.0)
+CFG_SOL = dict(BASE_CFG, strong_alloc=1.5, trail_base_trend=5.0, trail_base_strong=10.0, trend_adx_min=24.0, init_risk_atr=3.0)
 
 BEST_CFGS = {
-    'BTC': dict(BASE_CFG),
-    'ETH': dict(BASE_CFG),
-    'SOL': dict(BASE_CFG),
+    'BTC': CFG_BTC,
+    'ETH': CFG_ETH,
+    'SOL': CFG_SOL,
 }
 
 TRAIL_OVERRIDES_V14 = {
-    'BTC': (8.0, 2.5),
-    'ETH': (8.0, 2.5),
-    'SOL': (8.0, 2.5),
+    'BTC': (10.0, 5.0),
+    'ETH': (9.0, 4.5),
+    'SOL': (10.0, 5.0),
 }
 
 # ── Micro Satellite Configurations ─────────────────────────
@@ -157,16 +157,21 @@ def add_indicators(df, vol_q=0.70):
     delta = x.Close.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
-    rs = gain / loss.replace(0, np.nan)
-    x["RSI"] = 100 - (100 / (1 + rs))
+    loss_clean = loss.replace(0, np.nan)
+    rs = gain / loss_clean
+    rsi = 100 - (100 / (1 + rs))
+    fallback = pd.Series(np.where(gain > 0, 100.0, 50.0), index=gain.index)
+    x["RSI"] = rsi.fillna(fallback)
 
     high_diff = x.High.diff()
     low_diff = -x.Low.diff()
     pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
     neg_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0)
-    pos_di = 100 * pd.Series(pos_dm, index=x.index).ewm(alpha=1/14, min_periods=14).mean() / x.ATR
-    neg_di = 100 * pd.Series(neg_dm, index=x.index).ewm(alpha=1/14, min_periods=14).mean() / x.ATR
-    dx = 100 * (pos_di - neg_di).abs() / (pos_di + neg_di).replace(0, np.nan)
+    atr_safe = x.ATR.replace(0, np.nan)
+    pos_di = (100 * pd.Series(pos_dm, index=x.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+    neg_di = (100 * pd.Series(neg_dm, index=x.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+    denom = (pos_di + neg_di).replace(0, np.nan)
+    dx = (100 * (pos_di - neg_di).abs() / denom).fillna(0.0)
     x["ADX"] = dx.ewm(alpha=1/14, min_periods=14).mean()
 
     vol_thresh = x.Volume.rolling(500, min_periods=100).quantile(vol_q)
@@ -300,6 +305,12 @@ def run_backtest(df, cfg=BASE_CFG, capital=INITIAL_CAPITAL, trail_override=None,
                 alloc = cfg['highvol_alloc'] if r.HighVol else (
                     cfg['strong_alloc'] if entry_mode == 'STRONG_BULL_TREND' else cfg['base_alloc']
                 )
+                # Guard: skip zero-allocation entries (prevents phantom trades)
+                if alloc <= 0.0:
+                    eq_val.append(cash)
+                    eq_idx.append(df.index[i])
+                    continue
+
                 invested = cash * alloc
                 entry_px = c_close * (1.0 + fee_slip_per_side)
                 entry_fee = invested * fee_slip_per_side
@@ -328,7 +339,13 @@ def run_backtest(df, cfg=BASE_CFG, capital=INITIAL_CAPITAL, trail_override=None,
         # ── MANAGING ACTIVE POSITION ──────────────────────────
         else:
             first_e = entries[0]
-            first_e['high_water'] = max(first_e['high_water'], r.High)
+            current_high_water = first_e['high_water']
+
+            # Deduct funding fees for leveraged position (0.01% per 8h = 0.00005 per 4h candle)
+            if pos_units > 0:
+                funding_fee = pos_units * c_close * 0.00005
+                cash -= funding_fee
+                trade_fees_paid += funding_fee
 
             avg_px = entry_px_avg()
             open_r = (c_close - avg_px) / max(first_e['atr_at_entry'], 1e-6)
@@ -357,7 +374,7 @@ def run_backtest(df, cfg=BASE_CFG, capital=INITIAL_CAPITAL, trail_override=None,
                             })
                             trade_fees_paid += add_fee
 
-            # Trailing stop calculations
+            # Trailing stop calculations using high_water up to bar i-1 (prevents intra-bar lookahead)
             tb = trail_base_strong if first_e['mode'] == 'STRONG_BULL_TREND' else trail_base_trend
             trail_atr = tb
             if cfg.get('adaptive_trail', False) and open_r > cfg['parabolic_r']:
@@ -365,7 +382,7 @@ def run_backtest(df, cfg=BASE_CFG, capital=INITIAL_CAPITAL, trail_override=None,
                 extra = min(tm - tb, (open_r - cfg['parabolic_r']) * 0.4)
                 trail_atr = tb + extra
 
-            trail_stop = first_e['high_water'] - trail_atr * r.ATR
+            trail_stop = current_high_water - trail_atr * r.ATR
 
             # Exits check
             exit_now, exit_px, reason = False, None, None
@@ -399,6 +416,7 @@ def run_backtest(df, cfg=BASE_CFG, capital=INITIAL_CAPITAL, trail_override=None,
                 close_all(i, exit_px, reason)
                 last_exit_bar = i
             else:
+                first_e['high_water'] = max(first_e['high_water'], r.High)
                 if cfg.get('tp1_enabled', True) and not first_e['tp1_done']:
                     tp1_target = first_e['px'] + cfg['tp1_trigger_atr'] * first_e['atr_at_entry']
                     if r.High >= tp1_target:
@@ -450,8 +468,11 @@ def add_micro_indicators(df, cfg=DEFAULT_MICRO_CFG):
     delta = x.Close.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/9, min_periods=9).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/9, min_periods=9).mean()
-    rs = gain / loss.replace(0, np.nan)
-    x["RSI"] = 100 - (100 / (1 + rs))
+    loss_clean = loss.replace(0, np.nan)
+    rs = gain / loss_clean
+    rsi = 100 - (100 / (1 + rs))
+    fallback = pd.Series(np.where(gain > 0, 100.0, 50.0), index=gain.index)
+    x["RSI"] = rsi.fillna(fallback)
 
     d_bars = cfg['donchian_micro_bars']
     x["DonchianMicroHigh"] = x.High.rolling(d_bars).max().shift(1)
@@ -543,6 +564,12 @@ def run_micro_backtest(df, cfg=DEFAULT_MICRO_CFG, capital=INITIAL_CAPITAL):
                 alloc = cfg['strong_alloc'] if r.MicroRegime == 'HIGH_CONVICTION_MICRO' else cfg['base_alloc']
                 alloc = float(np.clip(alloc, 0.10, 0.98))
 
+                # Guard: skip zero-allocation entries (prevents phantom trades)
+                if alloc <= 0.0:
+                    eq_val.append(cash + pos_units * c_close)
+                    eq_idx.append(df.index[i])
+                    continue
+
                 invested = cash * alloc
                 entry_px = c_close * (1.0 + fee_slip_per_side)
                 entry_fee = invested * fee_slip_per_side
@@ -567,9 +594,15 @@ def run_micro_backtest(df, cfg=DEFAULT_MICRO_CFG, capital=INITIAL_CAPITAL):
                 })
         else:
             bars_held = i - entry_i
-            extreme_px = max(extreme_px, r.High)
+            prev_extreme = extreme_px
             open_profit_atr = (c_close - entry_px_avg) / max(c_atr, 1e-6)
-            raw_trail = extreme_px - cfg['trail_atr'] * c_atr
+            raw_trail = prev_extreme - cfg['trail_atr'] * c_atr
+
+            # Funding rate fee (0.01% per 8h = 0.00005 per 4h candle)
+            if pos_units > 0:
+                m_funding = pos_units * c_close * 0.00005
+                cash -= m_funding
+                trade_fees_paid += m_funding
 
             if open_profit_atr >= cfg['be_trigger_atr']:
                 stop_px = max(stop_px, entry_px_avg * 1.003, raw_trail)
@@ -589,6 +622,7 @@ def run_micro_backtest(df, cfg=DEFAULT_MICRO_CFG, capital=INITIAL_CAPITAL):
             if exit_now:
                 close_trade(i, exit_px, reason)
             else:
+                extreme_px = max(extreme_px, r.High)
                 if not tp1_done and r.High >= (entry_px_avg + cfg['tp1_atr'] * c_atr):
                     sell_u = pos_units * cfg['tp1_fraction']
                     raw_tp1_px = entry_px_avg + cfg['tp1_atr'] * c_atr
@@ -722,6 +756,7 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
 
     btc_df = load_real_data(FILES['BTC'])
     btc_daily = btc_df['Close'].resample('D').last().dropna()
+    ema20_daily = btc_daily.ewm(span=20, adjust=False).mean()
     sma150 = btc_daily.rolling(150).mean()
     is_bull = (btc_daily > sma150).fillna(False)
 
@@ -729,10 +764,14 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
     hy_aligned = hybrid_base.loc[common_idx]
     bh_aligned = bh_comb.loc[common_idx]
     is_bull_aligned = is_bull.loc[common_idx]
+    btc_daily_aligned = btc_daily.loc[common_idx]
+    ema20_aligned = ema20_daily.loc[common_idx]
 
     cap = initial_capital
     vals = [cap]
     daily_cash_yield = (1.0 + cash_apr)**(1.0 / 365.25) - 1.0 if cash_apr > 0 else 0.0
+
+    bull_peak = bh_aligned.iloc[0]
 
     for i in range(1, len(common_idx)):
         d_prev = common_idx[i-1]
@@ -743,12 +782,28 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
 
         bull = is_bull_aligned.loc[d_prev]
         if bull:
+            if bh_aligned.loc[d_prev] > bull_peak:
+                bull_peak = bh_aligned.loc[d_prev]
+
+            bh_pullback = (bh_aligned.loc[d_prev] - bull_peak) / bull_peak if bull_peak > 0 else 0.0
+
+            # Dynamic Bullish Risk Guard: De-leverage to 1.0x if pullback > 8% or price < EMA20
+            under_ema = btc_daily_aligned.loc[d_prev] < ema20_aligned.loc[d_prev]
+            if bh_pullback < -0.08 or under_ema:
+                effective_leverage = 1.0
+            else:
+                effective_leverage = bull_leverage
+
             w_bh = 0.70
             w_hy = 0.30
-            r_bh_lev = 1.0 + (r_bh - 1.0) * bull_leverage
-            r_hy_lev = 1.0 + (r_hy - 1.0) * bull_leverage
+            r_bh_lev = 1.0 + (r_bh - 1.0) * effective_leverage
+            # Deduct funding cost for leveraged portion (~0.03% daily on borrowed margin)
+            daily_funding_cost = 0.0003 * max(0.0, effective_leverage - 1.0)
+            r_bh_lev -= daily_funding_cost
+            r_hy_lev = r_hy
             port_r = w_bh * r_bh_lev + w_hy * r_hy_lev
         else:
+            bull_peak = bh_aligned.loc[d_curr]
             w_hy = max(0.0, 0.85 - bear_short_hedge)
             w_short = bear_short_hedge
             r_short = 1.0 - (r_bh - 1.0)
@@ -822,15 +877,19 @@ def run_true_oos_validation(initial_capital=2000.0, train_end='2024-04-01'):
     weights = DEFAULT_WEIGHTS
 
     for name, path in FILES.items():
-        df = add_indicators(load_real_data(path))
+        df_full = add_indicators(load_real_data(path))
         cfg = BEST_CFGS.get(name, BEST_CFGS['BTC'])
         trail = (7.5, 5.0) if name == 'SOL' else TRAIL_OVERRIDES_V14.get(name)
 
         w = weights[name]
-        tr, eq, bh = run_backtest(df, cfg, capital=initial_capital * w, trail_override=trail, fee_side=0.00125)
+        # Cold start OOS: Run backtest on unseen data window starting at train_end (with 100-bar warmup)
+        cut_dt = pd.to_datetime(train_end)
+        sub_df = df_full.loc[df_full.index >= (cut_dt - pd.Timedelta(days=50))].copy()
 
-        eq_oos = eq[eq.index >= train_end]
-        bh_oos = bh[bh.index >= train_end]
+        tr, eq, bh = run_backtest(sub_df, cfg, capital=initial_capital * w, trail_override=trail, fee_side=0.00125)
+
+        eq_oos = eq[eq.index >= cut_dt]
+        bh_oos = bh[bh.index >= cut_dt]
 
         if not eq_oos.empty:
             eq_oos_rebased = (eq_oos / eq_oos.iloc[0]) * (initial_capital * w)

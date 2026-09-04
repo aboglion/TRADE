@@ -10,6 +10,7 @@ Usage:
 """
 
 import sys
+import pandas as pd
 import engine
 
 def main():
@@ -29,5 +30,4 @@ def main():
         engine.generate_dashboard_html()
 
 if __name__ == '__main__':
-    import pandas as pd
     main()
