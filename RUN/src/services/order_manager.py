@@ -184,6 +184,9 @@ class OrderManager:
                     OrderStatus.EXPIRED,
                 ):
                     self._state.completed_orders.append(order_data)
+                    if result.status == OrderStatus.FILLED and result.fees > 0 and result.fee_currency:
+                        curr = result.fee_currency
+                        self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
 
             except Exception as e:
                 logger.warning(
@@ -221,6 +224,28 @@ class OrderManager:
             logger.error("Failed to check open orders: %s", e)
             return []
 
+    def cancel_stale_open_orders(self) -> int:
+        """
+        Cancel any open orders resting on the exchange to prevent cycle deadlock.
+
+        Returns number of canceled orders.
+        """
+        open_orders = self.check_open_orders_on_exchange()
+        canceled_count = 0
+        for o in open_orders:
+            if not o.exchange_order_id:
+                continue
+            symbol = ""
+            if isinstance(o.raw_response, dict):
+                symbol = o.raw_response.get("symbol", "")
+            try:
+                logger.warning("Canceling stale open order %s (%s)...", o.exchange_order_id, symbol)
+                self._gateway.cancel_order(symbol=symbol, order_id=o.exchange_order_id)
+                canceled_count += 1
+            except Exception as e:
+                logger.error("Failed to cancel open order %s: %s", o.exchange_order_id, e)
+        return canceled_count
+
     # ── Internal helpers ─────────────────────────────────────
 
     def _save_intent(self, intent: OrderIntent) -> None:
@@ -234,6 +259,8 @@ class OrderManager:
             "price": intent.price,
             "reason": intent.reason,
             "status": "intent",
+            "fees": 0.0,
+            "fee_currency": "",
             "timestamp": int(time.time() * 1000),
         }
         self._state.pending_orders.append(order_data)
@@ -249,6 +276,7 @@ class OrderManager:
                 order_data["filled_amount"] = result.filled_amount
                 order_data["average_price"] = result.average_price
                 order_data["fees"] = result.fees
+                order_data["fee_currency"] = result.fee_currency
                 order_data["error_message"] = result.error_message
 
                 # Move completed orders out of pending
@@ -258,6 +286,9 @@ class OrderManager:
                     OrderStatus.FAILED,
                 ):
                     self._state.completed_orders.append(order_data)
+                    if result.status == OrderStatus.FILLED and result.fees > 0 and result.fee_currency:
+                        curr = result.fee_currency
+                        self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
                 break
 
         # Clean up pending list

@@ -50,12 +50,17 @@ class Candle:
 
 @dataclass(frozen=True)
 class AssetHolding:
-    """Balance state for one asset."""
-    symbol: str                # e.g. "BTC", "ETH", "USDT"
+    """Balance state for one asset or futures position."""
+    symbol: str                # e.g. "BTC", "ETH", "USDT" (or "BTC/USDT" for positions)
     free: float                # Available for trading
     locked: float              # In open orders
-    total: float               # free + locked
-    value_usd: float           # Estimated USD value at current price
+    total: float               # free + locked (can be negative for shorts)
+    value_usd: float           # Estimated USD notional value at current price
+    
+    # Futures specific fields
+    unrealized_pnl: float = 0.0
+    entry_price: float = 0.0
+    leverage: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -72,7 +77,8 @@ class PortfolioSnapshot:
         h = self.holdings.get(symbol)
         if h is None:
             return 0.0
-        return h.value_usd / self.total_value_usd
+        weight = h.value_usd / self.total_value_usd
+        return -weight if h.total < 0 else weight
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,7 @@ class OrderIntent:
     order_type: OrderType
     amount: float                       # In base currency units
     price: Optional[float] = None       # Required for LIMIT orders
+    estimated_price: Optional[float] = None # Reference price for risk check / market order valuation
     reason: str = ""                    # Human-readable justification
     candle_ts: Optional[int] = None     # Candle that triggered this intent
 
@@ -174,6 +181,8 @@ class BotState:
     last_cycle_success: bool = True
     critical_errors: List[str] = field(default_factory=list)
     strategy_state: Dict[str, Any] = field(default_factory=dict)
+    session_initial_value_usd: Optional[float] = None
+    session_fees: Dict[str, float] = field(default_factory=dict)
     version: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
@@ -187,6 +196,8 @@ class BotState:
             "last_cycle_success": self.last_cycle_success,
             "critical_errors": self.critical_errors[-50:],
             "strategy_state": self.strategy_state,
+            "session_initial_value_usd": self.session_initial_value_usd,
+            "session_fees": self.session_fees,
         }
 
     @classmethod
@@ -201,4 +212,6 @@ class BotState:
             last_cycle_success=data.get("last_cycle_success", True),
             critical_errors=data.get("critical_errors", []),
             strategy_state=data.get("strategy_state", {}),
+            session_initial_value_usd=data.get("session_initial_value_usd"),
+            session_fees=data.get("session_fees", {}),
         )

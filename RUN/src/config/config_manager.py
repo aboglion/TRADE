@@ -29,6 +29,7 @@ class ExchangeConfig:
     retry_delay_base_ms: int = 1000
     api_key: str = ""           # Populated from env var
     api_secret: str = ""        # Populated from env var
+    market_type: str = "future" # "spot" or "future"
 
 
 @dataclass
@@ -46,6 +47,7 @@ class StrategyConfig:
     bull_leverage: float = 2.0
     bear_short_hedge_weight: float = 0.0   # 0 for spot-only (hold USDT)
     cash_apr: float = 0.0
+    core_ratio: float = 0.80               # Macro/Micro allocation split
     # Macro per-asset configs are kept as dicts matching engine.py constants
     macro_configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     micro_config: Dict[str, Any] = field(default_factory=dict)
@@ -164,6 +166,7 @@ class ConfigManager:
             retry_delay_base_ms=ex_raw.get("retry_delay_base_ms", 1000),
             api_key=os.environ.get("BINANCE_API_KEY", ""),
             api_secret=os.environ.get("BINANCE_API_SECRET", ""),
+            market_type=ex_raw.get("market_type", "future"),
         )
 
     def _load_strategy(self, config: BotConfig, raw: Dict) -> None:
@@ -187,6 +190,7 @@ class ConfigManager:
             bull_leverage=s_raw.get("bull_leverage", 2.0),
             bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.0),
             cash_apr=s_raw.get("cash_apr", 0.0),
+            core_ratio=s_raw.get("core_ratio", 0.80),
             macro_configs=s_raw.get("macro_configs", {}),
             micro_config=s_raw.get("micro_config", {}),
         )
@@ -234,6 +238,28 @@ class ConfigManager:
         parsed_bal = {str(k).upper(): float(v) for k, v in init_bal.items()}
         config.dry_run = DryRunConfig(initial_balances=parsed_bal)
 
+    def save_dry_run_balances(self, balances: Dict[str, float]) -> None:
+        """Persist updated dry_run.initial_balances back to config.yaml."""
+        parsed = {str(k).upper(): round(float(v), 8) for k, v in balances.items() if float(v) >= 0}
+        if self._config:
+            self._config.dry_run.initial_balances = parsed
+
+        if not self._config_path or not Path(self._config_path).exists():
+            return
+
+        try:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            if "dry_run" not in data:
+                data["dry_run"] = {}
+            data["dry_run"]["initial_balances"] = parsed
+
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+        except Exception as e:
+            logger.error("Failed to save dry run balances to %s: %s", self._config_path, e)
+
     # ── Validation ───────────────────────────────────────────
 
     def _validate(self, config: BotConfig) -> None:
@@ -260,8 +286,15 @@ class ConfigManager:
                 f"Asset weights sum to {total_weight:.4f}, must be ~1.0."
             )
 
-        # Risk limits sanity
         if config.risk.max_single_order_usd <= 0:
             raise ConfigError("max_single_order_usd must be positive.")
         if config.risk.max_portfolio_change_pct <= 0 or config.risk.max_portfolio_change_pct > 1.0:
             raise ConfigError("max_portfolio_change_pct must be in (0, 1.0].")
+
+        # Warmup candles check for 4h SMA-150 regime detection
+        required_candles = config.strategy.sma_regime_period * 6
+        if config.strategy.timeframe == "4h" and config.strategy.warmup_candles < required_candles:
+            raise ConfigError(
+                f"warmup_candles ({config.strategy.warmup_candles}) is less than required "
+                f"({required_candles}) for {config.strategy.sma_regime_period}-day SMA on 4h timeframe."
+            )

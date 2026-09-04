@@ -668,3 +668,42 @@ body {
     gap: 0.75rem;
     margin-top: 0.5rem;
 }
+
+/* Clickable card and error list styling */
+.clickable-card {
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.clickable-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-accent);
+}
+
+.error-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.error-item {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-family: var(--font-mono);
+    word-break: break-word;
+}
+.empty-errors {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #6ee7b7;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    text-align: center;
+}

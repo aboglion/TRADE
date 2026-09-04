@@ -91,7 +91,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     # Load .env before anything else
     args = parse_args()
-    load_dotenv(args.env)
+    env_path = args.env if Path(args.env).exists() else str(Path(__file__).parent / args.env)
+    load_dotenv(env_path)
 
     # Override RUN_MODE from CLI if specified
     if args.mode:
@@ -109,11 +110,19 @@ def main() -> None:
     from src.services.risk_manager import RiskManager
     from src.services.state_store import JsonStateStore
     from src.strategy.regime_adaptive_strategy import RegimeAdaptiveStrategy
+    from src.strategy.micro_satellite_strategy import MicroSatelliteStrategy
+    from src.strategy.hybrid_strategy import HybridStrategy
     from src.orchestrator import BotOrchestrator
     from src.utils.logging_utils import setup_logger
 
     # Load config
-    config_path = args.config if Path(args.config).exists() else None
+    if Path(args.config).exists():
+        config_path = args.config
+    elif (Path(__file__).parent / args.config).exists():
+        config_path = str(Path(__file__).parent / args.config)
+    else:
+        config_path = None
+
     cm = ConfigManager(config_path)
     config = cm.load()
 
@@ -140,13 +149,30 @@ def main() -> None:
             )
             sys.exit(1)
 
+    # Load state
+    state_store = JsonStateStore(config.state.path)
+    state = state_store.load_state()
+
+    # Callback to persist dry run balance changes to config.yaml & bot_state.json
+    def on_dry_run_balance_change(balances: Dict[str, float]) -> None:
+        try:
+            cm.save_dry_run_balances(balances)
+            st = state_store.load_state()
+            st.strategy_state["dry_run_balances"] = balances
+            state_store.save_state(st)
+        except Exception as ex:
+            logger.error("Failed to persist dry run balances: %s", ex)
+
     # Initialize exchange gateway
     if config.run_mode == RunMode.DRY_RUN:
+        saved_dry_balances = state.strategy_state.get("dry_run_balances")
+        init_balances = saved_dry_balances or config.dry_run.initial_balances
         gateway = DryRunExchange(
-            initial_balances=config.dry_run.initial_balances,
+            initial_balances=init_balances,
             fee_rate=0.001,
+            on_balance_change=on_dry_run_balance_change,
         )
-        logger.info("Using DRY_RUN simulated exchange with initial balances: %s", config.dry_run.initial_balances)
+        logger.info("Using DRY_RUN simulated exchange with balances: %s", init_balances)
     else:
         gateway = ExchangeGateway(config.exchange, config.run_mode)
         gateway.initialize()
@@ -163,10 +189,6 @@ def main() -> None:
             })
         sys.exit(0)
 
-    # Load state
-    state_store = JsonStateStore(config.state.path)
-    state = state_store.load_state()
-
     # Initialize services
     data_provider = LiveDataProvider(gateway)
     candle_service = CandleService(
@@ -174,7 +196,11 @@ def main() -> None:
         timeframe=config.strategy.timeframe,
         warmup_candles=config.strategy.warmup_candles,
     )
-    portfolio_service = PortfolioService(gateway)
+    portfolio_service = PortfolioService(
+        gateway,
+        allow_market_orders=config.risk.allow_market_orders,
+        is_futures=(config.exchange.market_type == "future"),
+    )
     risk_manager = RiskManager(config.risk)
 
     # Initialize strategy
@@ -182,10 +208,21 @@ def main() -> None:
         name: cfg.weight
         for name, cfg in config.strategy.assets.items()
     }
-    strategy = RegimeAdaptiveStrategy(
+    macro_strategy = RegimeAdaptiveStrategy(
         asset_weights=asset_weights,
         sma_regime_period=config.strategy.sma_regime_period,
         bull_leverage=config.strategy.bull_leverage,
+        bear_short_hedge_weight=config.strategy.bear_short_hedge_weight,
+    )
+    
+    micro_strategy = MicroSatelliteStrategy(
+        asset_weights=asset_weights,
+    )
+    
+    strategy = HybridStrategy(
+        macro_strategy=macro_strategy,
+        micro_strategy=micro_strategy,
+        core_ratio=config.strategy.core_ratio,
     )
 
     # Build orchestrator

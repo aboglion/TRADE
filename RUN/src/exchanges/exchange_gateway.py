@@ -72,6 +72,7 @@ class ExchangeGateway:
         options: Dict[str, Any] = {
             "enableRateLimit": self._config.rate_limit,
             "timeout": self._config.timeout_ms,
+            "defaultType": self._config.market_type,
         }
 
         # API credentials (not needed for DRY_RUN with no real calls)
@@ -216,6 +217,20 @@ class ExchangeGateway:
                         "total": total,
                     }
         return result
+
+    def fetch_positions(self) -> List[Dict[str, Any]]:
+        """
+        Fetch active futures positions.
+        """
+        if self._config.market_type != "future":
+            return []
+            
+        try:
+            positions = self._retry(lambda: self.exchange.fetch_positions())
+            return [p for p in positions if abs(float(p.get("contracts", 0) or 0)) > 0]
+        except AttributeError:
+            # exchange doesn't support fetch_positions
+            return []
 
     def fetch_ticker_price(self, symbol: str) -> float:
         """Fetch the last traded price for a symbol."""
@@ -369,6 +384,8 @@ class ExchangeGateway:
                     raise ExchangeConnectionError(
                         f"Exchange unreachable after {retries} retries: {e}"
                     )
+            except (ccxt.BadSymbol, ccxt.SymbolNotFound) as e:
+                raise InvalidOrderError(f"Symbol not supported or invalid: {e}")
             except (ccxt.InsufficientFunds, ccxt.InvalidOrder, ccxt.BadRequest):
                 raise  # Permanent errors — don't retry
             except ccxt.BaseError as e:

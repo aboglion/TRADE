@@ -40,16 +40,22 @@ class PortfolioService:
 
     def __init__(
         self,
-        gateway,
+        gateway: ExchangeGateway,
         deviation_threshold: float = DEFAULT_DEVIATION_THRESHOLD,
+        allow_market_orders: bool = False,
+        is_futures: bool = False,
     ):
         """
         Args:
-            gateway: ExchangeGateway or DryRunExchange instance.
+            gateway: Exchange client.
             deviation_threshold: Minimum weight difference to trigger trade.
+            allow_market_orders: If True, execute rebalance via market orders.
+            is_futures: If True, allows short selling and bypasses spot balance limits.
         """
         self._gateway = gateway
         self._deviation_threshold = deviation_threshold
+        self._allow_market_orders = allow_market_orders
+        self._is_futures = is_futures
 
     def get_portfolio(
         self,
@@ -74,24 +80,25 @@ class PortfolioService:
         for currency, bal in balances.items():
             if not isinstance(bal, dict) or "total" not in bal:
                 continue
-
             total = float(bal.get("total", 0))
             free = float(bal.get("free", 0))
             locked = float(bal.get("used", 0) or bal.get("locked", 0) or 0)
-
-            # Determine USD value
+            
+            # USDT margin balance in futures already includes unrealized PnL of positions
             if currency in ("USDT", "BUSD", "USDC", "USD"):
                 value_usd = total
+                total_value += value_usd
             else:
+                # If Spot, keep asset values
                 pair = f"{currency}/USDT"
                 price = prices.get(pair, 0.0)
                 if price <= 0:
-                    # Try to fetch from exchange
                     try:
                         price = self._gateway.fetch_ticker_price(pair)
                     except Exception:
                         price = 0.0
                 value_usd = total * price
+                total_value += value_usd
 
             holdings[currency] = AssetHolding(
                 symbol=currency,
@@ -100,7 +107,47 @@ class PortfolioService:
                 total=total,
                 value_usd=value_usd,
             )
-            total_value += value_usd
+
+        # Merge Futures Positions
+        try:
+            positions = self._gateway.fetch_positions()
+            for pos in positions:
+                sym = pos.get("symbol", "")
+                base = sym.split("/")[0] if "/" in sym else sym.replace("USDT", "")
+                contracts = float(pos.get("contracts", 0) or 0)
+                side = pos.get("side", "")
+                
+                # In CCXT, if side is short, contracts might be positive but we need it negative
+                if side == "short" and contracts > 0:
+                    contracts = -contracts
+                
+                entry_price = float(pos.get("entryPrice", 0) or 0)
+                unrealized_pnl = float(pos.get("unrealizedPnl", 0) or 0)
+                leverage = float(pos.get("leverage", 1) or 1)
+                
+                # For positions, we track the notional value (absolute contracts * current price)
+                # But it does not add to total_value because total_value is USDT Margin Balance.
+                price = prices.get(sym, 0.0)
+                if price <= 0:
+                    try:
+                        price = self._gateway.fetch_ticker_price(sym)
+                    except Exception:
+                        price = 0.0
+                        
+                value_usd = abs(contracts) * price
+                
+                holdings[base] = AssetHolding(
+                    symbol=base,
+                    free=0.0,
+                    locked=0.0,
+                    total=contracts,
+                    value_usd=value_usd,
+                    unrealized_pnl=unrealized_pnl,
+                    entry_price=entry_price,
+                    leverage=leverage
+                )
+        except Exception as e:
+            logger.warning("Failed to fetch futures positions: %s", e)
 
         snapshot = PortfolioSnapshot(
             timestamp_ms=int(time.time() * 1000),
@@ -200,9 +247,9 @@ class PortfolioService:
                 )
                 continue
 
-            # Check available balance for sells
+            # Check available balance for sells (skip if Futures, as shorts are allowed)
             base = symbol.split("/")[0]
-            if deviation < 0:  # Need to sell
+            if deviation < 0 and not self._is_futures:  # Need to sell in Spot
                 holding = portfolio.holdings.get(base)
                 available = holding.free if holding else 0.0
                 if amount > available:
@@ -212,13 +259,17 @@ class PortfolioService:
                     if amount <= 0:
                         continue
 
+            order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
+            order_price = None if order_type == OrderType.MARKET else price
+
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
                 symbol=symbol,
                 side=OrderSide.SELL if deviation < 0 else OrderSide.BUY,
-                order_type=OrderType.LIMIT,
+                order_type=order_type,
                 amount=amount,
-                price=price,
+                price=order_price,
+                estimated_price=price,
                 reason=f"Rebalance: {deviation:+.2%} deviation in {symbol}",
                 candle_ts=target.timestamp_ms,
             )
@@ -240,7 +291,8 @@ class PortfolioService:
                 logger.info(
                     "  %s %s %.8f @ %.4f ($%.2f) — %s",
                     o.side.value.upper(), o.symbol, o.amount,
-                    o.price or 0, (o.amount * (o.price or 0)),
+                    (o.price or o.estimated_price or 0), 
+                    (o.amount * (o.price or o.estimated_price or 0)),
                     o.reason,
                 )
         else:

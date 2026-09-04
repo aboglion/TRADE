@@ -4,6 +4,8 @@
  * Polls REST API endpoints every 5 seconds and updates the UI dynamically.
  */
 
+let activeErrorsList = [];
+
 document.addEventListener("DOMContentLoaded", () => {
     initClock();
     fetchDashboardData();
@@ -19,6 +21,18 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("closeDryRunModal").addEventListener("click", closeDryRunModal);
     document.getElementById("cancelDryRunSave").addEventListener("click", closeDryRunModal);
     document.getElementById("saveDryRunBalances").addEventListener("click", saveDryRunBalances);
+
+    // Reset Stats listener
+    document.getElementById("resetStatsBtn").addEventListener("click", resetSessionStats);
+
+    // System Errors modal event listeners
+    document.getElementById("systemHealthCard").addEventListener("click", openErrorsModal);
+    document.getElementById("closeErrorsModal").addEventListener("click", closeErrorsModal);
+    document.getElementById("closeErrorsModalFooter").addEventListener("click", closeErrorsModal);
+    document.getElementById("clearErrorsBtn").addEventListener("click", clearSystemErrors);
+    document.getElementById("errorsModal").addEventListener("click", (e) => {
+        if (e.target.id === "errorsModal") closeErrorsModal();
+    });
 });
 
 // ── Toast Notifications ─────────────────────────────────────
@@ -114,13 +128,27 @@ async function fetchStatus() {
         }
 
         // Health
+        activeErrorsList = data.critical_errors || [];
         const healthVal = document.getElementById("systemHealthVal");
+        const healthDetail = document.getElementById("systemHealthDetail");
         if (data.critical_errors_count > 0) {
-            healthVal.textContent = `${data.critical_errors_count} ERRORS`;
+            healthVal.textContent = `${data.critical_errors_count} ERROR${data.critical_errors_count > 1 ? 'S' : ''}`;
             healthVal.className = "metric-value text-danger";
+            if (healthDetail) {
+                healthDetail.textContent = data.latest_error || "System error recorded in logs";
+                healthDetail.className = "metric-value text-danger-subtle";
+                healthDetail.style.fontSize = "0.8rem";
+                healthDetail.title = data.latest_error || "";
+            }
         } else {
             healthVal.textContent = "HEALTHY";
             healthVal.className = "metric-value text-success";
+            if (healthDetail) {
+                healthDetail.textContent = "All systems operational";
+                healthDetail.className = "metric-subtitle text-muted";
+                healthDetail.style.fontSize = "0.85rem";
+                healthDetail.title = "";
+            }
         }
 
         if (data.last_run_ts) {
@@ -155,6 +183,25 @@ async function fetchPortfolio() {
 
         // Total Portfolio Value
         document.getElementById("portfolioValue").textContent = `$${data.total_value_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+        // PNL and Fees
+        const initialVal = data.session_initial_value_usd;
+        if (initialVal !== null && initialVal !== undefined) {
+            const pnl = data.total_value_usd - initialVal;
+            const pnlPct = initialVal > 0 ? (pnl / initialVal) * 100 : 0;
+            const pnlEl = document.getElementById("sessionPnl");
+            if (pnlEl) {
+                pnlEl.textContent = `PNL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+                pnlEl.className = pnl >= 0 ? "tag tag-buy" : "tag tag-sell";
+            }
+        }
+        
+        const feesObj = data.session_fees || {};
+        const feeStrings = Object.entries(feesObj).map(([curr, amt]) => `${amt.toFixed(4)} ${curr}`);
+        const feeEl = document.getElementById("sessionFees");
+        if (feeEl) {
+            feeEl.textContent = feeStrings.length > 0 ? `Fees: ${feeStrings.join(', ')}` : "Fees: 0.00";
+        }
 
         // Allocation Bars
         const container = document.getElementById("allocationBars");
@@ -212,7 +259,7 @@ async function fetchOrders() {
         document.getElementById("orderCount").textContent = allOrders.length;
 
         if (allOrders.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="6" class="empty-cell text-muted">No orders executed yet</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="7" class="empty-cell text-muted">No orders executed yet</td></tr>`;
             return;
         }
 
@@ -221,12 +268,16 @@ async function fetchOrders() {
             const sideClass = (o.side || "").toLowerCase() === "buy" ? "tag-buy" : "tag-sell";
             const priceStr = o.average_price ? `$${o.average_price.toFixed(2)}` : (o.price ? `$${o.price.toFixed(2)}` : "MARKET");
 
+            const feeVal = typeof o.fees === 'number' ? o.fees : 0.0;
+            const feeStr = feeVal > 0 ? `${feeVal.toFixed(4)} ${o.fee_currency || ''}`.trim() : "0.0";
+
             tr.innerHTML = `
                 <td><code>${(o.client_order_id || o.exchange_order_id || "N/A").substring(0, 18)}</code></td>
                 <td><span class="tag ${sideClass}">${(o.side || "BUY").toUpperCase()}</span></td>
                 <td><strong>${o.symbol}</strong></td>
                 <td>${o.amount || o.filled_amount || 0}</td>
                 <td>${priceStr}</td>
+                <td>${feeStr}</td>
                 <td><span class="tag tag-filled">${(o.status || "FILLED").toUpperCase()}</span></td>
             `;
             tableBody.appendChild(tr);
@@ -339,6 +390,32 @@ async function toggleKillSwitch() {
     }
 }
 
+async function resetSessionStats() {
+    if (!confirm("Are you sure you want to reset PNL, fees, and order history? This will start a new session.")) {
+        return;
+    }
+    
+    const btn = document.getElementById("resetStatsBtn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Resetting...";
+
+    try {
+        const res = await fetch("/api/reset_stats", { method: "POST" });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast("🧹 נתוני הסשן (רווחים ועמלות) אופסו בהצלחה!", "success");
+            await fetchDashboardData();
+        } else {
+            showToast("❌ Error resetting stats: " + (data.error || "Unknown error"), "error");
+        }
+    } catch (err) {
+        showToast("❌ Failed to reset stats: " + err, "error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "🧹 Reset PNL Stats";
+    }
+}
+
 // ── Dry Run Holdings Modal Functions ─────────────────────────
 
 async function openDryRunModal() {
@@ -395,5 +472,54 @@ async function saveDryRunBalances() {
     } finally {
         saveBtn.disabled = false;
         saveBtn.textContent = "עדכן אחזקות 💾";
+    }
+}
+
+// ── System Errors Diagnostic Modal Functions ───────────────────
+
+function openErrorsModal() {
+    const modal = document.getElementById("errorsModal");
+    const listEl = document.getElementById("modalErrorList");
+    listEl.innerHTML = "";
+
+    if (!activeErrorsList || activeErrorsList.length === 0) {
+        listEl.innerHTML = `<li class="empty-errors">אין שגיאות רשומות — המערכת פועלת באופן תקין לחלוטין ✓</li>`;
+    } else {
+        activeErrorsList.forEach((err, idx) => {
+            const li = document.createElement("li");
+            li.className = "error-item";
+            li.textContent = `#${idx + 1}: ${err}`;
+            listEl.appendChild(li);
+        });
+    }
+    modal.classList.add("active");
+}
+
+function closeErrorsModal() {
+    const modal = document.getElementById("errorsModal");
+    modal.classList.remove("active");
+}
+
+async function clearSystemErrors() {
+    const btn = document.getElementById("clearErrorsBtn");
+    btn.disabled = true;
+    btn.textContent = "מנקה...";
+
+    try {
+        const res = await fetch("/api/errors/clear", { method: "POST" });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast("🧹 שגיאות המערכת נוקו בהצלחה!", "success");
+            activeErrorsList = [];
+            closeErrorsModal();
+            await fetchStatus();
+        } else {
+            showToast("❌ שגיאה בניקוי שגיאות: " + (data.error || "Unknown error"), "error");
+        }
+    } catch (err) {
+        showToast("❌ שגיאה בניקוי שגיאות: " + err, "error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "🧹 נקה שגיאות (Clear Errors)";
     }
 }

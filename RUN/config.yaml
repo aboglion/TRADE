@@ -1,70 +1,53 @@
-# ═══════════════════════════════════════════════════════════
-# Dynamic Regime-Adaptive 2.0x — Bot Configuration
-# ═══════════════════════════════════════════════════════════
-# Copy this file to config.yaml and adjust as needed.
-# API keys must be set via environment variables (see .env.example).
-
-run_mode: DRY_RUN  # BACKTEST | DRY_RUN | TESTNET | LIVE
-
+run_mode: DRY_RUN
 exchange:
   name: binance
   timeout_ms: 30000
   rate_limit: true
   max_retries: 3
   retry_delay_base_ms: 1000
-
 strategy:
-  timeframe: "4h"
-  warmup_candles: 300
+  timeframe: 4h
+  warmup_candles: 1200
   sma_regime_period: 150
   bull_leverage: 2.0
-  bear_short_hedge_weight: 0.0    # 0 = hold USDT in bear (spot-only)
-  cash_apr: 0.0                   # Set > 0 if using Binance Earn
-
+  bear_short_hedge_weight: 0.0
+  cash_apr: 0.0
   assets:
     BTC:
-      weight: 0.40
+      weight: 0.4
       pair: BTC/USDT
     ETH:
-      weight: 0.30
+      weight: 0.3
       pair: ETH/USDT
     SOL:
-      weight: 0.30
+      weight: 0.3
       pair: SOL/USDT
-
 risk:
   max_orders_per_cycle: 6
   max_single_order_usd: 10000
-  max_portfolio_change_pct: 0.20
+  max_portfolio_change_pct: 0.2
   min_seconds_between_orders: 10
   allowed_symbols:
-    - BTC/USDT
-    - ETH/USDT
-    - SOL/USDT
+  - BTC/USDT
+  - ETH/USDT
+  - SOL/USDT
   banned_symbols: []
-  allow_market_orders: false
+  allow_market_orders: true
   kill_switch: false
-  max_drawdown_pct: 0.60
+  max_drawdown_pct: 0.6
   min_order_value_usd: 11.0
-
 state:
   backend: json
   path: data/bot_state.json
-
 logging:
   level: INFO
   file: logs/bot.log
-
 scheduler:
-  poll_interval_seconds: 300       # 5 minutes
+  poll_interval_seconds: 300
   max_consecutive_errors: 10
-
 dry_run:
   initial_balances:
-    USDT: 1000.0
-    BTC: 0.02
-    ETH: 0.5
+    USDT: 421.14769317
+    BTC: 0.0148827
+    ETH: 0.5506405
     SOL: 0.0
-
-
-

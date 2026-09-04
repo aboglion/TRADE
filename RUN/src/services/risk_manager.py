@@ -79,7 +79,7 @@ class RiskManager(IRiskManager):
         # All checks passed
         self._cycle_order_count += 1
         self._last_order_time = time.time()
-        order_value = intent.amount * (intent.price or 0)
+        order_value = self._get_order_value(intent)
         self._cycle_total_value += order_value
 
         logger.info(
@@ -131,10 +131,14 @@ class RiskManager(IRiskManager):
             return False, "Market orders are disabled in risk config"
         return True, ""
 
+    def _get_order_value(self, intent: OrderIntent) -> float:
+        price = intent.price or intent.estimated_price or 0.0
+        return intent.amount * price
+
     def _check_max_order_value(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> Tuple[bool, str]:
-        order_value = intent.amount * (intent.price or 0)
+        order_value = self._get_order_value(intent)
         if order_value > self._config.max_single_order_usd:
             return (
                 False,
@@ -171,7 +175,7 @@ class RiskManager(IRiskManager):
     ) -> Tuple[bool, str]:
         if portfolio.total_value_usd <= 0:
             return True, ""
-        order_value = intent.amount * (intent.price or 0)
+        order_value = self._get_order_value(intent)
         total_change = (self._cycle_total_value + order_value) / portfolio.total_value_usd
         if total_change > self._config.max_portfolio_change_pct:
             return (
@@ -184,7 +188,7 @@ class RiskManager(IRiskManager):
     def _check_min_order_value(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> Tuple[bool, str]:
-        order_value = intent.amount * (intent.price or 0)
+        order_value = self._get_order_value(intent)
         if order_value < self._config.min_order_value_usd:
             return (
                 False,

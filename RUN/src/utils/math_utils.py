@@ -11,16 +11,39 @@ import math
 from typing import Any, Dict, Optional
 
 
-def truncate_to_precision(value: float, precision: int) -> float:
+def parse_precision_to_decimals(precision: Any) -> int:
+    """
+    Convert CCXT precision representation to an integer number of decimal places.
+
+    CCXT returns precision in two formats:
+    - Decimal places as int/str: 4, 8, "4" -> 4
+    - Tick / step size as float/str: 0.0001, 1e-05 -> 4, 5
+    """
+    if precision is None:
+        return 8
+    try:
+        val = float(precision)
+    except (ValueError, TypeError):
+        return 8
+
+    if val <= 0:
+        return 0
+    if val < 1.0:
+        return int(round(abs(math.log10(val))))
+    return int(val)
+
+
+def truncate_to_precision(value: float, precision: Any) -> float:
     """
     Truncate (floor) a float to *precision* decimal places.
 
     Unlike round(), this never rounds up — critical for order amounts
     where exceeding available balance causes rejection.
     """
-    if precision <= 0:
+    dec_places = parse_precision_to_decimals(precision)
+    if dec_places <= 0:
         return float(int(value))
-    factor = 10 ** precision
+    factor = 10 ** dec_places
     return math.floor(value * factor) / factor
 
 
@@ -61,7 +84,7 @@ def is_above_min_order(
 def compute_order_amount(
     target_value_usd: float,
     price: float,
-    amount_precision: int,
+    amount_precision: Any,
     min_amount: float,
     min_notional: float,
 ) -> Optional[float]:
@@ -93,11 +116,15 @@ def get_market_constraints(market_info: Dict[str, Any]) -> Dict[str, Any]:
     price_limits = limits.get("price", {})
     cost_limits = limits.get("cost", {})
 
+    raw_amt_prec = precision.get("amount", 8)
+    raw_price_prec = precision.get("price", 2)
+
     return {
-        "amount_precision": precision.get("amount", 8),
-        "price_precision": precision.get("price", 2),
+        "amount_precision": parse_precision_to_decimals(raw_amt_prec),
+        "price_precision": parse_precision_to_decimals(raw_price_prec),
         "min_amount": amount_limits.get("min", 0.0) or 0.0,
         "max_amount": amount_limits.get("max") or float("inf"),
         "min_price": price_limits.get("min", 0.0) or 0.0,
         "min_notional": cost_limits.get("min", 10.0) or 10.0,
     }
+

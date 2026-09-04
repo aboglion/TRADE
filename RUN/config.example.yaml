@@ -15,7 +15,7 @@ exchange:
 
 strategy:
   timeframe: "4h"
-  warmup_candles: 300
+  warmup_candles: 1000
   sma_regime_period: 150
   bull_leverage: 2.0
   bear_short_hedge_weight: 0.0    # 0 = hold USDT in bear (spot-only)

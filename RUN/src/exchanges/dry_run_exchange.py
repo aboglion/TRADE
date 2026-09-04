@@ -31,12 +31,15 @@ class DryRunExchange:
         self,
         initial_balances: Optional[Dict[str, float]] = None,
         fee_rate: float = 0.001,  # 0.1% taker fee
+        on_balance_change: Optional[Any] = None,
     ):
         self._balances: Dict[str, Dict[str, float]] = {}
+        self._positions: Dict[str, Dict[str, Any]] = {}  # Futures positions
         self._orders: Dict[str, Dict[str, Any]] = {}
         self._last_prices: Dict[str, float] = {}
         self._fee_rate = fee_rate
         self._markets: Dict[str, Any] = {}
+        self._on_balance_change = on_balance_change
 
         # Initialize default balances
         defaults = initial_balances or {"USDT": 1000.0}
@@ -51,6 +54,14 @@ class DryRunExchange:
             "DryRunExchange initialized with balances: %s",
             {k: v["total"] for k, v in self._balances.items()},
         )
+
+    def _notify_balance_change(self) -> None:
+        if callable(self._on_balance_change):
+            try:
+                simplified = {k: round(v["total"], 8) for k, v in self._balances.items() if v["total"] >= 0}
+                self._on_balance_change(simplified)
+            except Exception as e:
+                logger.error("Error in on_balance_change callback: %s", e)
 
     # ── Market Data ──────────────────────────────────────────
 
@@ -146,7 +157,34 @@ class DryRunExchange:
     # ── Account ──────────────────────────────────────────────
 
     def fetch_balance(self) -> Dict[str, Dict[str, float]]:
-        return dict(self._balances)
+        # In futures, update USDT total based on unrealized PnL
+        bal = dict(self._balances)
+        if "USDT" in bal:
+            unrealized = sum(p.get("unrealizedPnl", 0.0) for p in self.fetch_positions())
+            bal["USDT"] = {
+                "free": bal["USDT"]["free"],
+                "used": bal["USDT"]["used"],
+                "total": bal["USDT"]["free"] + unrealized
+            }
+        return bal
+
+    def fetch_positions(self) -> List[Dict[str, Any]]:
+        # Update unrealized PnL dynamically
+        positions_list = []
+        for symbol, pos in self._positions.items():
+            if pos["contracts"] == 0:
+                continue
+            
+            price = self._last_prices.get(symbol, pos["entryPrice"])
+            if pos["side"] == "long":
+                pnl = (price - pos["entryPrice"]) * pos["contracts"]
+            else:
+                pnl = (pos["entryPrice"] - price) * abs(pos["contracts"])
+                
+            pos["unrealizedPnl"] = pnl
+            positions_list.append(dict(pos))
+            
+        return positions_list
 
     def set_balances(self, balances: Dict[str, float]) -> None:
         """Update or reset simulated holdings in Dry Run mode."""
@@ -163,6 +201,7 @@ class DryRunExchange:
             "[DRY_RUN] Balances updated: %s",
             {k: v["total"] for k, v in self._balances.items()},
         )
+        self._notify_balance_change()
 
     # ── Orders ───────────────────────────────────────────────
 
@@ -181,30 +220,61 @@ class DryRunExchange:
         cost = intent.amount * price
         fee = cost * self._fee_rate
 
-        # Check balances
-        if intent.side == OrderSide.BUY:
-            available = self._get_free(quote)
-            needed = cost + fee
-            if available < needed:
-                return OrderResult(
-                    client_order_id=intent.client_order_id,
-                    status=OrderStatus.FAILED,
-                    error_message=f"Insufficient {quote}: need {needed:.4f}, have {available:.4f}",
-                )
-            # Deduct quote, add base
-            self._adjust_balance(quote, -needed)
-            self._adjust_balance(base, intent.amount)
-        else:  # SELL
-            available = self._get_free(base)
-            if available < intent.amount:
-                return OrderResult(
-                    client_order_id=intent.client_order_id,
-                    status=OrderStatus.FAILED,
-                    error_message=f"Insufficient {base}: need {intent.amount:.8f}, have {available:.8f}",
-                )
-            # Deduct base, add quote
-            self._adjust_balance(base, -intent.amount)
-            self._adjust_balance(quote, cost - fee)
+        # Basic margin/balance check
+        quote = intent.symbol.split("/")[1] if "/" in intent.symbol else "USDT"
+        if intent.side == OrderSide.BUY and cost > (self._get_free(quote) + 1e-4):
+             return OrderResult(
+                 client_order_id=intent.client_order_id,
+                 status=OrderStatus.FAILED,
+                 error_message=f"Insufficient balance: need {cost} {quote}",
+             )
+
+        # Handle Futures execution
+        is_futures = True  # We migrated to futures
+        
+        if is_futures:
+            pos = self._positions.get(intent.symbol, {
+                "symbol": intent.symbol,
+                "contracts": 0.0,
+                "entryPrice": 0.0,
+                "side": "long",
+                "unrealizedPnl": 0.0,
+                "leverage": 1.0,
+            })
+            
+            # Calculate realized PnL if closing/reducing
+            realized_pnl = 0.0
+            contracts_before = pos["contracts"]
+            qty_delta = intent.amount if intent.side == OrderSide.BUY else -intent.amount
+            
+            # Simple average entry price logic for adding to position
+            if (contracts_before > 0 and qty_delta > 0) or (contracts_before < 0 and qty_delta < 0):
+                total_cost = (abs(contracts_before) * pos["entryPrice"]) + (intent.amount * price)
+                pos["entryPrice"] = total_cost / (abs(contracts_before) + intent.amount)
+            elif contracts_before != 0:
+                # Reducing position
+                reduce_qty = min(abs(contracts_before), intent.amount)
+                if contracts_before > 0:
+                    realized_pnl = (price - pos["entryPrice"]) * reduce_qty
+                else:
+                    realized_pnl = (pos["entryPrice"] - price) * reduce_qty
+                
+                # If flipped side, update entry price for remainder
+                if intent.amount > abs(contracts_before):
+                    pos["entryPrice"] = price
+                    
+            pos["contracts"] += qty_delta
+            if pos["contracts"] > 0:
+                pos["side"] = "long"
+            elif pos["contracts"] < 0:
+                pos["side"] = "short"
+                
+            self._positions[intent.symbol] = pos
+            
+            # Apply realized PnL and fees to USDT balance
+            self._adjust_balance("USDT", realized_pnl - fee)
+            quote = "USDT"
+            base = intent.symbol.split("/")[0]
 
         exchange_id = f"dry_{uuid.uuid4().hex[:12]}"
         result = OrderResult(
@@ -233,6 +303,7 @@ class DryRunExchange:
             result.fee_currency,
             {k: round(v["total"], 4) for k, v in self._balances.items() if v["total"] > 0},
         )
+        self._notify_balance_change()
 
         return result
 

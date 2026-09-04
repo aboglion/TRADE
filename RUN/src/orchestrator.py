@@ -78,6 +78,12 @@ class BotOrchestrator:
 
         self._consecutive_errors = 0
 
+    def clear_critical_errors(self) -> None:
+        """Clear critical errors both in memory and persist state."""
+        self._state.critical_errors.clear()
+        self._consecutive_errors = 0
+        self._save_state(success=True)
+
     def run_once(self) -> bool:
         """
         Execute a single trading cycle.
@@ -109,11 +115,18 @@ class BotOrchestrator:
             open_orders = self._order_manager.check_open_orders_on_exchange()
             if open_orders:
                 logger.warning(
-                    "Open orders detected on exchange, skipping trading cycle "
-                    "until resolved"
+                    "Open orders detected on exchange — attempting stale order cleanup..."
                 )
-                self._save_state(success=True)
-                return True
+                canceled = self._order_manager.cancel_stale_open_orders()
+                if canceled < len(open_orders):
+                    logger.warning(
+                        "Some open orders could not be canceled (%d/%d remain open). "
+                        "Skipping trading cycle until resolved.",
+                        len(open_orders) - canceled,
+                        len(open_orders),
+                    )
+                    self._save_state(success=True)
+                    return True
 
             # 3. Check for new closed candles
             assets = self._config.strategy.assets
@@ -182,10 +195,16 @@ class BotOrchestrator:
             portfolio = self._portfolio_service.get_portfolio(prices=prices)
 
             # 7. Compute strategy signals
+            if hasattr(self._strategy, "import_state"):
+                self._strategy.import_state(self._state.strategy_state)
+
             decision = self._strategy.compute_signals(
                 candles_by_asset=candles_by_asset,
                 portfolio=portfolio,
             )
+
+            if hasattr(self._strategy, "export_state"):
+                self._state.strategy_state.update(self._strategy.export_state())
 
             self._state.last_regime = decision.regime.value
 
