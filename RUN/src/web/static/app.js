@@ -316,14 +316,13 @@ async function triggerCycle() {
 }
 
 async function toggleKillSwitch() {
-    if (!confirm("האם אתה בטוח שברצונך לשנות את מצב עצירת החירום (Kill Switch)?")) return;
     try {
         const res = await fetch("/api/killswitch", { method: "POST" });
         const data = await res.json();
         await fetchStatus();
-        const statusMsg = data.kill_switch ? "⚠️ Kill Switch הופעל! פקודות חסומות." : "🛡️ Kill Switch כובה. מסחר פעיל.";
-        showToast(statusMsg, data.kill_switch ? "error" : "info");
+        const statusMsg = data.kill_switch ? "⚠️ KILL SWITCH ACTIVATED — Trading Halts!" : "🛡️ KILL SWITCH DEACTIVATED — Trading Active";
+        showToast(statusMsg, data.kill_switch ? "error" : "success");
     } catch (err) {
-        showToast("❌ שגיאה בשינוי Kill Switch: " + err, "error");
+        showToast("❌ Failed to toggle kill switch: " + err, "error");
     }
 }
