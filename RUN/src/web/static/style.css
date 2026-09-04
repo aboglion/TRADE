@@ -97,8 +97,16 @@ body {
 
 .header-status {
     display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+
+.status-row {
+    display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.6rem;
+    flex-wrap: wrap;
 }
 
 /* Badges */
@@ -112,6 +120,7 @@ body {
     font-weight: 600;
     letter-spacing: 0.5px;
     border: 1px solid transparent;
+    white-space: nowrap;
 }
 
 .mode-badge {
@@ -156,6 +165,7 @@ body {
     padding: 0.4rem 0.8rem;
     border-radius: 8px;
     border: 1px solid var(--border-card);
+    white-space: nowrap;
 }
 
 /* Buttons */
@@ -171,6 +181,7 @@ body {
     cursor: pointer;
     transition: all 0.2s ease;
     border: none;
+    white-space: nowrap;
 }
 
 .btn-outline {
@@ -236,6 +247,22 @@ body {
 @media (max-width: 1024px) {
     .dashboard-grid { grid-template-columns: 1fr; }
     .full-width, .half-width { grid-column: span 1; }
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    .header-status {
+        align-items: flex-start;
+        width: 100%;
+    }
+    .status-row {
+        width: 100%;
+        justify-content: flex-start;
+    }
 }
 
 .card-header {
@@ -357,20 +384,62 @@ body {
     background: #06080d;
     border: 1px solid var(--border-card);
     border-radius: 10px;
-    padding: 1rem;
+    padding: 0.85rem;
     font-family: var(--font-mono);
     font-size: 0.78rem;
-    height: 280px;
+    height: 320px;
     overflow-y: auto;
+    overflow-x: auto;
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.35rem;
 }
 
-.log-line {
-    white-space: pre-wrap;
-    word-break: break-all;
-    line-height: 1.4;
+.log-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    white-space: nowrap;
+    padding: 0.2rem 0.3rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+    transition: background 0.15s ease;
+}
+.log-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.log-time {
+    color: #6b7280;
+    font-size: 0.73rem;
+    flex-shrink: 0;
+}
+
+.log-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+.log-level-info { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+.log-level-warn { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.log-level-error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+.log-module {
+    color: #a78bfa;
+    font-weight: 600;
+    font-size: 0.73rem;
+    flex-shrink: 0;
+    background: rgba(167, 139, 250, 0.08);
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+}
+
+.log-msg {
+    color: #d1d5db;
+    overflow-wrap: anywhere;
 }
 
 .pulse-indicator {
@@ -378,4 +447,21 @@ body {
     color: var(--accent-success);
     font-weight: 600;
     letter-spacing: 1px;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
 }

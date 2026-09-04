@@ -203,14 +203,49 @@ async function fetchLogs() {
         const wasScrolledToBottom = logConsole.scrollHeight - logConsole.clientHeight <= logConsole.scrollTop + 20;
 
         logConsole.innerHTML = "";
-        (data.logs || []).forEach(line => {
-            const div = document.createElement("div");
-            div.className = "log-line";
-            if (line.includes("ERROR") || line.includes("CRITICAL")) div.className += " text-danger";
-            else if (line.includes("WARNING")) div.className += " text-accent";
-            else if (line.includes("CYCLE COMPLETE")) div.className += " text-success";
-            div.textContent = line;
-            logConsole.appendChild(div);
+        
+        if (!data.logs || data.logs.length === 0) {
+            logConsole.innerHTML = `<div class="log-line text-muted">No logs recorded yet</div>`;
+            return;
+        }
+
+        data.logs.forEach(rawLine => {
+            const row = document.createElement("div");
+            row.className = "log-row";
+
+            // Parse pattern: "2026-09-04T12:16:54+0300 | INFO     | bot.services.state | Loaded state..."
+            const match = rawLine.match(/^(\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})\S*)\s*\|\s*(\w+)\s*\|\s*([\w\.]+)\s*\|\s*(.*)$/);
+
+            if (match) {
+                const timeStr = match[2]; // "12:16:54"
+                const level = match[3].trim().toUpperCase(); // "INFO"
+                const fullModule = match[4].trim(); // "bot.services.state"
+                const msg = match[5].trim();
+
+                // Shorten module name: "bot.services.state" -> "state"
+                const moduleShort = fullModule.replace(/^bot\.(services\.|data\.|exchanges\.)?/, "");
+
+                let levelClass = "log-level-info";
+                if (level === "ERROR" || level === "CRITICAL") levelClass = "log-level-error";
+                else if (level === "WARNING" || level === "WARN") levelClass = "log-level-warn";
+
+                row.innerHTML = `
+                    <span class="log-time">${timeStr}</span>
+                    <span class="log-badge ${levelClass}">${level}</span>
+                    <span class="log-module">${moduleShort}</span>
+                    <span class="log-msg">${escapeHtml(msg)}</span>
+                `;
+            } else {
+                // Fallback for unparsed lines
+                let lineClass = "log-msg";
+                if (rawLine.includes("ERROR") || rawLine.includes("CRITICAL")) lineClass += " text-danger";
+                else if (rawLine.includes("WARNING")) lineClass += " text-accent";
+                else if (rawLine.includes("CYCLE COMPLETE")) lineClass += " text-success";
+
+                row.innerHTML = `<span class="${lineClass}">${escapeHtml(rawLine)}</span>`;
+            }
+
+            logConsole.appendChild(row);
         });
 
         if (wasScrolledToBottom) {
@@ -220,6 +255,10 @@ async function fetchLogs() {
     } catch (err) {
         console.error("Failed to fetch logs:", err);
     }
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ── Actions ────────────────────────────────────────────────
