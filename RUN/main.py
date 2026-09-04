@@ -65,6 +65,17 @@ def parse_args() -> argparse.Namespace:
         help="Run a single cycle and exit",
     )
     parser.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Start live monitoring web dashboard server",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8090,
+        help="Web dashboard port (default: 8090)",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Test exchange connectivity and exit",
@@ -188,6 +199,21 @@ def main() -> None:
         state_store=state_store,
         state=state,
     )
+
+    # Start Dashboard Server if requested
+    if args.dashboard:
+        import threading
+        from src.web.server import run_dashboard_server
+        web_server = run_dashboard_server(
+            config=config,
+            gateway=gateway,
+            state_store=state_store,
+            orchestrator=orchestrator,
+            port=args.port,
+        )
+        t = threading.Thread(target=web_server.serve_forever, daemon=True)
+        t.start()
+        logger.info("⚡ Live Web Dashboard running at http://localhost:%d", args.port)
 
     # Run
     if args.once:

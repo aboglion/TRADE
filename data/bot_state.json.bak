@@ -1,11 +1,15 @@
 {
   "version": 1,
-  "last_processed_candle_ts": {},
-  "last_regime": null,
+  "last_processed_candle_ts": {
+    "BTC/USDT": 1788494400000,
+    "ETH/USDT": 1788494400000,
+    "SOL/USDT": 1788494400000
+  },
+  "last_regime": "bear",
   "pending_orders": [],
   "completed_orders": [],
-  "last_run_ts": 1788513099131,
-  "last_cycle_success": false,
+  "last_run_ts": 1788513266657,
+  "last_cycle_success": true,
   "critical_errors": [
     "Cycle error: AttributeError: 'DryRunExchange' object has no attribute 'fetch_ohlcv_all'"
   ],
