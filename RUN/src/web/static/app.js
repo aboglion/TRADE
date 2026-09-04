@@ -9,11 +9,45 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchDashboardData();
     setInterval(fetchDashboardData, 5000);
 
-    // Event listeners
-    document.getElementById("refreshBtn").addEventListener("click", fetchDashboardData);
+    // Event listeners with instant visual feedback
+    document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
     document.getElementById("triggerCycleBtn").addEventListener("click", triggerCycle);
     document.getElementById("killSwitchBtn").addEventListener("click", toggleKillSwitch);
 });
+
+// ── Toast Notifications ─────────────────────────────────────
+
+function showToast(message, type = "info") {
+    let container = document.getElementById("toastContainer");
+    if (!container) {
+        container = document.createElement("div");
+        container.id = "toastContainer";
+        container.className = "toast-container";
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add("show");
+    }, 10);
+
+    setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+async function manualRefresh() {
+    const btn = document.getElementById("refreshBtn");
+    btn.classList.add("spinning");
+    await fetchDashboardData();
+    setTimeout(() => btn.classList.remove("spinning"), 500);
+    showToast("✨ נתוני הדשבורד רועננו בהצלחה!", "success");
+}
 
 // ── Clock ──────────────────────────────────────────────────
 
@@ -272,8 +306,9 @@ async function triggerCycle() {
         const res = await fetch("/api/trigger", { method: "POST" });
         const data = await res.json();
         await fetchDashboardData();
+        showToast("▶ מחזור מסחר הופעל והושלם בהצלחה!", "success");
     } catch (err) {
-        alert("Failed to trigger cycle: " + err);
+        showToast("❌ שגיאה בהפעלת מחזור: " + err, "error");
     } finally {
         btn.disabled = false;
         btn.textContent = "▶ Run Instant Cycle";
@@ -281,12 +316,14 @@ async function triggerCycle() {
 }
 
 async function toggleKillSwitch() {
-    if (!confirm("Are you sure you want to toggle the Kill Switch?")) return;
+    if (!confirm("האם אתה בטוח שברצונך לשנות את מצב עצירת החירום (Kill Switch)?")) return;
     try {
         const res = await fetch("/api/killswitch", { method: "POST" });
         const data = await res.json();
-        fetchStatus();
+        await fetchStatus();
+        const statusMsg = data.kill_switch ? "⚠️ Kill Switch הופעל! פקודות חסומות." : "🛡️ Kill Switch כובה. מסחר פעיל.";
+        showToast(statusMsg, data.kill_switch ? "error" : "info");
     } catch (err) {
-        alert("Failed to toggle kill switch: " + err);
+        showToast("❌ שגיאה בשינוי Kill Switch: " + err, "error");
     }
 }
