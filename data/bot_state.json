@@ -8,7 +8,7 @@
   "last_regime": "bear",
   "pending_orders": [],
   "completed_orders": [],
-  "last_run_ts": 1788513278143,
+  "last_run_ts": 1788513586608,
   "last_cycle_success": true,
   "critical_errors": [
     "Cycle error: AttributeError: 'DryRunExchange' object has no attribute 'fetch_ohlcv_all'"

@@ -60,15 +60,21 @@ body {
 /* Navbar */
 .navbar {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    padding: 1rem 1.5rem;
+    justify-content: center;
+    text-align: center;
+    padding: 1.2rem 1.5rem;
+    gap: 0.85rem;
 }
 
 .brand {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
+    justify-content: center;
+    text-align: center;
+    gap: 0.4rem;
 }
 
 .logo-icon {
@@ -98,15 +104,19 @@ body {
 .header-status {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
+    justify-content: center;
     gap: 0.5rem;
+    width: 100%;
 }
 
 .status-row {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.6rem;
     flex-wrap: wrap;
+    width: 100%;
 }
 
 /* Badges */
@@ -249,26 +259,17 @@ body {
     .full-width, .half-width { grid-column: span 1; }
 }
 
-@media (max-width: 768px) {
-    .navbar {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
-    }
-    .header-status {
-        align-items: flex-start;
-        width: 100%;
-    }
-    .status-row {
-        width: 100%;
-        justify-content: flex-start;
-    }
+.metric-card {
+    align-items: center;
+    text-align: center;
 }
 
 .card-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
 }
 
 .card-title {
@@ -276,6 +277,7 @@ body {
     font-weight: 600;
     color: var(--text-muted);
     letter-spacing: 0.5px;
+    text-align: center;
 }
 
 .card-icon {
@@ -286,6 +288,13 @@ body {
     font-size: 2.2rem;
     font-weight: 700;
     color: #ffffff;
+    text-align: center;
+}
+
+.metric-subtitle {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
 }
 
 .metric-subtitle {
