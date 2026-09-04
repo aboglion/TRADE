@@ -111,3 +111,16 @@ class TestRebalancePlan:
         # Tiny changes should be filtered out
         for o in plan.orders:
             assert o.amount * (o.price or 0) >= 10.0  # Min notional
+
+
+class TestDryRunBalancesUpdate:
+    def test_set_balances_updates_dry_exchange(self, dry_exchange, portfolio_service):
+        dry_exchange.set_balances({"USDT": 2500.0, "SOL": 10.0})
+        bal = dry_exchange.fetch_balance()
+
+        assert bal["USDT"]["total"] == 2500.0
+        assert bal["SOL"]["total"] == 10.0
+        assert "BTC" not in bal
+
+        snap = portfolio_service.get_portfolio(prices={"SOL/USDT": 100.0})
+        assert snap.total_value_usd == 3500.0  # 2500 USDT + 10 SOL * $100

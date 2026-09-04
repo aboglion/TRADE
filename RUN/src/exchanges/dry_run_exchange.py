@@ -148,6 +148,22 @@ class DryRunExchange:
     def fetch_balance(self) -> Dict[str, Dict[str, float]]:
         return dict(self._balances)
 
+    def set_balances(self, balances: Dict[str, float]) -> None:
+        """Update or reset simulated holdings in Dry Run mode."""
+        self._balances.clear()
+        for currency, amount in balances.items():
+            curr_upper = currency.upper()
+            amt_float = max(0.0, float(amount))
+            self._balances[curr_upper] = {
+                "free": amt_float,
+                "used": 0.0,
+                "total": amt_float,
+            }
+        logger.info(
+            "[DRY_RUN] Balances updated: %s",
+            {k: v["total"] for k, v in self._balances.items()},
+        )
+
     # ── Orders ───────────────────────────────────────────────
 
     def create_order(self, intent: OrderIntent) -> OrderResult:

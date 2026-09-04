@@ -61,6 +61,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_orders()
         elif self.path == "/api/logs":
             self._handle_logs()
+        elif self.path == "/api/dry_run/balances":
+            self._handle_get_dry_run_balances()
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
             if self.path in ("/", ""):
@@ -72,6 +74,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_trigger_cycle()
         elif self.path == "/api/killswitch":
             self._handle_toggle_killswitch()
+        elif self.path == "/api/dry_run/balances":
+            self._handle_update_dry_run_balances()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -167,6 +171,51 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._send_json({"kill_switch": self.config.risk.kill_switch, "message": f"Kill switch {status}"})
         else:
             self._send_json({"error": "Config unavailable"}, status=500)
+
+    def _handle_get_dry_run_balances(self) -> None:
+        if hasattr(self.gateway, "fetch_balance"):
+            raw_bal = self.gateway.fetch_balance()
+            balances = {k: v.get("total", 0.0) for k, v in raw_bal.items() if isinstance(v, dict)}
+        elif self.config and hasattr(self.config, "dry_run"):
+            balances = self.config.dry_run.initial_balances
+        else:
+            balances = {"USDT": 1000.0}
+        self._send_json({"balances": balances})
+
+    def _handle_update_dry_run_balances(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+            new_balances = data.get("balances", {})
+
+            parsed = {str(k).upper(): float(v) for k, v in new_balances.items() if float(v) >= 0}
+            if not parsed:
+                self._send_json({"error": "No valid balances provided"}, status=400)
+                return
+
+            if hasattr(self.gateway, "set_balances"):
+                self.gateway.set_balances(parsed)
+
+            if self.config and hasattr(self.config, "dry_run"):
+                self.config.dry_run.initial_balances = parsed
+
+            # Option to clear old test order history when setting new simulated holdings
+            if data.get("clear_history", True) and self.state_store:
+                try:
+                    state = self.state_store.load_state()
+                    state.completed_orders.clear()
+                    state.pending_orders.clear()
+                    self.state_store.save_state(state)
+                    logger.info("Cleared old order history from bot state store")
+                except Exception as ex:
+                    logger.warning("Could not clear state store history: %s", ex)
+
+            logger.info("Dry run balances updated via API: %s", parsed)
+            self._send_json({"success": True, "balances": parsed, "message": "Dry Run holdings updated successfully"})
+        except Exception as e:
+            logger.error("Failed to update dry run balances via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
 
     # ── Helpers ──────────────────────────────────────────────
 

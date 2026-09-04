@@ -143,10 +143,10 @@ def main() -> None:
     # Initialize exchange gateway
     if config.run_mode == RunMode.DRY_RUN:
         gateway = DryRunExchange(
-            initial_balances={"USDT": 1000.0},
+            initial_balances=config.dry_run.initial_balances,
             fee_rate=0.001,
         )
-        logger.info("Using DRY_RUN simulated exchange")
+        logger.info("Using DRY_RUN simulated exchange with initial balances: %s", config.dry_run.initial_balances)
     else:
         gateway = ExchangeGateway(config.exchange, config.run_mode)
         gateway.initialize()

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "last_processed_candle_ts": {
+    "BTC/USDT": 1788494400000,
+    "ETH/USDT": 1788494400000,
+    "SOL/USDT": 1788494400000
+  },
+  "last_regime": "bear",
+  "pending_orders": [],
+  "completed_orders": [
+    {
+      "client_order_id": "bot_20260904094438_446e3502",
+      "symbol": "SOL/USDT",
+      "side": "sell",
+      "order_type": "limit",
+      "amount": 5.0,
+      "price": 103.72,
+      "reason": "Rebalance: -4.28% deviation in SOL/USDT",
+      "status": "filled",
+      "timestamp": 1788515078251,
+      "exchange_order_id": "dry_546d0f4690d0",
+      "filled_amount": 5.0,
+      "average_price": 103.72,
+      "fees": 0.5186000000000001,
+      "error_message": ""
+    }
+  ],
+  "last_run_ts": 1788516077760,
+  "last_cycle_success": true,
+  "critical_errors": [],
+  "strategy_state": {}
+}

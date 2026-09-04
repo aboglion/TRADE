@@ -76,9 +76,6 @@ class PortfolioService:
                 continue
 
             total = float(bal.get("total", 0))
-            if total <= 0:
-                continue
-
             free = float(bal.get("free", 0))
             locked = float(bal.get("used", 0) or bal.get("locked", 0) or 0)
 

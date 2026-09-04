@@ -83,6 +83,13 @@ class SchedulerConfig:
     max_consecutive_errors: int = 10
 
 
+@dataclass
+class DryRunConfig:
+    initial_balances: Dict[str, float] = field(
+        default_factory=lambda: {"USDT": 1000.0}
+    )
+
+
 # ── Main config container ────────────────────────────────────
 
 @dataclass
@@ -94,6 +101,7 @@ class BotConfig:
     state: StateConfig = field(default_factory=StateConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    dry_run: DryRunConfig = field(default_factory=DryRunConfig)
 
 
 class ConfigManager:
@@ -122,6 +130,7 @@ class ConfigManager:
         self._load_state(config, raw)
         self._load_logging(config, raw)
         self._load_scheduler(config, raw)
+        self._load_dry_run(config, raw)
         self._validate(config)
 
         self._config = config
@@ -217,6 +226,13 @@ class ConfigManager:
             poll_interval_seconds=sc_raw.get("poll_interval_seconds", 300),
             max_consecutive_errors=sc_raw.get("max_consecutive_errors", 10),
         )
+
+    def _load_dry_run(self, config: BotConfig, raw: Dict) -> None:
+        dr_raw = raw.get("dry_run", {})
+        init_bal = dr_raw.get("initial_balances", {"USDT": 1000.0})
+        # Ensure values are float
+        parsed_bal = {str(k).upper(): float(v) for k, v in init_bal.items()}
+        config.dry_run = DryRunConfig(initial_balances=parsed_bal)
 
     # ── Validation ───────────────────────────────────────────
 

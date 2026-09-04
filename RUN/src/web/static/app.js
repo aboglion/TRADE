@@ -13,6 +13,12 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
     document.getElementById("triggerCycleBtn").addEventListener("click", triggerCycle);
     document.getElementById("killSwitchBtn").addEventListener("click", toggleKillSwitch);
+
+    // Dry Run modal event listeners
+    document.getElementById("dryRunModalBtn").addEventListener("click", openDryRunModal);
+    document.getElementById("closeDryRunModal").addEventListener("click", closeDryRunModal);
+    document.getElementById("cancelDryRunSave").addEventListener("click", closeDryRunModal);
+    document.getElementById("saveDryRunBalances").addEventListener("click", saveDryRunBalances);
 });
 
 // ── Toast Notifications ─────────────────────────────────────
@@ -166,15 +172,21 @@ async function fetchPortfolio() {
             else if (symbol === "ETH") bgClass = "bg-eth";
             else if (symbol === "SOL") bgClass = "bg-sol";
 
+            const isZero = (h.total === 0 || h.weight_pct === 0);
+            const totalStr = isZero ? "0.00" : (h.total < 1 ? h.total.toFixed(4) : h.total.toFixed(2));
+            const valueStr = h.value_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const fillWidth = isZero ? 0 : Math.min(100, Math.max(1, h.weight_pct));
+
             const row = document.createElement("div");
-            row.className = "alloc-row";
+            row.className = `alloc-row ${isZero ? "alloc-row-zero" : ""}`;
             row.innerHTML = `
                 <div class="alloc-info">
-                    <span>${symbol}</span>
-                    <span>${h.total.toFixed(4)} ($${h.value_usd.toFixed(2)}) — <strong>${h.weight_pct}%</strong></span>
+                    <span class="alloc-symbol">${symbol}</span>
+                    <span class="alloc-center">${totalStr} ($${valueStr})</span>
+                    <span class="alloc-weight"><strong>${h.weight_pct}%</strong></span>
                 </div>
                 <div class="progress-bg">
-                    <div class="progress-fill ${bgClass}" style="width: ${Math.min(100, Math.max(2, h.weight_pct))}%"></div>
+                    <div class="progress-fill ${bgClass}" style="width: ${fillWidth}%"></div>
                 </div>
             `;
             container.appendChild(row);
@@ -324,5 +336,64 @@ async function toggleKillSwitch() {
         showToast(statusMsg, data.kill_switch ? "error" : "success");
     } catch (err) {
         showToast("❌ Failed to toggle kill switch: " + err, "error");
+    }
+}
+
+// ── Dry Run Holdings Modal Functions ─────────────────────────
+
+async function openDryRunModal() {
+    const modal = document.getElementById("dryRunModal");
+    try {
+        const res = await fetch("/api/dry_run/balances");
+        if (res.ok) {
+            const data = await res.json();
+            const bal = data.balances || {};
+            document.getElementById("dryUsdtInput").value = bal.USDT !== undefined ? bal.USDT : 1000;
+            document.getElementById("dryBtcInput").value = bal.BTC !== undefined ? bal.BTC : 0;
+            document.getElementById("dryEthInput").value = bal.ETH !== undefined ? bal.ETH : 0;
+            document.getElementById("drySolInput").value = bal.SOL !== undefined ? bal.SOL : 0;
+        }
+    } catch (e) {
+        console.error("Failed to load dry run balances:", e);
+    }
+    modal.classList.add("active");
+}
+
+function closeDryRunModal() {
+    const modal = document.getElementById("dryRunModal");
+    modal.classList.remove("active");
+}
+
+async function saveDryRunBalances() {
+    const usdt = parseFloat(document.getElementById("dryUsdtInput").value) || 0;
+    const btc = parseFloat(document.getElementById("dryBtcInput").value) || 0;
+    const eth = parseFloat(document.getElementById("dryEthInput").value) || 0;
+    const sol = parseFloat(document.getElementById("drySolInput").value) || 0;
+
+    const balances = { USDT: usdt, BTC: btc, ETH: eth, SOL: sol };
+
+    const saveBtn = document.getElementById("saveDryRunBalances");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "שומר...";
+
+    try {
+        const res = await fetch("/api/dry_run/balances", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ balances }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast("⚙️ אחזקות DRY RUN עודכנו בהצלחה!", "success");
+            closeDryRunModal();
+            await fetchPortfolio();
+        } else {
+            showToast("❌ שגיאה בעדכון אחזקות: " + (data.error || "Unknown error"), "error");
+        }
+    } catch (err) {
+        showToast("❌ שגיאה בעדכון אחזקות: " + err, "error");
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "עדכן אחזקות 💾";
     }
 }
