@@ -21,3 +21,5 @@ run_dry:
 	python3 RUN/main.py --mode DRY_RUN --dashboard --port 8090
 run:
 	python3 RUN/main.py --mode LIVE --dashboard --port 8090
+run_check:
+	python3 RUN/main.py --mode LIVE --check
