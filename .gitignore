@@ -26,9 +26,11 @@ htmlcov/
 .vscode/
 .idea/
 
-# Data artifacts generated dynamically if needed
-# Dynamic state files
-data/bot_state.json*
+# Dynamic state files and logs (runtime generated)
+**/bot_state*.json*
+**/fast_forward_state*.json*
+logs/
+*.log
 *.bak
 
 
