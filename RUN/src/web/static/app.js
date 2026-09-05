@@ -50,8 +50,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Event listeners with instant visual feedback
     document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
     document.getElementById("triggerCycleBtn").addEventListener("click", triggerCycle);
-    document.getElementById("killSwitchBtn").addEventListener("click", toggleKillSwitch);
+    document.getElementById("killSwitchBtn").addEventListener("click", openKillSwitchModal);
     document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
+
+    // Kill Switch Modal listeners
+    document.getElementById("closeKillSwitchModal").addEventListener("click", closeKillSwitchModal);
+    document.getElementById("cancelKillSwitchBtn").addEventListener("click", closeKillSwitchModal);
+    document.getElementById("confirmKillSwitchBtn").addEventListener("click", confirmToggleKillSwitch);
+    document.getElementById("killSwitchModal").addEventListener("click", (e) => {
+        if (e.target.id === "killSwitchModal") closeKillSwitchModal();
+    });
 
     // Dry Run modal event listeners
     document.getElementById("dryRunModalBtn").addEventListener("click", openDryRunModal);
@@ -585,7 +593,32 @@ async function triggerCycle() {
     }
 }
 
-async function toggleKillSwitch() {
+function openKillSwitchModal() {
+    const modal = document.getElementById("killSwitchModal");
+    const desc = document.getElementById("killSwitchModalDesc");
+    const ksBtn = document.getElementById("killSwitchBtn");
+
+    const isActive = ksBtn.textContent.includes("ACTIVE");
+
+    if (isActive) {
+        desc.innerHTML = "מצב נוכחי: <strong style='color:#ef4444;'>⚠️ KILL SWITCH פעיל</strong>.<br>האם אתה בטוח שברצונך לבטל את ה-Kill Switch ולהחזיר את המסחר לפעילות תקינה?";
+    } else {
+        desc.innerHTML = "מצב נוכחי: <strong>🛡️ KILL SWITCH כבוי (תקין)</strong>.<br>האם אתה בטוח שברצונך להפעיל את ה-Kill Switch ולעצור מיידית פקודות מסחר חדשות במערכת?";
+    }
+
+    if (modal) modal.classList.add("active");
+}
+
+function closeKillSwitchModal() {
+    const modal = document.getElementById("killSwitchModal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function confirmToggleKillSwitch() {
+    closeKillSwitchModal();
+    const btn = document.getElementById("confirmKillSwitchBtn");
+    btn.disabled = true;
+
     try {
         const res = await apiFetch("/api/killswitch", { method: "POST" });
         const data = await res.json();
@@ -594,6 +627,8 @@ async function toggleKillSwitch() {
         showToast(statusMsg, data.kill_switch ? "error" : "success");
     } catch (err) {
         showToast("❌ Failed to toggle kill switch: " + err, "error");
+    } finally {
+        btn.disabled = false;
     }
 }
 

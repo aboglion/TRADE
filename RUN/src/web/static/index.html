@@ -259,6 +259,28 @@
         </div>
     </div>
 
+    <!-- Kill Switch Safety Confirmation Modal -->
+    <div class="modal-backdrop" id="killSwitchModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 style="color: var(--accent-danger);">🛡️ אישור פעולת Kill Switch</h3>
+                <button class="modal-close" id="closeKillSwitchModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc" id="killSwitchModalDesc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
+                    האם אתה בטוח שברצונך לשנות את מצב ה-Kill Switch?
+                </p>
+                <div style="background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fecdd3; line-height: 1.4;">
+                    ⚠️ <strong>שים לב:</strong> הפעלת ה-Kill Switch תחסום באופן מיידי את כל פקודות המסחר החדשות במערכת ותקפיא את הפעילות עד לביטול היזום.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelKillSwitchBtn">ביטול</button>
+                <button class="btn btn-danger" id="confirmKillSwitchBtn">אישור וביצוע 🛡️</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Password Protection Auth Modal -->
     <div class="modal-backdrop" id="loginModal">
         <div class="modal-content glass modal-auth">
@@ -278,6 +300,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=8"></script>
 </body>
 </html>
