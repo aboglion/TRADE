@@ -223,6 +223,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_reset_stats()
         elif clean_path == "/api/updater/toggle":
             self._handle_toggle_updater()
+        elif clean_path == "/api/updater/pull":
+            self._handle_manual_pull()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -373,7 +375,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         ignored_patterns = ("Loaded state:", "Portfolio snapshot:", "No state file found at")
         if os.path.exists(log_path):
             try:
-                with open(log_path, "r", encoding="utf-8") as f:
+                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
                     all_lines = f.readlines()
                     filtered = [
                         line.strip() for line in all_lines
@@ -574,6 +576,42 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             logger.error("Failed to toggle auto-updater: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_manual_pull(self) -> None:
+        try:
+            import subprocess
+            project_dir = Path(__file__).resolve().parent.parent.parent.parent
+            res = subprocess.run(
+                ["git", "pull", "origin", "main"],
+                cwd=str(project_dir),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            stdout = res.stdout.strip() if res.stdout else ""
+            stderr = res.stderr.strip() if res.stderr else ""
+            output_msg = stdout or stderr
+
+            updated = "Already up to date" not in stdout and "Already up-to-date" not in stdout
+            
+            logger.info("Manual Git Pull executed via API: %s (Output: %s)", "Success" if res.returncode == 0 else "Failed", output_msg)
+
+            if res.returncode == 0:
+                msg = "קוד מעודכן נמשך בהצלחה מ-GitHub!" if updated else "הקוד כבר מעודכן לגרסה העדכנית ביותר (Already up to date)."
+                self._send_json({
+                    "success": True,
+                    "updated": updated,
+                    "message": msg,
+                    "output": output_msg
+                })
+            else:
+                self._send_json({
+                    "success": False,
+                    "error": f"Git pull failed: {output_msg}"
+                }, status=500)
+        except Exception as e:
+            logger.error("Failed to execute manual git pull: %s", e)
             self._send_json({"error": str(e)}, status=500)
 
     # ── Helpers ──────────────────────────────────────────────

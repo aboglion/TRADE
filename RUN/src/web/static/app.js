@@ -52,6 +52,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("triggerCycleBtn").addEventListener("click", triggerCycle);
     document.getElementById("killSwitchBtn").addEventListener("click", openKillSwitchModal);
     document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
+    document.getElementById("manualPullBtn").addEventListener("click", triggerManualPull);
 
     // Kill Switch Modal listeners
     document.getElementById("closeKillSwitchModal").addEventListener("click", closeKillSwitchModal);
@@ -65,10 +66,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("dryRunModalBtn").addEventListener("click", openDryRunModal);
     document.getElementById("closeDryRunModal").addEventListener("click", closeDryRunModal);
     document.getElementById("cancelDryRunSave").addEventListener("click", closeDryRunModal);
-    document.getElementById("saveDryRunBalances").addEventListener("click", saveDryRunBalances);
+    document.getElementById("saveDryRunBalances").addEventListener("click", openDryRunConfirmModal);
+    document.getElementById("dryRunModal").addEventListener("click", (e) => {
+        if (e.target.id === "dryRunModal") closeDryRunModal();
+    });
 
-    // Reset Stats listener
-    document.getElementById("resetStatsBtn").addEventListener("click", resetSessionStats);
+    // Dry Run Confirm modal event listeners
+    document.getElementById("closeDryRunConfirmModal").addEventListener("click", closeDryRunConfirmModal);
+    document.getElementById("cancelDryRunConfirmBtn").addEventListener("click", closeDryRunConfirmModal);
+    document.getElementById("confirmDryRunSaveBtn").addEventListener("click", confirmSaveDryRunBalances);
+    document.getElementById("dryRunConfirmModal").addEventListener("click", (e) => {
+        if (e.target.id === "dryRunConfirmModal") closeDryRunConfirmModal();
+    });
 
     // System Errors modal event listeners
     document.getElementById("systemHealthCard").addEventListener("click", openErrorsModal);
@@ -283,6 +292,33 @@ async function toggleUpdater() {
     }
 }
 
+async function triggerManualPull() {
+    const btn = document.getElementById("manualPullBtn");
+    btn.disabled = true;
+    btn.innerHTML = `<span>⏳</span> <span class="btn-text">Pulling...</span>`;
+
+    try {
+        const res = await apiFetch("/api/updater/pull", { method: "POST" });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            if (data.updated) {
+                showToast(`🚀 ${data.message}`, "success");
+            } else {
+                showToast(`ℹ️ ${data.message}`, "info");
+            }
+            await fetchLogs();
+        } else {
+            showToast("❌ שגיאה במשיכת קוד מ-GitHub: " + (data.error || data.message || "Unknown error"), "error");
+        }
+    } catch (err) {
+        showToast("❌ שגיאת תקשורת בביצוע Git Pull: " + err, "error");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<span>⬇️</span> <span class="btn-text">Git Pull</span>`;
+    }
+}
+
 // ── Status & Regime ────────────────────────────────────────
 
 async function fetchStatus() {
@@ -456,17 +492,42 @@ async function fetchOrders() {
         document.getElementById("orderCount").textContent = allOrders.length;
 
         if (allOrders.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="7" class="empty-cell text-muted">No orders executed yet</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">No orders executed yet</td></tr>`;
             return;
         }
 
         allOrders.slice(0, 15).forEach(o => {
             const tr = document.createElement("tr");
-            const sideClass = (o.side || "").toLowerCase() === "buy" ? "tag-buy" : "tag-sell";
-            const priceStr = o.average_price ? `$${o.average_price.toFixed(2)}` : (o.price ? `$${o.price.toFixed(2)}` : "MARKET");
+            const side = (o.side || "BUY").toUpperCase();
+            const sideClass = side === "BUY" ? "tag-buy" : "tag-sell";
+            const priceVal = o.average_price || o.price || 0;
+            const priceStr = priceVal > 0 ? `$${priceVal.toFixed(2)}` : "MARKET";
+            const amountVal = o.filled_amount || o.amount || 0;
 
             const feeVal = typeof o.fees === 'number' ? o.fees : 0.0;
             const feeStr = feeVal > 0 ? `${feeVal.toFixed(4)} ${o.fee_currency || ''}`.trim() : "0.0";
+
+            // Calculate Net Total USD (Net cash flow impact after fees)
+            const grossTotalUsd = amountVal * priceVal;
+            let netTotalStr = "--";
+            let netStyle = "color: var(--text-muted);";
+
+            if (grossTotalUsd > 0) {
+                let feeInUsd = feeVal;
+                if (o.fee_currency && o.fee_currency !== "USDT" && o.fee_currency !== "USD" && priceVal > 0) {
+                    feeInUsd = feeVal * priceVal;
+                }
+
+                if (side === "BUY") {
+                    const netCost = grossTotalUsd + feeInUsd;
+                    netTotalStr = `-$${netCost.toFixed(2)}`;
+                    netStyle = "color: var(--accent-danger, #f43f5e);";
+                } else {
+                    const netReceived = grossTotalUsd - feeInUsd;
+                    netTotalStr = `+$${netReceived.toFixed(2)}`;
+                    netStyle = "color: var(--accent-success, #10b981); font-weight: 600;";
+                }
+            }
 
             let statusRaw = (o.status || "FILLED").toUpperCase();
             let statusDisplay = statusRaw;
@@ -485,11 +546,12 @@ async function fetchOrders() {
 
             tr.innerHTML = `
                 <td><code>${(o.client_order_id || o.exchange_order_id || "N/A").substring(0, 18)}</code></td>
-                <td><span class="tag ${sideClass}">${(o.side || "BUY").toUpperCase()}</span></td>
+                <td><span class="tag ${sideClass}">${side}</span></td>
                 <td><strong>${o.symbol}</strong></td>
-                <td>${o.amount || o.filled_amount || 0}</td>
+                <td>${amountVal}</td>
                 <td>${priceStr}</td>
                 <td>${feeStr}</td>
+                <td><span style="${netStyle}">${netTotalStr}</span></td>
                 <td><span class="tag ${statusClass}">${statusDisplay}</span></td>
             `;
             tableBody.appendChild(tr);
@@ -683,7 +745,30 @@ function closeDryRunModal() {
     modal.classList.remove("active");
 }
 
-async function saveDryRunBalances() {
+function openDryRunConfirmModal() {
+    const usdt = parseFloat(document.getElementById("dryUsdtInput").value) || 0;
+    const btc = parseFloat(document.getElementById("dryBtcInput").value) || 0;
+    const eth = parseFloat(document.getElementById("dryEthInput").value) || 0;
+    const sol = parseFloat(document.getElementById("drySolInput").value) || 0;
+
+    const desc = document.getElementById("dryRunConfirmModalDesc");
+    if (desc) {
+        desc.innerHTML = `האם אתה בטוח שברצונך לעדכן את אחזקות ה-DRY RUN במערכת לערכים הבאים?<br><br>` +
+            `<strong style="color: #60a5fa; font-size: 1rem;">💵 USDT: ${usdt} | ₿ BTC: ${btc} | ⟠ ETH: ${eth} | ◎ SOL: ${sol}</strong>`;
+    }
+
+    const modal = document.getElementById("dryRunConfirmModal");
+    if (modal) modal.classList.add("active");
+}
+
+function closeDryRunConfirmModal() {
+    const modal = document.getElementById("dryRunConfirmModal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function confirmSaveDryRunBalances() {
+    closeDryRunConfirmModal();
+
     const usdt = parseFloat(document.getElementById("dryUsdtInput").value) || 0;
     const btc = parseFloat(document.getElementById("dryBtcInput").value) || 0;
     const eth = parseFloat(document.getElementById("dryEthInput").value) || 0;
@@ -691,9 +776,14 @@ async function saveDryRunBalances() {
 
     const balances = { USDT: usdt, BTC: btc, ETH: eth, SOL: sol };
 
+    const confirmBtn = document.getElementById("confirmDryRunSaveBtn");
     const saveBtn = document.getElementById("saveDryRunBalances");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "שומר...";
+
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "שומר...";
+    }
 
     try {
         const res = await apiFetch("/api/dry_run/balances", {
@@ -712,8 +802,11 @@ async function saveDryRunBalances() {
     } catch (err) {
         showToast("❌ שגיאה בעדכון אחזקות: " + err, "error");
     } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = "עדכן אחזקות 💾";
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "עדכן אחזקות 💾";
+        }
     }
 }
 

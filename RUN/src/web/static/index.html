@@ -53,6 +53,10 @@
                 </div>
 
                 <div class="toolbar-actions">
+                    <button class="btn btn-outline" id="manualPullBtn" title="משיכת עדכוני קוד ידנית מ-GitHub עכשיו (Manual Git Pull)">
+                        <span>⬇️</span> <span class="btn-text">Git Pull</span>
+                    </button>
+
                     <button class="btn btn-outline" id="toggleUpdaterBtn" title="הפעל/הקפא עדכונים אוטומטיים מ-GitHub">
                         <span>🔄</span> <span class="btn-text">Auto-Pull Active</span>
                     </button>
@@ -163,11 +167,12 @@
                                 <th>Amount</th>
                                 <th>Price</th>
                                 <th>Fee</th>
+                                <th>Total Net (USD)</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody id="ordersTableBody">
-                            <tr><td colspan="7" class="empty-cell">No order history available</td></tr>
+                            <tr><td colspan="8" class="empty-cell">No order history available</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -235,6 +240,28 @@
             <div class="modal-footer">
                 <button class="btn btn-outline" id="cancelDryRunSave">ביטול</button>
                 <button class="btn btn-action" id="saveDryRunBalances">עדכן אחזקות 💾</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DRY RUN Safety Confirmation Modal -->
+    <div class="modal-backdrop" id="dryRunConfirmModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 style="color: var(--accent-warning, #f59e0b);">⚙️ אישור עדכון אחזקות DRY RUN</h3>
+                <button class="modal-close" id="closeDryRunConfirmModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc" id="dryRunConfirmModalDesc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
+                    האם אתה בטוח שברצונך לעדכן את אחזקות ה-DRY RUN במערכת?
+                </p>
+                <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fef08a; line-height: 1.4;">
+                    ⚠️ <strong>שים לב:</strong> עדכון אחזקות ה-DRY RUN יאפס וידרוס את נתוני הפורטפוליו והיסטוריית הפקודות בסשן הנוכחי.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelDryRunConfirmBtn">ביטול</button>
+                <button class="btn btn-action" id="confirmDryRunSaveBtn">אישור וביצוע ⚙️</button>
             </div>
         </div>
     </div>

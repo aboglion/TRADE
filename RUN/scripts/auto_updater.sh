@@ -11,7 +11,7 @@ BRANCH="main"
 CHECK_INTERVAL=60 # Check interval in seconds
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 run_loop() {

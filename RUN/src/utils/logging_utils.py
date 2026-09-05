@@ -77,7 +77,7 @@ def setup_logger(
     if log_file:
         log_dir = Path(log_file).parent
         log_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler = logging.FileHandler(log_file, encoding="utf-8", errors="replace")
         file_handler.setFormatter(formatter)
         file_handler.addFilter(SecretFilter())
         logger.addHandler(file_handler)
