@@ -252,6 +252,17 @@ def main() -> None:
         t.start()
         logger.info("⚡ Live Web Dashboard running at http://localhost:%d", args.port)
 
+        # Ensure AUTO_PULL (auto_updater.sh) is active immediately on server start
+        try:
+            updater_script = Path(__file__).parent / "scripts" / "auto_updater.sh"
+            project_root = Path(__file__).parent.parent
+            if updater_script.exists():
+                import subprocess
+                subprocess.Popen([str(updater_script), "start"], cwd=str(project_root))
+                logger.info("🟢 Git Auto-Updater (AUTO_PULL) initiated automatically on server start.")
+        except Exception as ex:
+            logger.warning("Could not auto-start Git Auto-Updater: %s", ex)
+
     # Run
     if args.once:
         logger.info("Running single cycle...")

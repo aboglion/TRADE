@@ -9,14 +9,16 @@ gp:
 dry:
 	@mkdir -p logs
 	@fuser -k 8090/tcp >/dev/null 2>&1 || true
+	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
 	@nohup python3 RUN/main.py --mode DRY_RUN --dashboard --port 8090 > logs/bot.log 2>&1 &
-	@echo "⚡ Bot started in DRY_RUN mode (24/7 background on port 8090)"
+	@echo "⚡ Bot started in DRY_RUN mode (24/7 background on port 8090 with AUTO_PULL active)"
 
 run:
 	@mkdir -p logs
 	@fuser -k 8090/tcp >/dev/null 2>&1 || true
+	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
 	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup python3 RUN/main.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
-	@echo "🔥 Bot started in LIVE mode (24/7 background on port 8090)"
+	@echo "🔥 Bot started in LIVE mode (24/7 background on port 8090 with AUTO_PULL active)"
 
 # Management and Diagnostics
 stop:
