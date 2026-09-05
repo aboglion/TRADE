@@ -6,6 +6,7 @@
 
 let activeErrorsList = [];
 let authToken = sessionStorage.getItem("dash_password") || "";
+let currentRunMode = "DRY_RUN";
 
 function getAuthHeaders() {
     const headers = {};
@@ -49,10 +50,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Event listeners with instant visual feedback
     document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
-    document.getElementById("triggerCycleBtn").addEventListener("click", triggerCycle);
+    document.getElementById("triggerCycleBtn").addEventListener("click", openTriggerCycleModal);
     document.getElementById("killSwitchBtn").addEventListener("click", openKillSwitchModal);
     document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
     document.getElementById("manualPullBtn").addEventListener("click", triggerManualPull);
+
+    // Trigger Cycle Confirm Modal listeners
+    document.getElementById("closeTriggerCycleConfirmModal").addEventListener("click", closeTriggerCycleConfirmModal);
+    document.getElementById("cancelTriggerCycleConfirmBtn").addEventListener("click", closeTriggerCycleConfirmModal);
+    document.getElementById("confirmTriggerCycleBtn").addEventListener("click", confirmTriggerCycle);
+    document.getElementById("triggerCycleConfirmModal").addEventListener("click", (e) => {
+        if (e.target.id === "triggerCycleConfirmModal") closeTriggerCycleConfirmModal();
+    });
 
     // Kill Switch Modal listeners
     document.getElementById("closeKillSwitchModal").addEventListener("click", closeKillSwitchModal);
@@ -328,7 +337,8 @@ async function fetchStatus() {
         const data = await res.json();
 
         // Mode badge
-        document.getElementById("modeText").textContent = data.run_mode || "DRY_RUN";
+        currentRunMode = data.run_mode || "DRY_RUN";
+        document.getElementById("modeText").textContent = currentRunMode;
 
         // Regime badge & card
         const regimeBadge = document.getElementById("regimeBadge");
@@ -636,6 +646,64 @@ function escapeHtml(str) {
 }
 
 // ── Actions ────────────────────────────────────────────────
+
+function openTriggerCycleModal() {
+    const title = document.getElementById("triggerCycleModalTitle");
+    const desc = document.getElementById("triggerCycleModalDesc");
+    const warn = document.getElementById("triggerCycleWarningBox");
+    const confirmBtn = document.getElementById("confirmTriggerCycleBtn");
+
+    if (currentRunMode === "LIVE") {
+        if (title) {
+            title.textContent = "🔥 אישור הפעלת מחזור מסחר בלייב (LIVE MODE)";
+            title.style.color = "var(--accent-danger, #ef4444)";
+        }
+        if (desc) {
+            desc.innerHTML = "מצב נוכחי: <strong style='color:#ef4444;'>🔥 LIVE TRADING MODE</strong>.<br>האם אתה בטוח שברצונך להפעיל מחזור מסחר מיידי כעת במצב מסחר חי?";
+        }
+        if (warn) {
+            warn.style.background = "rgba(244, 63, 94, 0.15)";
+            warn.style.borderColor = "rgba(244, 63, 94, 0.4)";
+            warn.style.color = "#fecdd3";
+            warn.innerHTML = "⚠️ <strong>אזהרת מסחר אמת (LIVE MODE):</strong> המערכת פועלת במצב LIVE! הפעלת המחזור תבצע ניתוח שוק בזמן אמת ותשלח פקודות קנייה/מכירה אמיתיות לחשבון ה-Binance שלך!";
+        }
+        if (confirmBtn) {
+            confirmBtn.className = "btn btn-danger";
+            confirmBtn.textContent = "אישור והפעלת LIVE ▶";
+        }
+    } else {
+        if (title) {
+            title.textContent = "▶ אישור הפעלת מחזור מסחר (DRY RUN)";
+            title.style.color = "var(--accent-color, #3b82f6)";
+        }
+        if (desc) {
+            desc.innerHTML = "מצב נוכחי: <strong>⚙️ DRY_RUN (סימולציה)</strong>.<br>האם אתה בטוח שברצונך להפעיל מחזור מסחר מיידי כעת?";
+        }
+        if (warn) {
+            warn.style.background = "rgba(59, 130, 246, 0.12)";
+            warn.style.borderColor = "rgba(59, 130, 246, 0.35)";
+            warn.style.color = "#93c5fd";
+            warn.innerHTML = "ℹ️ <strong>מצב סימולציה (DRY RUN):</strong> הפעלת המחזור תבצע סימולציית מסחר על אחזקות ה-DRY RUN במערכת.";
+        }
+        if (confirmBtn) {
+            confirmBtn.className = "btn btn-action";
+            confirmBtn.textContent = "אישור והפעלה ▶";
+        }
+    }
+
+    const modal = document.getElementById("triggerCycleConfirmModal");
+    if (modal) modal.classList.add("active");
+}
+
+function closeTriggerCycleConfirmModal() {
+    const modal = document.getElementById("triggerCycleConfirmModal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function confirmTriggerCycle() {
+    closeTriggerCycleConfirmModal();
+    await triggerCycle();
+}
 
 async function triggerCycle() {
     const btn = document.getElementById("triggerCycleBtn");

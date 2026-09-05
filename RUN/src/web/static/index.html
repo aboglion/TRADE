@@ -266,6 +266,28 @@
         </div>
     </div>
 
+    <!-- Trigger Instant Cycle Safety Confirmation Modal -->
+    <div class="modal-backdrop" id="triggerCycleConfirmModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 id="triggerCycleModalTitle" style="color: var(--accent-color, #3b82f6);">▶ אישור הפעלת מחזור מסחר</h3>
+                <button class="modal-close" id="closeTriggerCycleConfirmModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc" id="triggerCycleModalDesc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
+                    האם אתה בטוח שברצונך להפעיל מחזור מסחר מיידי כעת?
+                </p>
+                <div id="triggerCycleWarningBox" style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #93c5fd; line-height: 1.4;">
+                    ℹ️ <strong>הפעלת מחזור:</strong> המערכת תבצע ניתוח אינדיקטורים ואיזון מחדש של הפורטפוליו.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelTriggerCycleConfirmBtn">ביטול</button>
+                <button class="btn btn-action" id="confirmTriggerCycleBtn">אישור והפעלה ▶</button>
+            </div>
+        </div>
+    </div>
+
     <!-- System Errors Diagnostic Modal -->
     <div class="modal-backdrop" id="errorsModal">
         <div class="modal-content glass">
