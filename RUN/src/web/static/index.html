@@ -1,28 +1,33 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="he" dir="ltr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Engine — Live Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quant 2.0x Engine — Live Trading Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="navbar glass">
-            <div class="brand">
-                <div class="logo-icon">⚡</div>
-                <div>
-                    <h1>QUANT 2.0x ENGINE</h1>
-                    <span class="sub-logo">Dynamic Regime-Adaptive System</span>
-                </div>
-            </div>
+    <div class="ambient-glow bg-glow-1"></div>
+    <div class="ambient-glow bg-glow-2"></div>
 
-            <div class="header-status">
-                <div class="status-row status-row-top">
+    <div class="app-container">
+        <!-- Modern Header -->
+        <header class="navbar glass">
+            <div class="navbar-top">
+                <div class="brand">
+                    <div class="logo-icon">
+                        <span>⚡</span>
+                    </div>
+                    <div class="brand-text">
+                        <h1>QUANT 2.0x ENGINE</h1>
+                        <span class="sub-logo">Dynamic Regime-Adaptive Trading System</span>
+                    </div>
+                </div>
+
+                <div class="header-badges">
                     <div class="status-badge mode-badge" id="modeBadge" title="מצב עבודה: DRY_RUN (סימולציה בלייב), TESTNET או LIVE">
                         <span class="dot pulse"></span>
                         <span id="modeText">DRY_RUN</span>
@@ -38,28 +43,34 @@
                         <span id="updaterText">AUTO-PULL: ACTIVE</span>
                     </div>
                 </div>
+            </div>
 
-                <div class="status-row status-row-bottom">
-                    <div class="clock-display" id="utcClock" title="שעון UTC מסונכרן בזמן אמת">00:00:00 UTC</div>
+            <!-- Quick Action Toolbar (Mobile & Desktop Friendly) -->
+            <div class="toolbar">
+                <div class="clock-display" id="utcClock" title="שעון UTC מסונכרן בזמן אמת">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>00:00:00 UTC</span>
+                </div>
 
+                <div class="toolbar-actions">
                     <button class="btn btn-outline" id="toggleUpdaterBtn" title="הפעל/הקפא עדכונים אוטומטיים מ-GitHub">
-                        🔄 Auto-Pull Active
+                        <span>🔄</span> <span class="btn-text">Auto-Pull Active</span>
                     </button>
 
                     <button class="btn btn-outline" id="resetStatsBtn" title="איפוס נתוני רווח והפסד ועמלות לסשן חדש">
-                        🧹 Reset PNL Stats
+                        <span>🧹</span> <span class="btn-text">Reset PNL Stats</span>
                     </button>
 
                     <button class="btn btn-outline" id="dryRunModalBtn" title="הגדרת אחזקות סימולציה (Dry Run Initial Holdings)">
-                        ⚙️ Dry Run Balances
+                        <span>⚙️</span> <span class="btn-text">Dry Run Balances</span>
                     </button>
 
-                    <button class="btn btn-outline" id="refreshBtn" title="רענן נתונים כעת (Force Immediate Refresh)">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <button class="btn btn-icon" id="refreshBtn" title="רענן נתונים כעת (Force Immediate Refresh)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     </button>
 
                     <button class="btn btn-danger" id="killSwitchBtn" title="עצירת חירום! הפעלה/ביטול של Kill Switch לחסימת פקודות חדשות במסחר">
-                        🛡️ KILL SWITCH
+                        <span>🛡️</span> <span>KILL SWITCH</span>
                     </button>
                 </div>
             </div>
@@ -70,46 +81,65 @@
             <!-- Metric Card 1: Total Value -->
             <div class="card glass metric-card">
                 <div class="card-header">
-                    <span class="card-title">TOTAL PORTFOLIO VALUE</span>
-                    <span class="card-icon">💰</span>
+                    <div class="card-header-left">
+                        <span class="card-icon">💰</span>
+                        <span class="card-title">TOTAL PORTFOLIO VALUE</span>
+                    </div>
                 </div>
-                <div class="metric-value" id="portfolioValue">$0.00</div>
-                <div class="metric-subtitle" id="portfolioSub">Allocated across BTC, ETH, SOL & USDT</div>
-                <div class="metric-subtitle" style="margin-top: 8px;">
-                    <span id="sessionPnl" class="tag">PNL: $0.00 (0.00%)</span>
-                    <span id="sessionFees" class="tag" style="margin-left: 5px;">Fees: 0.00</span>
+                <div class="metric-value-container">
+                    <div class="metric-value" id="portfolioValue">$0.00</div>
+                    <div class="metric-subtitle" id="portfolioSub">Allocated across BTC, ETH, SOL & USDT</div>
+                </div>
+                <div class="tags-container">
+                    <span id="sessionPnl" class="tag tag-pnl">PNL: +$0.00 (+0.00%)</span>
+                    <span id="sessionFees" class="tag tag-fee">Fees: 0.00</span>
                 </div>
             </div>
 
             <!-- Metric Card 2: Market Regime -->
             <div class="card glass metric-card">
                 <div class="card-header">
-                    <span class="card-title">MACRO REGIME (BTC SMA-150)</span>
-                    <span class="card-icon">📈</span>
+                    <div class="card-header-left">
+                        <span class="card-icon">📈</span>
+                        <span class="card-title">MACRO REGIME (BTC SMA-150)</span>
+                    </div>
                 </div>
-                <div class="metric-value text-accent" id="macroRegimeVal">--</div>
-                <div class="metric-subtitle" id="macroRegimeSub">Spot Protection Active (100% USDT in Bear)</div>
+                <div class="metric-value-container">
+                    <div class="metric-value text-accent" id="macroRegimeVal">--</div>
+                    <div class="metric-subtitle" id="macroRegimeSub">Spot Protection Active (100% USDT in Bear)</div>
+                </div>
             </div>
 
             <!-- Metric Card 3: Execution Health -->
             <div class="card glass metric-card clickable-card" id="systemHealthCard" title="לחץ לצפייה בהיסטוריית שגיאות ואיפוס (Click to view error log & clear)">
                 <div class="card-header">
-                    <span class="card-title">SYSTEM HEALTH</span>
-                    <span class="card-icon">🛡️</span>
+                    <div class="card-header-left">
+                        <span class="card-icon">🛡️</span>
+                        <span class="card-title">SYSTEM HEALTH</span>
+                    </div>
+                    <span class="tap-hint">Tap for details ↗</span>
                 </div>
-                <div class="metric-value text-success" id="systemHealthVal">HEALTHY</div>
-                <div class="metric-subtitle text-muted" id="systemHealthDetail">All systems operational</div>
-                <div class="metric-subtitle" id="systemHealthSub" style="margin-top: 2px;">Last cycle: <span id="lastCycleTime">Never</span></div>
+                <div class="metric-value-container">
+                    <div class="metric-value text-success" id="systemHealthVal">HEALTHY</div>
+                    <div class="metric-subtitle text-muted" id="systemHealthDetail">All systems operational</div>
+                </div>
+                <div class="metric-sub-footer" id="systemHealthSub">
+                    <span>Last cycle:</span> <strong id="lastCycleTime">Never</strong>
+                </div>
             </div>
 
             <!-- Asset Allocations Card -->
             <div class="card glass full-width">
                 <div class="card-header">
-                    <span class="card-title">PORTFOLIO ALLOCATION SPLIT</span>
-                    <button class="btn btn-sm btn-action" id="triggerCycleBtn" title="הפעלת מחזור מסחר מיידי עכשיו (Trigger Instant Trading Cycle)">▶ Run Instant Cycle</button>
+                    <div class="card-header-left">
+                        <span class="card-icon">📊</span>
+                        <span class="card-title">PORTFOLIO ALLOCATION SPLIT</span>
+                    </div>
+                    <button class="btn btn-sm btn-action" id="triggerCycleBtn" title="הפעלת מחזור מסחר מיידי עכשיו (Trigger Instant Trading Cycle)">
+                        <span>▶</span> <span>Run Instant Cycle</span>
+                    </button>
                 </div>
                 <div class="allocation-bars" id="allocationBars">
-                    <!-- Dynamic allocation progress bars injected here -->
                     <div class="empty-state">Loading portfolio holdings...</div>
                 </div>
             </div>
@@ -117,7 +147,10 @@
             <!-- Active & Pending Orders Table -->
             <div class="card glass full-width">
                 <div class="card-header">
-                    <span class="card-title">RECENT ORDERS & FILLS</span>
+                    <div class="card-header-left">
+                        <span class="card-icon">⚡</span>
+                        <span class="card-title">RECENT ORDERS & FILLS</span>
+                    </div>
                     <span class="badge-count" id="orderCount">0</span>
                 </div>
                 <div class="table-container">
@@ -143,8 +176,14 @@
             <!-- Console System Logs -->
             <div class="card glass full-width">
                 <div class="card-header">
-                    <span class="card-title">REAL-TIME SYSTEM LOGS</span>
-                    <span class="pulse-indicator">LIVE</span>
+                    <div class="card-header-left">
+                        <span class="card-icon">🖥️</span>
+                        <span class="card-title">REAL-TIME SYSTEM LOGS</span>
+                    </div>
+                    <div class="pulse-indicator">
+                        <span class="dot pulse"></span>
+                        <span>LIVE STREAM</span>
+                    </div>
                 </div>
                 <div class="log-console" id="logConsole">
                     <div class="log-line text-muted">Initializing dashboard stream...</div>
@@ -164,20 +203,32 @@
                 <p class="modal-desc">הכנס את כמויות המטבעות שיש לך כיום ב-Binance כדי שהסימולציה תרוץ עליהם בדיוק:</p>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label for="dryUsdtInput">USDT Amount:</label>
-                        <input type="number" step="any" min="0" id="dryUsdtInput" class="form-input" placeholder="1000.0">
+                        <label for="dryUsdtInput">USDT Balance:</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">💵</span>
+                            <input type="number" step="any" min="0" id="dryUsdtInput" class="form-input" placeholder="1000.0">
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label for="dryBtcInput">BTC Amount:</label>
-                        <input type="number" step="any" min="0" id="dryBtcInput" class="form-input" placeholder="0.0">
+                        <label for="dryBtcInput">BTC Balance:</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">₿</span>
+                            <input type="number" step="any" min="0" id="dryBtcInput" class="form-input" placeholder="0.0">
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label for="dryEthInput">ETH Amount:</label>
-                        <input type="number" step="any" min="0" id="dryEthInput" class="form-input" placeholder="0.0">
+                        <label for="dryEthInput">ETH Balance:</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">⟠</span>
+                            <input type="number" step="any" min="0" id="dryEthInput" class="form-input" placeholder="0.0">
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label for="drySolInput">SOL Amount:</label>
-                        <input type="number" step="any" min="0" id="drySolInput" class="form-input" placeholder="0.0">
+                        <label for="drySolInput">SOL Balance:</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">◎</span>
+                            <input type="number" step="any" min="0" id="drySolInput" class="form-input" placeholder="0.0">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -203,30 +254,30 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" id="closeErrorsModalFooter">סגור</button>
-                <button class="btn btn-action" id="clearErrorsBtn" style="background: rgba(239, 68, 68, 0.2); border-color: #ef4444; color: #ef4444;">🧹 נקה שגיאות (Clear Errors)</button>
+                <button class="btn btn-danger" id="clearErrorsBtn">🧹 נקה שגיאות (Clear Errors)</button>
             </div>
         </div>
     </div>
 
     <!-- Password Protection Auth Modal -->
     <div class="modal-backdrop" id="loginModal">
-        <div class="modal-content glass" style="max-width: 420px; text-align: center;">
-            <div class="modal-header" style="justify-content: center; width: 100%;">
-                <h3 style="font-size: 1.25rem;">🔒 דשבורד מוגן בסיסמה</h3>
+        <div class="modal-content glass modal-auth">
+            <div class="modal-header center">
+                <h3>🔒 דשבורד מוגן בסיסמה</h3>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem; align-items: center;">
-                <p class="modal-desc" style="font-size: 0.9rem; line-height: 1.4;">הכנס את סיסמת הגישה שהוגדרה בקובץ <code>.env</code> (DASHBOARD_PASSWORD):</p>
-                <div class="form-group" style="width: 100%;">
-                    <input type="password" id="dashboardPasswordInput" class="form-input" placeholder="הכנס סיסמה..." style="text-align: center; font-size: 1.1rem; padding: 0.75rem;">
+            <div class="modal-body center-body">
+                <p class="modal-desc">הכנס את סיסמת הגישה שהוגדרה בקובץ <code>.env</code> (DASHBOARD_PASSWORD):</p>
+                <div class="form-group full-width">
+                    <input type="password" id="dashboardPasswordInput" class="form-input pass-input" placeholder="הכנס סיסמה...">
                 </div>
-                <div id="loginErrorMsg" class="text-danger" style="display: none; font-size: 0.88rem; font-weight: 600;"></div>
+                <div id="loginErrorMsg" class="text-danger error-box"></div>
             </div>
-            <div class="modal-footer" style="justify-content: center; width: 100%;">
-                <button class="btn btn-action" id="submitLoginBtn" style="width: 100%; padding: 0.75rem; font-size: 1rem;">התחבר למערכת 🔑</button>
+            <div class="modal-footer center">
+                <button class="btn btn-action btn-block" id="submitLoginBtn">התחבר למערכת 🔑</button>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=6"></script>
+    <script src="app.js?v=7"></script>
 </body>
 </html>

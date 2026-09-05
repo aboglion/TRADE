@@ -399,9 +399,11 @@ async function fetchPortfolio() {
         data.holdings.forEach(h => {
             const symbol = h.symbol.toUpperCase();
             let bgClass = "bg-usdt";
-            if (symbol === "BTC") bgClass = "bg-btc";
-            else if (symbol === "ETH") bgClass = "bg-eth";
-            else if (symbol === "SOL") bgClass = "bg-sol";
+            let coinIcon = "💵";
+            if (symbol === "BTC") { bgClass = "bg-btc"; coinIcon = "₿"; }
+            else if (symbol === "ETH") { bgClass = "bg-eth"; coinIcon = "⟠"; }
+            else if (symbol === "SOL") { bgClass = "bg-sol"; coinIcon = "◎"; }
+            else if (symbol === "USDT") { bgClass = "bg-usdt"; coinIcon = "💵"; }
 
             const isZero = (h.total === 0 || h.weight_pct === 0);
             const totalStr = isZero ? "0.00" : (h.total < 1 ? h.total.toFixed(4) : h.total.toFixed(2));
@@ -412,9 +414,12 @@ async function fetchPortfolio() {
             row.className = `alloc-row ${isZero ? "alloc-row-zero" : ""}`;
             row.innerHTML = `
                 <div class="alloc-info">
-                    <span class="alloc-symbol">${symbol}</span>
-                    <span class="alloc-center">${totalStr} ($${valueStr})</span>
-                    <span class="alloc-weight"><strong>${h.weight_pct}%</strong></span>
+                    <div class="alloc-symbol-badge">
+                        <span class="coin-icon">${coinIcon}</span>
+                        <span>${symbol}</span>
+                    </div>
+                    <span class="alloc-center">${totalStr} ${symbol} ($${valueStr})</span>
+                    <span class="alloc-weight">${h.weight_pct}%</span>
                 </div>
                 <div class="progress-bg">
                     <div class="progress-fill ${bgClass}" style="width: ${fillWidth}%"></div>
