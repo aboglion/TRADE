@@ -30,3 +30,10 @@ htmlcov/
 # data/true_oos_*.csv
 data/oos_test_results.txt
 *.html
+
+# Environment variables and secrets (CRITICAL SECURITY)
+.env
+*.env
+.env.*
+!.env.example
+
