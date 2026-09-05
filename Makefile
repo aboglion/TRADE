@@ -1,4 +1,4 @@
-.PHONY: gp dry run stop status logs test check balance pull restart restart-dry
+.PHONY: gp dry run stop status logs test check balance pull restart restart-dry watch watch-stop watch-status watch-logs
 
 gp:
 	git add .
@@ -41,3 +41,17 @@ pull:
 restart: stop pull run
 
 restart-dry: stop pull dry
+
+# Git Auto-Updater Watcher
+watch:
+	@RUN/scripts/auto_updater.sh start
+
+watch-stop:
+	@RUN/scripts/auto_updater.sh stop
+
+watch-status:
+	@RUN/scripts/auto_updater.sh status
+
+watch-logs:
+	tail -n 100 -f logs/updater.log
+

@@ -445,6 +445,9 @@ async function fetchLogs() {
         }
 
         data.logs.forEach(rawLine => {
+            if (rawLine.includes("Loaded state:") || rawLine.includes("Portfolio snapshot:") || rawLine.includes("No state file found at")) {
+                return;
+            }
             const row = document.createElement("div");
             row.className = "log-row";
 

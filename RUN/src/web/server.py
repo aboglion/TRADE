@@ -366,11 +366,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def _handle_logs(self) -> None:
         log_path = self.log_file_path or (self.config.logging.file if self.config else "logs/bot.log")
         lines = []
+        ignored_patterns = ("Loaded state:", "Portfolio snapshot:", "No state file found at")
         if os.path.exists(log_path):
             try:
                 with open(log_path, "r", encoding="utf-8") as f:
                     all_lines = f.readlines()
-                    lines = [line.strip() for line in all_lines[-100:]]  # Last 100 lines
+                    filtered = [
+                        line.strip() for line in all_lines
+                        if line.strip() and not any(pat in line for pat in ignored_patterns)
+                    ]
+                    lines = filtered[-100:]  # Last 100 meaningful lines
             except Exception as e:
                 lines = [f"Error reading log file: {e}"]
         else:

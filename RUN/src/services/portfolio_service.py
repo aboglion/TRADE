@@ -155,7 +155,7 @@ class PortfolioService:
             total_value_usd=total_value,
         )
 
-        logger.info(
+        logger.debug(
             "Portfolio snapshot: total=$%.2f | %s",
             total_value,
             {k: f"${v.value_usd:.2f}" for k, v in holdings.items() if v.value_usd > 1},

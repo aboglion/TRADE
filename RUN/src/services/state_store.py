@@ -44,7 +44,7 @@ class JsonStateStore(IStateStore):
         Returns a fresh BotState if no file exists or the file is corrupt.
         """
         if not self._path.exists():
-            logger.info("No state file found at %s — starting fresh", self._path)
+            logger.debug("No state file found at %s — starting fresh", self._path)
             return BotState()
 
         try:
@@ -52,7 +52,7 @@ class JsonStateStore(IStateStore):
                 data = json.load(f)
 
             state = BotState.from_dict(data)
-            logger.info(
+            logger.debug(
                 "Loaded state: last_candle=%s, pending=%d, completed=%d",
                 state.last_processed_candle_ts,
                 len(state.pending_orders),
