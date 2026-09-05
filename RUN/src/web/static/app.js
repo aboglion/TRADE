@@ -22,7 +22,9 @@ async function apiFetch(url, options = {}) {
     };
 
     const res = await fetch(url, options);
-    if (res.status === 401) {
+    if (res.status === 401 || res.status === 429) {
+        authToken = "";
+        sessionStorage.removeItem("dash_password");
         showLoginModal();
     }
     return res;
@@ -74,8 +76,17 @@ async function checkAuthStatus() {
         const res = await fetch("/api/auth_check", { headers: getAuthHeaders() });
         if (res.ok) {
             const data = await res.json();
-            if (data.auth_required && !data.authenticated && !authToken) {
+            if (data.auth_required && !data.authenticated) {
+                authToken = "";
+                sessionStorage.removeItem("dash_password");
                 showLoginModal();
+                if (data.locked_out) {
+                    const errorMsg = document.getElementById("loginErrorMsg");
+                    if (errorMsg) {
+                        errorMsg.textContent = `חשבון ננעל זמנית! נסה שוב בעוד ${data.retry_after_seconds} שניות.`;
+                        errorMsg.style.display = "block";
+                    }
+                }
                 return false;
             }
         }
@@ -87,7 +98,13 @@ async function checkAuthStatus() {
 
 function showLoginModal() {
     const modal = document.getElementById("loginModal");
-    if (modal) modal.classList.add("active");
+    if (modal) {
+        modal.classList.add("active");
+        const input = document.getElementById("dashboardPasswordInput");
+        if (input) {
+            setTimeout(() => input.focus(), 100);
+        }
+    }
 }
 
 function closeLoginModal() {
@@ -122,10 +139,13 @@ async function performLogin() {
         if (res.ok && data.success) {
             authToken = password;
             sessionStorage.setItem("dash_password", password);
+            input.value = "";
             closeLoginModal();
             showToast("🔑 התחברת בהצלחה ללוח הבקרה!", "success");
             fetchDashboardData();
         } else {
+            authToken = "";
+            sessionStorage.removeItem("dash_password");
             errorMsg.textContent = data.error || "סיסמה שגויה (Invalid password)";
             errorMsg.style.display = "block";
         }
