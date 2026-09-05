@@ -413,7 +413,7 @@ class ExchangeGateway:
                     raise ExchangeConnectionError(
                         f"Exchange unreachable after {retries} retries: {e}"
                     )
-            except (ccxt.BadSymbol, ccxt.SymbolNotFound) as e:
+            except (ccxt.BadSymbol, getattr(ccxt, 'SymbolNotFound', ccxt.BadSymbol)) as e:
                 raise InvalidOrderError(f"Symbol not supported or invalid: {e}")
             except (ccxt.InsufficientFunds, ccxt.InvalidOrder, ccxt.BadRequest):
                 raise  # Permanent errors — don't retry
