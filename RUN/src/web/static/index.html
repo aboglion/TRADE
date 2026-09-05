@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Engine — Live Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="navbar glass">
+            <div class="brand">
+                <div class="logo-icon">⚡</div>
+                <div>
+                    <h1>QUANT 2.0x ENGINE</h1>
+                    <span class="sub-logo">Dynamic Regime-Adaptive System</span>
+                </div>
+            </div>
+
+            <div class="header-status">
+                <div class="status-row status-row-top">
+                    <div class="status-badge mode-badge" id="modeBadge" title="מצב עבודה: DRY_RUN (סימולציה בלייב), TESTNET או LIVE">
+                        <span class="dot pulse"></span>
+                        <span id="modeText">DRY_RUN</span>
+                    </div>
+
+                    <div class="status-badge regime-badge" id="regimeBadge" title="משטר שוק נוכחי: BULL (שוק עולה) / BEAR (שוק יורד) לפי BTC vs SMA-150">
+                        <span id="regimeIcon">🐂</span>
+                        <span id="regimeText">BULL REGIME</span>
+                    </div>
+                </div>
+
+                <div class="status-row status-row-bottom">
+                    <div class="clock-display" id="utcClock" title="שעון UTC מסונכרן בזמן אמת">00:00:00 UTC</div>
+
+                    <button class="btn btn-outline" id="resetStatsBtn" title="איפוס נתוני רווח והפסד ועמלות לסשן חדש">
+                        🧹 Reset PNL Stats
+                    </button>
+
+                    <button class="btn btn-outline" id="dryRunModalBtn" title="הגדרת אחזקות סימולציה (Dry Run Initial Holdings)">
+                        ⚙️ Dry Run Balances
+                    </button>
+
+                    <button class="btn btn-outline" id="refreshBtn" title="רענן נתונים כעת (Force Immediate Refresh)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
+
+                    <button class="btn btn-danger" id="killSwitchBtn" title="עצירת חירום! הפעלה/ביטול של Kill Switch לחסימת פקודות חדשות במסחר">
+                        🛡️ KILL SWITCH
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content -->
+        <main class="dashboard-grid">
+            <!-- Metric Card 1: Total Value -->
+            <div class="card glass metric-card">
+                <div class="card-header">
+                    <span class="card-title">TOTAL PORTFOLIO VALUE</span>
+                    <span class="card-icon">💰</span>
+                </div>
+                <div class="metric-value" id="portfolioValue">$0.00</div>
+                <div class="metric-subtitle" id="portfolioSub">Allocated across BTC, ETH, SOL & USDT</div>
+                <div class="metric-subtitle" style="margin-top: 8px;">
+                    <span id="sessionPnl" class="tag">PNL: $0.00 (0.00%)</span>
+                    <span id="sessionFees" class="tag" style="margin-left: 5px;">Fees: 0.00</span>
+                </div>
+            </div>
+
+            <!-- Metric Card 2: Market Regime -->
+            <div class="card glass metric-card">
+                <div class="card-header">
+                    <span class="card-title">MACRO REGIME (BTC SMA-150)</span>
+                    <span class="card-icon">📈</span>
+                </div>
+                <div class="metric-value text-accent" id="macroRegimeVal">--</div>
+                <div class="metric-subtitle" id="macroRegimeSub">Spot Protection Active (100% USDT in Bear)</div>
+            </div>
+
+            <!-- Metric Card 3: Execution Health -->
+            <div class="card glass metric-card clickable-card" id="systemHealthCard" title="לחץ לצפייה בהיסטוריית שגיאות ואיפוס (Click to view error log & clear)">
+                <div class="card-header">
+                    <span class="card-title">SYSTEM HEALTH</span>
+                    <span class="card-icon">🛡️</span>
+                </div>
+                <div class="metric-value text-success" id="systemHealthVal">HEALTHY</div>
+                <div class="metric-subtitle text-muted" id="systemHealthDetail">All systems operational</div>
+                <div class="metric-subtitle" id="systemHealthSub" style="margin-top: 2px;">Last cycle: <span id="lastCycleTime">Never</span></div>
+            </div>
+
+            <!-- Asset Allocations Card -->
+            <div class="card glass full-width">
+                <div class="card-header">
+                    <span class="card-title">PORTFOLIO ALLOCATION SPLIT</span>
+                    <button class="btn btn-sm btn-action" id="triggerCycleBtn" title="הפעלת מחזור מסחר מיידי עכשיו (Trigger Instant Trading Cycle)">▶ Run Instant Cycle</button>
+                </div>
+                <div class="allocation-bars" id="allocationBars">
+                    <!-- Dynamic allocation progress bars injected here -->
+                    <div class="empty-state">Loading portfolio holdings...</div>
+                </div>
+            </div>
+
+            <!-- Active & Pending Orders Table -->
+            <div class="card glass full-width">
+                <div class="card-header">
+                    <span class="card-title">RECENT ORDERS & FILLS</span>
+                    <span class="badge-count" id="orderCount">0</span>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Client Order ID</th>
+                                <th>Side</th>
+                                <th>Symbol</th>
+                                <th>Amount</th>
+                                <th>Price</th>
+                                <th>Fee</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ordersTableBody">
+                            <tr><td colspan="7" class="empty-cell">No order history available</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Console System Logs -->
+            <div class="card glass full-width">
+                <div class="card-header">
+                    <span class="card-title">REAL-TIME SYSTEM LOGS</span>
+                    <span class="pulse-indicator">LIVE</span>
+                </div>
+                <div class="log-console" id="logConsole">
+                    <div class="log-line text-muted">Initializing dashboard stream...</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal for DRY RUN Holdings -->
+    <div class="modal-backdrop" id="dryRunModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3>⚙️ הגדרת אחזקות DRY RUN</h3>
+                <button class="modal-close" id="closeDryRunModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">הכנס את כמויות המטבעות שיש לך כיום ב-Binance כדי שהסימולציה תרוץ עליהם בדיוק:</p>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="dryUsdtInput">USDT Amount:</label>
+                        <input type="number" step="any" min="0" id="dryUsdtInput" class="form-input" placeholder="1000.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="dryBtcInput">BTC Amount:</label>
+                        <input type="number" step="any" min="0" id="dryBtcInput" class="form-input" placeholder="0.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="dryEthInput">ETH Amount:</label>
+                        <input type="number" step="any" min="0" id="dryEthInput" class="form-input" placeholder="0.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="drySolInput">SOL Amount:</label>
+                        <input type="number" step="any" min="0" id="drySolInput" class="form-input" placeholder="0.0">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelDryRunSave">ביטול</button>
+                <button class="btn btn-action" id="saveDryRunBalances">עדכן אחזקות 💾</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Errors Diagnostic Modal -->
+    <div class="modal-backdrop" id="errorsModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3>🛡️ System Health & Error Log</h3>
+                <button class="modal-close" id="closeErrorsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">היסטוריית שגיאות מערכת שנרשמו בריצות האחרונות:</p>
+                <ul class="error-list" id="modalErrorList">
+                    <li class="empty-errors">אין שגיאות רשומות — המערכת פועלת באופן תקין לחלוטין ✓</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="closeErrorsModalFooter">סגור</button>
+                <button class="btn btn-action" id="clearErrorsBtn" style="background: rgba(239, 68, 68, 0.2); border-color: #ef4444; color: #ef4444;">🧹 נקה שגיאות (Clear Errors)</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=5"></script>
+</body>
+</html>

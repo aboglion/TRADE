@@ -15,7 +15,7 @@ dry:
 run:
 	@mkdir -p logs
 	@fuser -k 8090/tcp >/dev/null 2>&1 || true
-	@nohup python3 main.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
+	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup python3 main.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
 	@echo "🔥 Bot started in LIVE mode (24/7 background on port 8090)"
 
 # Management and Diagnostics
