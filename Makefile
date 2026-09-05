@@ -1,4 +1,4 @@
-.PHONY: gp dry run stop status logs test check balance
+.PHONY: gp dry run stop status logs test check balance pull restart restart-dry
 
 gp:
 	git add .
@@ -35,8 +35,9 @@ test:
 check:
 	python3 RUN/scripts/check_connection.py
 
-balance:
-	python3 RUN/scripts/show_balances.py
-restart:
-	@make stop
-	@make dry 
+pull:
+	git pull
+
+restart: stop pull run
+
+restart-dry: stop pull dry

@@ -1,9 +1,12 @@
-.PHONY: gp dry run stop status logs test check balance
+.PHONY: gp dry run stop status logs test check balance pull restart restart-dry
 
 gp:
 	git add .
 	git commit -m "Update trading bot system and web dashboard" || true
 	git push
+
+pull:
+	git pull
 
 # 24/7 Background execution modes
 dry:
@@ -37,3 +40,7 @@ check:
 
 balance:
 	python3 scripts/show_balances.py
+
+restart: stop pull run
+
+restart-dry: stop pull dry
