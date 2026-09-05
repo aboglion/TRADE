@@ -21,4 +21,5 @@ balance:
 	python3 scripts/show_balances.py
 
 run:
+	python3 -m pip install --break-system-packages -r RUN/requirements.txt
 	python3 main.py --mode DRY_RUN
