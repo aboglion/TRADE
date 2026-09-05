@@ -73,6 +73,8 @@ class ExchangeGateway:
             "enableRateLimit": self._config.rate_limit,
             "timeout": self._config.timeout_ms,
             "defaultType": self._config.market_type,
+            "warnWithoutSymbol": False,
+            "warnOnFetchOpenOrdersWithoutSymbol": False,
         }
         if getattr(self._config, "portfolio_margin", False):
             options["portfolioMargin"] = True
@@ -88,6 +90,11 @@ class ExchangeGateway:
             "enableRateLimit": self._config.rate_limit,
             "timeout": self._config.timeout_ms,
         })
+        self._exchange.options["warnWithoutSymbol"] = False
+        self._exchange.options["warnOnFetchOpenOrdersWithoutSymbol"] = False
+        if "fetchOpenOrders" not in self._exchange.options:
+            self._exchange.options["fetchOpenOrders"] = {}
+        self._exchange.options["fetchOpenOrders"]["warnWithoutSymbol"] = False
 
         # Switch to testnet if needed
         if self._run_mode == RunMode.TESTNET:

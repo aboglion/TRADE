@@ -53,6 +53,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
         super().end_headers()
 
+    def translate_path(self, path: str) -> str:
+        clean_path = path.split("?")[0].split("#")[0]
+        if clean_path in ("/", "", "/index", "/index.html"):
+            clean_path = "/index.html"
+        
+        rel_path = clean_path.lstrip("/")
+        target_file = (STATIC_DIR / rel_path).resolve()
+        
+        if not str(target_file).startswith(str(STATIC_DIR)):
+            target_file = STATIC_DIR / "index.html"
+            
+        return str(target_file)
+
     def do_GET(self) -> None:
         clean_path = self.path.split("?")[0]
         if clean_path == "/api/status":
