@@ -87,7 +87,7 @@
       "positions": {}
     }
   },
-  "session_initial_value_usd": null,
+  "session_initial_value_usd": 2949.5445937,
   "session_fees": {
     "BTC": 0.421569262429
   }
