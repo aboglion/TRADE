@@ -454,6 +454,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     if data.get("clear_history", True):
                         state.completed_orders.clear()
                         state.pending_orders.clear()
+                        state.session_initial_value_usd = None
+                        state.session_fees.clear()
                     self.state_store.save_state(state)
                     logger.info("Persisted dry run balances into bot_state.json")
                 except Exception as ex:
