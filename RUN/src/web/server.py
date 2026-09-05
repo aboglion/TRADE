@@ -296,13 +296,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     # ── Helpers ──────────────────────────────────────────────
 
     def _send_json(self, data: Dict[str, Any], status: int = 200) -> None:
-        content = json.dumps(data, indent=2, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(content)
+        try:
+            content = json.dumps(data, indent=2, default=str).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError):
+            logger.debug("Client disconnected during response stream.")
 
     def log_message(self, format: str, *args: Any) -> None:
         # Suppress standard HTTP logging noise in console unless debug
