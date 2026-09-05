@@ -191,6 +191,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_logs()
         elif clean_path == "/api/dry_run/balances":
             self._handle_get_dry_run_balances()
+        elif clean_path == "/api/updater":
+            self._handle_get_updater_status()
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
             if clean_path in ("/", "", "/index", "/index.html"):
@@ -219,6 +221,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_clear_errors()
         elif clean_path == "/api/reset_stats":
             self._handle_reset_stats()
+        elif clean_path == "/api/updater/toggle":
+            self._handle_toggle_updater()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -501,6 +505,75 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "State store unavailable"}, status=503)
         except Exception as e:
             logger.error("Failed to clear critical errors via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_get_updater_status(self) -> None:
+        try:
+            project_dir = Path(__file__).resolve().parent.parent.parent.parent
+            pid_file = project_dir / "logs" / "updater.pid"
+            is_running = False
+            pid = None
+
+            if pid_file.exists():
+                try:
+                    pid = int(pid_file.read_text().strip())
+                    os.kill(pid, 0)
+                    is_running = True
+                except (ValueError, OSError):
+                    is_running = False
+
+            self._send_json({
+                "active": is_running,
+                "pid": pid if is_running else None,
+                "status": "ACTIVE" if is_running else "STOPPED"
+            })
+        except Exception as e:
+            logger.error("Failed to check updater status: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_toggle_updater(self) -> None:
+        try:
+            import subprocess
+            project_dir = Path(__file__).resolve().parent.parent.parent.parent
+            script_path = project_dir / "RUN" / "scripts" / "auto_updater.sh"
+            pid_file = project_dir / "logs" / "updater.pid"
+
+            is_running = False
+            if pid_file.exists():
+                try:
+                    pid = int(pid_file.read_text().strip())
+                    os.kill(pid, 0)
+                    is_running = True
+                except (ValueError, OSError):
+                    is_running = False
+
+            if is_running:
+                subprocess.run([str(script_path), "stop"], cwd=str(project_dir), capture_output=True)
+                action_msg = "Git Auto-Updater paused"
+            else:
+                subprocess.run([str(script_path), "start"], cwd=str(project_dir), capture_output=True)
+                action_msg = "Git Auto-Updater started"
+
+            time.sleep(0.3)
+
+            is_running_now = False
+            pid_now = None
+            if pid_file.exists():
+                try:
+                    pid_now = int(pid_file.read_text().strip())
+                    os.kill(pid_now, 0)
+                    is_running_now = True
+                except (ValueError, OSError):
+                    is_running_now = False
+
+            logger.info("Auto-updater toggled via API: %s (Active: %s)", action_msg, is_running_now)
+            self._send_json({
+                "active": is_running_now,
+                "pid": pid_now if is_running_now else None,
+                "message": action_msg
+            })
+        except Exception as e:
+            logger.error("Failed to toggle auto-updater: %s", e)
             self._send_json({"error": str(e)}, status=500)
 
     # ── Helpers ──────────────────────────────────────────────

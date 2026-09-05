@@ -51,6 +51,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
     document.getElementById("triggerCycleBtn").addEventListener("click", triggerCycle);
     document.getElementById("killSwitchBtn").addEventListener("click", toggleKillSwitch);
+    document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
 
     // Dry Run modal event listeners
     document.getElementById("dryRunModalBtn").addEventListener("click", openDryRunModal);
@@ -211,7 +212,67 @@ async function fetchDashboardData() {
         fetchPortfolio(),
         fetchOrders(),
         fetchLogs(),
+        fetchUpdaterStatus(),
     ]);
+}
+
+// ── Git Auto-Updater Status ──────────────────────────────────
+
+async function fetchUpdaterStatus() {
+    try {
+        const res = await apiFetch("/api/updater");
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const badge = document.getElementById("updaterBadge");
+        const dot = document.getElementById("updaterDot");
+        const text = document.getElementById("updaterText");
+        const btn = document.getElementById("toggleUpdaterBtn");
+
+        if (data.active) {
+            if (badge) badge.className = "status-badge updater-badge";
+            if (dot) dot.className = "dot pulse";
+            if (text) text.textContent = "AUTO-PULL: ACTIVE";
+            if (btn) {
+                btn.textContent = "⏸️ Pause Auto-Pull";
+                btn.style.borderColor = "rgba(16, 185, 129, 0.4)";
+                btn.style.color = "#10b981";
+            }
+        } else {
+            if (badge) badge.className = "status-badge updater-badge updater-badge-stopped";
+            if (dot) dot.className = "dot";
+            if (text) text.textContent = "AUTO-PULL: PAUSED";
+            if (btn) {
+                btn.textContent = "▶️ Resume Auto-Pull";
+                btn.style.borderColor = "rgba(245, 158, 11, 0.4)";
+                btn.style.color = "#f59e0b";
+            }
+        }
+    } catch (err) {
+        console.error("Failed to fetch updater status:", err);
+    }
+}
+
+async function toggleUpdater() {
+    const btn = document.getElementById("toggleUpdaterBtn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Updating...";
+
+    try {
+        const res = await apiFetch("/api/updater/toggle", { method: "POST" });
+        const data = await res.json();
+        await fetchUpdaterStatus();
+
+        if (data.active) {
+            showToast("🔄 Git Auto-Updater הופעל בהצלחה! (Active)", "success");
+        } else {
+            showToast("⏸️ Git Auto-Updater הוקפא (Paused)", "info");
+        }
+    } catch (err) {
+        showToast("❌ שגיאה בשינוי סטטוס auto-updater: " + err, "error");
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 // ── Status & Regime ────────────────────────────────────────

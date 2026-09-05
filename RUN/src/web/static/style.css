@@ -153,6 +153,18 @@ body {
     border-color: rgba(239, 68, 68, 0.3) !important;
 }
 
+.updater-badge {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--accent-success);
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.updater-badge-stopped {
+    background: rgba(156, 163, 175, 0.12) !important;
+    color: var(--text-muted) !important;
+    border-color: rgba(156, 163, 175, 0.25) !important;
+}
+
 .dot {
     width: 8px;
     height: 8px;

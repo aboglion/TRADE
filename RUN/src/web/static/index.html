@@ -32,10 +32,19 @@
                         <span id="regimeIcon">🐂</span>
                         <span id="regimeText">BULL REGIME</span>
                     </div>
+
+                    <div class="status-badge updater-badge" id="updaterBadge" title="סטטוס מעקב עדכונים מ-GitHub (Git Auto-Updater)">
+                        <span class="dot pulse" id="updaterDot"></span>
+                        <span id="updaterText">AUTO-PULL: ACTIVE</span>
+                    </div>
                 </div>
 
                 <div class="status-row status-row-bottom">
                     <div class="clock-display" id="utcClock" title="שעון UTC מסונכרן בזמן אמת">00:00:00 UTC</div>
+
+                    <button class="btn btn-outline" id="toggleUpdaterBtn" title="הפעל/הקפא עדכונים אוטומטיים מ-GitHub">
+                        🔄 Auto-Pull Active
+                    </button>
 
                     <button class="btn btn-outline" id="resetStatsBtn" title="איפוס נתוני רווח והפסד ועמלות לסשן חדש">
                         🧹 Reset PNL Stats
