@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger("bot.web.server")
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = (Path(__file__).parent / "static").resolve()
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -54,32 +54,36 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self) -> None:
-        if self.path == "/api/status":
+        clean_path = self.path.split("?")[0]
+        if clean_path == "/api/status":
             self._handle_status()
-        elif self.path == "/api/portfolio":
+        elif clean_path == "/api/portfolio":
             self._handle_portfolio()
-        elif self.path == "/api/orders":
+        elif clean_path == "/api/orders":
             self._handle_orders()
-        elif self.path == "/api/logs":
+        elif clean_path == "/api/logs":
             self._handle_logs()
-        elif self.path == "/api/dry_run/balances":
+        elif clean_path == "/api/dry_run/balances":
             self._handle_get_dry_run_balances()
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
-            if self.path in ("/", ""):
+            if clean_path in ("/", "", "/index", "/index.html"):
                 self.path = "/index.html"
+            else:
+                self.path = clean_path
             super().do_GET()
 
     def do_POST(self) -> None:
-        if self.path == "/api/trigger":
+        clean_path = self.path.split("?")[0]
+        if clean_path == "/api/trigger":
             self._handle_trigger_cycle()
-        elif self.path == "/api/killswitch":
+        elif clean_path == "/api/killswitch":
             self._handle_toggle_killswitch()
-        elif self.path == "/api/dry_run/balances":
+        elif clean_path == "/api/dry_run/balances":
             self._handle_update_dry_run_balances()
-        elif self.path == "/api/errors/clear":
+        elif clean_path == "/api/errors/clear":
             self._handle_clear_errors()
-        elif self.path == "/api/reset_stats":
+        elif clean_path == "/api/reset_stats":
             self._handle_reset_stats()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
