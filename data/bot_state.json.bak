@@ -1,9 +1,9 @@
 {
   "version": 1,
   "last_processed_candle_ts": {
-    "BTC/USDT": 1788508800000,
-    "ETH/USDT": 1788508800000,
-    "SOL/USDT": 1788508800000
+    "BTC/USDT": 1788595200000,
+    "ETH/USDT": 1788595200000,
+    "SOL/USDT": 1788595200000
   },
   "last_regime": "bull",
   "pending_orders": [],
@@ -18,15 +18,32 @@
       "reason": "Rebalance: -14.05% deviation in BTC/USDT",
       "status": "filled",
       "fees": 0.421569262429,
-      "fee_currency": "BTC",
+      "fee_currency": "USDT",
       "timestamp": 1788523445188,
       "exchange_order_id": "dry_c4268d2f5bd9",
       "filled_amount": 0.0052267,
       "average_price": 80656.87,
       "error_message": ""
+    },
+    {
+      "client_order_id": "bot_20260905124944_f6d0cff8",
+      "symbol": "ETH/USDT",
+      "side": "buy",
+      "order_type": "market",
+      "amount": 0.1873,
+      "price": null,
+      "reason": "Rebalance: +15.60% deviation in ETH/USDT",
+      "status": "filled",
+      "fees": 0.0,
+      "fee_currency": "",
+      "timestamp": 1788612584757,
+      "exchange_order_id": "8389766271002487464",
+      "filled_amount": 0.187,
+      "average_price": 0.0,
+      "error_message": ""
     }
   ],
-  "last_run_ts": 1788531479293,
+  "last_run_ts": 1788612585045,
   "last_cycle_success": true,
   "critical_errors": [],
   "strategy_state": {
@@ -46,10 +63,32 @@
         "mode": "STRONG_BULL_TREND"
       }
     },
-    "bull_peak": 80656.87
+    "bull_peak": 80656.87,
+    "macro_state": {
+      "positions": {
+        "BTC": {
+          "active": true,
+          "entry_px": 80656.87,
+          "atr_at_entry": 1022.013378449413,
+          "high_water": 81288.0,
+          "mode": "STRONG_BULL_TREND"
+        },
+        "ETH": {
+          "active": true,
+          "entry_px": 2504.39,
+          "atr_at_entry": 37.92696534361615,
+          "high_water": 2525.0,
+          "mode": "STRONG_BULL_TREND"
+        }
+      },
+      "bull_peak": 80656.87
+    },
+    "micro_state": {
+      "positions": {}
+    }
   },
-  "session_initial_value_usd": 2949.6362376215707,
+  "session_initial_value_usd": 2949.4323937,
   "session_fees": {
-    "BTC": 0.421569262429
+    "USDT": 0.421569262429
   }
 }

@@ -271,12 +271,20 @@ class ExchangeGateway:
                 params=params,
             ))
 
+            avg_px = float(raw.get("average") or raw.get("price") or 0)
+            if avg_px == 0.0 and raw.get("trades"):
+                trades = raw.get("trades", [])
+                total_cost = sum(float(t.get("cost", 0) or (float(t.get("price", 0)) * float(t.get("amount", 0)))) for t in trades)
+                total_qty = sum(float(t.get("amount", 0)) for t in trades)
+                if total_qty > 0:
+                    avg_px = total_cost / total_qty
+
             return OrderResult(
                 client_order_id=intent.client_order_id,
                 exchange_order_id=str(raw.get("id", "")),
                 status=self._map_order_status(raw.get("status", "")),
                 filled_amount=float(raw.get("filled", 0) or 0),
-                average_price=float(raw.get("average", 0) or raw.get("price", 0) or 0),
+                average_price=avg_px,
                 fees=float(raw.get("fee", {}).get("cost", 0) or 0) if raw.get("fee") else 0.0,
                 fee_currency=str(raw.get("fee", {}).get("currency", "")) if raw.get("fee") else "",
                 timestamp_ms=int(raw.get("timestamp", 0) or 0),
@@ -308,12 +316,20 @@ class ExchangeGateway:
     def fetch_order(self, symbol: str, order_id: str) -> OrderResult:
         """Get current status of an order."""
         raw = self._retry(lambda: self.exchange.fetch_order(order_id, symbol))
+        avg_px = float(raw.get("average") or raw.get("price") or 0)
+        if avg_px == 0.0 and raw.get("trades"):
+            trades = raw.get("trades", [])
+            total_cost = sum(float(t.get("cost", 0) or (float(t.get("price", 0)) * float(t.get("amount", 0)))) for t in trades)
+            total_qty = sum(float(t.get("amount", 0)) for t in trades)
+            if total_qty > 0:
+                avg_px = total_cost / total_qty
+
         return OrderResult(
             client_order_id=raw.get("clientOrderId", ""),
             exchange_order_id=str(raw.get("id", "")),
             status=self._map_order_status(raw.get("status", "")),
             filled_amount=float(raw.get("filled", 0) or 0),
-            average_price=float(raw.get("average", 0) or raw.get("price", 0) or 0),
+            average_price=avg_px,
             fees=float(raw.get("fee", {}).get("cost", 0) or 0) if raw.get("fee") else 0.0,
             fee_currency=str(raw.get("fee", {}).get("currency", "")) if raw.get("fee") else "",
             timestamp_ms=int(raw.get("timestamp", 0) or 0),

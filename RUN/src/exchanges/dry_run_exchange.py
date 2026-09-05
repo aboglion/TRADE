@@ -284,7 +284,7 @@ class DryRunExchange:
             filled_amount=intent.amount,
             average_price=price,
             fees=fee,
-            fee_currency=quote if intent.side == OrderSide.BUY else base,
+            fee_currency=quote,
             timestamp_ms=int(time.time() * 1000),
         )
 
