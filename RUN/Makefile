@@ -21,5 +21,7 @@ balance:
 	python3 scripts/show_balances.py
 
 run:
-	python3 -m pip install --break-system-packages -r RUN/requirements.txt
-	python3 main.py --mode DRY_RUN
+	python3 main.py --mode DRY_RUN --dashboard --port 8090
+
+run_live:
+	python3 main.py --mode LIVE --dashboard --port 8090
