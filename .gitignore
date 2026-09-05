@@ -27,9 +27,10 @@ htmlcov/
 .idea/
 
 # Data artifacts generated dynamically if needed
-# data/true_oos_*.csv
-data/oos_test_results.txt
-*.html
+# Dynamic state files
+data/bot_state.json*
+*.bak
+
 
 # Environment variables and secrets (CRITICAL SECURITY)
 .env
