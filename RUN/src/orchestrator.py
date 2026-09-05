@@ -317,7 +317,7 @@ class BotOrchestrator:
                     logger.critical("Safe stop required — exiting loop")
                     break
 
-                logger.info("Sleeping %ds until next cycle...", interval)
+                logger.debug("Sleeping %ds until next cycle...", interval)
                 time.sleep(interval)
 
         except KeyboardInterrupt:
