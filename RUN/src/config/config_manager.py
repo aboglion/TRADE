@@ -93,6 +93,14 @@ class DryRunConfig:
     )
 
 
+@dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+    dashboard_url: str = ""
+
+
 # ── Main config container ────────────────────────────────────
 
 @dataclass
@@ -105,6 +113,7 @@ class BotConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     dry_run: DryRunConfig = field(default_factory=DryRunConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
 
 class ConfigManager:
@@ -134,6 +143,7 @@ class ConfigManager:
         self._load_logging(config, raw)
         self._load_scheduler(config, raw)
         self._load_dry_run(config, raw)
+        self._load_telegram(config, raw)
         self._validate(config)
 
         self._config = config
@@ -239,6 +249,50 @@ class ConfigManager:
         # Ensure values are float
         parsed_bal = {str(k).upper(): float(v) for k, v in init_bal.items()}
         config.dry_run = DryRunConfig(initial_balances=parsed_bal)
+
+    def _load_telegram(self, config: BotConfig, raw: Dict) -> None:
+        tg_raw = raw.get("telegram", {})
+        env_enabled = os.environ.get("TELEGRAM_ENABLED")
+        if env_enabled is not None:
+            enabled = env_enabled.lower() in ("true", "1", "yes")
+        else:
+            enabled = bool(tg_raw.get("enabled", False))
+
+        config.telegram = TelegramConfig(
+            enabled=enabled,
+            bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", tg_raw.get("bot_token", "")),
+            chat_id=os.environ.get("TELEGRAM_CHAT_ID", tg_raw.get("chat_id", "")),
+            dashboard_url=os.environ.get("TELEGRAM_DASHBOARD_URL", tg_raw.get("dashboard_url", "")),
+        )
+
+    def save_telegram_config(
+        self, enabled: bool, bot_token: str, chat_id: str, dashboard_url: str = ""
+    ) -> None:
+        """Persist updated telegram settings back to config.yaml."""
+        if self._config:
+            self._config.telegram.enabled = enabled
+            self._config.telegram.bot_token = bot_token
+            self._config.telegram.chat_id = chat_id
+            self._config.telegram.dashboard_url = dashboard_url
+
+        if not self._config_path or not Path(self._config_path).exists():
+            return
+
+        try:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            if "telegram" not in data:
+                data["telegram"] = {}
+            data["telegram"]["enabled"] = enabled
+            data["telegram"]["bot_token"] = bot_token
+            data["telegram"]["chat_id"] = chat_id
+            data["telegram"]["dashboard_url"] = dashboard_url
+
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+        except Exception as e:
+            logger.error("Failed to save telegram config to %s: %s", self._config_path, e)
 
     def save_dry_run_balances(self, balances: Dict[str, float]) -> None:
         """Persist updated dry_run.initial_balances back to config.yaml."""

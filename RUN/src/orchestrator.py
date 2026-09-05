@@ -62,6 +62,7 @@ class BotOrchestrator:
         state_store: JsonStateStore,
         state: BotState,
         clock: Optional[SystemClock] = None,
+        telegram_service: Optional[Any] = None,
     ):
         self._config = config
         self._gateway = gateway
@@ -73,7 +74,23 @@ class BotOrchestrator:
         self._state = state
         self._clock = clock or SystemClock()
 
-        self._order_manager = OrderManager(gateway, state, config.run_mode)
+        if telegram_service is not None:
+            self._telegram_service = telegram_service
+        elif hasattr(config, "telegram"):
+            from src.services.telegram_service import TelegramService
+            tg_cfg = config.telegram
+            self._telegram_service = TelegramService(
+                bot_token=tg_cfg.bot_token,
+                chat_id=tg_cfg.chat_id,
+                enabled=tg_cfg.enabled,
+                dashboard_url=tg_cfg.dashboard_url,
+            )
+        else:
+            self._telegram_service = None
+
+        self._order_manager = OrderManager(
+            gateway, state, config.run_mode, telegram_service=self._telegram_service
+        )
         self._reconciliation = ReconciliationService(gateway, state)
 
         self._consecutive_errors = 0

@@ -225,6 +225,15 @@ def main() -> None:
         core_ratio=config.strategy.core_ratio,
     )
 
+    # Initialize Telegram service
+    from src.services.telegram_service import TelegramService
+    telegram_service = TelegramService(
+        bot_token=config.telegram.bot_token,
+        chat_id=config.telegram.chat_id,
+        enabled=config.telegram.enabled,
+        dashboard_url=config.telegram.dashboard_url,
+    )
+
     # Build orchestrator
     orchestrator = BotOrchestrator(
         config=config,
@@ -235,6 +244,7 @@ def main() -> None:
         risk_manager=risk_manager,
         state_store=state_store,
         state=state,
+        telegram_service=telegram_service,
     )
 
     # Start Dashboard Server if requested
@@ -246,6 +256,7 @@ def main() -> None:
             gateway=gateway,
             state_store=state_store,
             orchestrator=orchestrator,
+            telegram_service=telegram_service,
             port=args.port,
         )
         t = threading.Thread(target=web_server.serve_forever, daemon=True)

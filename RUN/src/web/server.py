@@ -107,6 +107,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     config: Any = None
     log_file_path: Optional[str] = None
     orchestrator: Any = None
+    telegram_service: Any = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -193,6 +194,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_get_dry_run_balances()
         elif clean_path == "/api/updater":
             self._handle_get_updater_status()
+        elif clean_path == "/api/telegram":
+            self._handle_get_telegram()
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
             if clean_path in ("/", "", "/index", "/index.html"):
@@ -225,6 +228,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_toggle_updater()
         elif clean_path == "/api/updater/pull":
             self._handle_manual_pull()
+        elif clean_path == "/api/telegram":
+            self._handle_update_telegram()
+        elif clean_path == "/api/telegram/test":
+            self._handle_test_telegram()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -616,6 +623,141 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             logger.error("Failed to execute manual git pull: %s", e)
             self._send_json({"error": str(e)}, status=500)
 
+    def _get_telegram_service(self) -> Any:
+        if DashboardRequestHandler.telegram_service:
+            return DashboardRequestHandler.telegram_service
+        if self.orchestrator and hasattr(self.orchestrator, "_telegram_service") and self.orchestrator._telegram_service:
+            return self.orchestrator._telegram_service
+        if self.config and hasattr(self.config, "telegram"):
+            from src.services.telegram_service import TelegramService
+            tg_cfg = self.config.telegram
+            svc = TelegramService(
+                bot_token=tg_cfg.bot_token,
+                chat_id=tg_cfg.chat_id,
+                enabled=tg_cfg.enabled,
+                dashboard_url=tg_cfg.dashboard_url,
+            )
+            DashboardRequestHandler.telegram_service = svc
+            return svc
+        return None
+
+    def _handle_get_telegram(self) -> None:
+        svc = self._get_telegram_service()
+        token = svc.bot_token if svc else ""
+        masked_token = ""
+        if token:
+            if len(token) > 8:
+                masked_token = f"{token[:4]}...{token[-4:]}"
+            else:
+                masked_token = "****"
+
+        data = {
+            "enabled": svc.enabled if svc else False,
+            "bot_token": token,
+            "masked_token": masked_token,
+            "chat_id": svc.chat_id if svc else "",
+            "dashboard_url": svc.dashboard_url if svc else "",
+            "is_configured": svc.is_configured() if svc else False,
+        }
+        self._send_json(data)
+
+    def _handle_update_telegram(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+
+            enabled = bool(data.get("enabled", False))
+            bot_token = str(data.get("bot_token", "")).strip()
+            chat_id = str(data.get("chat_id", "")).strip()
+            dashboard_url = str(data.get("dashboard_url", "")).strip()
+
+            svc = self._get_telegram_service()
+            if not svc:
+                from src.services.telegram_service import TelegramService
+                svc = TelegramService(bot_token=bot_token, chat_id=chat_id, enabled=enabled, dashboard_url=dashboard_url)
+                DashboardRequestHandler.telegram_service = svc
+            else:
+                svc.enabled = enabled
+                svc.bot_token = bot_token
+                svc.chat_id = chat_id
+                svc.dashboard_url = dashboard_url
+
+            if self.orchestrator:
+                self.orchestrator._telegram_service = svc
+                if hasattr(self.orchestrator, "_order_manager") and self.orchestrator._order_manager:
+                    self.orchestrator._order_manager._telegram_service = svc
+
+            try:
+                from pathlib import Path
+                from src.config.config_manager import ConfigManager
+                cfg_path = "RUN/config.yaml" if Path("RUN/config.yaml").exists() else "config.yaml"
+                cm = ConfigManager(cfg_path)
+                cm.save_telegram_config(enabled=enabled, bot_token=bot_token, chat_id=chat_id, dashboard_url=dashboard_url)
+            except Exception as ex:
+                logger.warning("Could not save telegram config to config.yaml: %s", ex)
+
+            if self.config and hasattr(self.config, "telegram"):
+                self.config.telegram.enabled = enabled
+                self.config.telegram.bot_token = bot_token
+                self.config.telegram.chat_id = chat_id
+                self.config.telegram.dashboard_url = dashboard_url
+
+            logger.info("Telegram configuration updated via API (Enabled: %s, Chat ID: %s)", enabled, chat_id)
+            self._send_json({
+                "success": True,
+                "message": "הגדרות טלגרם שנשמרו בהצלחה בקובץ הקונפיגורציה!",
+                "enabled": enabled,
+                "is_configured": svc.is_configured(),
+            })
+        except Exception as e:
+            logger.error("Failed to update telegram configuration via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_test_telegram(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8")) if length > 0 else {}
+
+            bot_token = str(data.get("bot_token", "")).strip()
+            chat_id = str(data.get("chat_id", "")).strip()
+
+            # Retrieve last completed trade from state if available
+            last_trade = None
+            if self.state_store:
+                try:
+                    st = self.state_store.load_state()
+                    if st.completed_orders:
+                        last_trade = st.completed_orders[-1]
+                except Exception as ex:
+                    logger.debug("Could not fetch last completed order for telegram test: %s", ex)
+
+            run_mode_str = "DRY_RUN"
+            if self.config and hasattr(self.config, "run_mode"):
+                mode = self.config.run_mode
+                run_mode_str = mode.name if hasattr(mode, "name") else str(mode)
+
+            if bot_token and chat_id:
+                from src.services.telegram_service import TelegramService
+                dash_url = self.config.telegram.dashboard_url if (self.config and hasattr(self.config, "telegram")) else ""
+                test_svc = TelegramService(bot_token=bot_token, chat_id=chat_id, enabled=True, dashboard_url=dash_url)
+                success, msg = test_svc.send_test_notification(last_trade=last_trade, run_mode=run_mode_str)
+            else:
+                svc = self._get_telegram_service()
+                if not svc or not svc.is_configured():
+                    self._send_json({"success": False, "error": "טלגרם אינו מוגדר. נא להזין Bot Token ו-Chat ID."}, status=400)
+                    return
+                success, msg = svc.send_test_notification(last_trade=last_trade, run_mode=run_mode_str)
+
+            if success:
+                self._send_json({"success": True, "message": msg, "has_last_trade": bool(last_trade)})
+            else:
+                self._send_json({"success": False, "error": msg}, status=400)
+        except Exception as e:
+            logger.error("Failed to test Telegram notification via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
     # ── Helpers ──────────────────────────────────────────────
 
     def _send_json(self, data: Dict[str, Any], status: int = 200) -> None:
@@ -640,6 +782,7 @@ def run_dashboard_server(
     gateway: Any,
     state_store: Any,
     orchestrator: Any = None,
+    telegram_service: Any = None,
     host: str = "0.0.0.0",
     port: int = 8080,
 ) -> ThreadedHTTPServer:
@@ -648,6 +791,7 @@ def run_dashboard_server(
     DashboardRequestHandler.gateway = gateway
     DashboardRequestHandler.state_store = state_store
     DashboardRequestHandler.orchestrator = orchestrator
+    DashboardRequestHandler.telegram_service = telegram_service
     DashboardRequestHandler.log_file_path = config.logging.file if config else "logs/bot.log"
 
     server = ThreadedHTTPServer((host, port), DashboardRequestHandler)

@@ -37,16 +37,24 @@ class OrderManager:
     tracks state, and handles crash recovery.
     """
 
-    def __init__(self, gateway, state: BotState, run_mode: RunMode):
+    def __init__(
+        self,
+        gateway,
+        state: BotState,
+        run_mode: RunMode,
+        telegram_service: Optional[Any] = None,
+    ):
         """
         Args:
             gateway: ExchangeGateway or DryRunExchange instance.
             state: Current bot state (for persistence).
             run_mode: Current operational mode.
+            telegram_service: Optional TelegramService for trade alerts.
         """
         self._gateway = gateway
         self._state = state
         self._run_mode = run_mode
+        self._telegram_service = telegram_service
         # Track submitted order IDs to prevent duplicates
         self._submitted_ids: set = set()
         self._load_submitted_ids()
@@ -286,9 +294,18 @@ class OrderManager:
                     OrderStatus.FAILED,
                 ):
                     self._state.completed_orders.append(order_data)
-                    if result.status == OrderStatus.FILLED and result.fees > 0 and result.fee_currency:
-                        curr = result.fee_currency
-                        self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                    if result.status == OrderStatus.FILLED:
+                        if result.fees > 0 and result.fee_currency:
+                            curr = result.fee_currency
+                            self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                        
+                        # Send Telegram trade alert (safe, never fails execution)
+                        if self._telegram_service:
+                            try:
+                                mode_str = self._run_mode.name if hasattr(self._run_mode, "name") else str(self._run_mode)
+                                self._telegram_service.send_trade_notification(order_data, run_mode=mode_str)
+                            except Exception as ex:
+                                logger.warning("Telegram trade notification failed (ignored): %s", ex)
                 break
 
         # Clean up pending list

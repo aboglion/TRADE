@@ -45,6 +45,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const isAuthed = await checkAuthStatus();
     if (isAuthed) {
         fetchDashboardData();
+        loadTelegramConfig();
     }
     setInterval(fetchDashboardData, 5000);
 
@@ -86,6 +87,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("confirmDryRunSaveBtn").addEventListener("click", confirmSaveDryRunBalances);
     document.getElementById("dryRunConfirmModal").addEventListener("click", (e) => {
         if (e.target.id === "dryRunConfirmModal") closeDryRunConfirmModal();
+    });
+
+    // Telegram modal event listeners
+    const tgBtn = document.getElementById("telegramModalBtn");
+    if (tgBtn) tgBtn.addEventListener("click", openTelegramModal);
+    const closeTgModal = document.getElementById("closeTelegramModal");
+    if (closeTgModal) closeTgModal.addEventListener("click", closeTelegramModal);
+    const cancelTgSave = document.getElementById("cancelTelegramSave");
+    if (cancelTgSave) cancelTgSave.addEventListener("click", closeTelegramModal);
+    const saveTgBtn = document.getElementById("saveTelegramConfigBtn");
+    if (saveTgBtn) saveTgBtn.addEventListener("click", saveTelegramConfig);
+    const testTgBtn = document.getElementById("testTelegramBtn");
+    if (testTgBtn) testTgBtn.addEventListener("click", testTelegramConnection);
+    const toggleEyeBtn = document.getElementById("toggleTokenVisibilityBtn");
+    if (toggleEyeBtn) toggleEyeBtn.addEventListener("click", toggleTokenVisibility);
+    const tgModal = document.getElementById("telegramModal");
+    if (tgModal) tgModal.addEventListener("click", (e) => {
+        if (e.target.id === "telegramModal") closeTelegramModal();
     });
 
     // System Errors modal event listeners
@@ -926,3 +945,184 @@ async function clearSystemErrors() {
         btn.textContent = "🧹 נקה שגיאות (Clear Errors)";
     }
 }
+
+// ── Telegram Settings Functions ───────────────────────────────
+
+async function openTelegramModal() {
+    const modal = document.getElementById("telegramModal");
+    if (!modal) return;
+    await loadTelegramConfig();
+    modal.classList.add("active");
+}
+
+function closeTelegramModal() {
+    const modal = document.getElementById("telegramModal");
+    if (modal) modal.classList.remove("active");
+    const statusBox = document.getElementById("telegramStatusBox");
+    if (statusBox) statusBox.style.display = "none";
+}
+
+function toggleTokenVisibility() {
+    const input = document.getElementById("telegramTokenInput");
+    const btn = document.getElementById("toggleTokenVisibilityBtn");
+    if (!input || !btn) return;
+    if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈";
+    } else {
+        input.type = "password";
+        btn.textContent = "👁️";
+    }
+}
+
+async function loadTelegramConfig() {
+    try {
+        const res = await apiFetch("/api/telegram");
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const enabledToggle = document.getElementById("telegramEnabledToggle");
+        const tokenInput = document.getElementById("telegramTokenInput");
+        const chatIdInput = document.getElementById("telegramChatIdInput");
+        const urlInput = document.getElementById("telegramDashboardUrlInput");
+
+        if (enabledToggle) enabledToggle.checked = !!data.enabled;
+        if (tokenInput) tokenInput.value = data.bot_token || "";
+        if (chatIdInput) chatIdInput.value = data.chat_id || "";
+        if (urlInput) {
+            urlInput.value = data.dashboard_url || window.location.origin;
+        }
+
+        const tgBtn = document.getElementById("telegramModalBtn");
+        if (tgBtn) {
+            if (data.enabled && data.is_configured) {
+                tgBtn.style.background = "rgba(34, 197, 94, 0.18)";
+                tgBtn.style.borderColor = "rgba(34, 197, 94, 0.5)";
+                tgBtn.style.color = "#86efac";
+                tgBtn.title = "התראות טלגרם פעילות! (לחץ לשינוי הגדרות)";
+            } else {
+                tgBtn.style.background = "";
+                tgBtn.style.borderColor = "";
+                tgBtn.style.color = "";
+                tgBtn.title = "הגדרות התראות Telegram (Telegram API Alerts)";
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load Telegram configuration:", e);
+    }
+}
+
+async function testTelegramConnection() {
+    const testBtn = document.getElementById("testTelegramBtn");
+    const statusBox = document.getElementById("telegramStatusBox");
+    const token = (document.getElementById("telegramTokenInput")?.value || "").trim();
+    const chatId = (document.getElementById("telegramChatIdInput")?.value || "").trim();
+
+    if (!token || !chatId) {
+        if (statusBox) {
+            statusBox.style.display = "block";
+            statusBox.style.background = "rgba(239, 68, 68, 0.15)";
+            statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+            statusBox.style.color = "#fca5a5";
+            statusBox.textContent = "⚠️ נא להזין Bot Token ו-Chat ID לפני בדיקת החיבור.";
+        }
+        return;
+    }
+
+    if (testBtn) {
+        testBtn.disabled = true;
+        testBtn.textContent = "שולח הודעת ניסיון...";
+    }
+
+    if (statusBox) {
+        statusBox.style.display = "block";
+        statusBox.style.background = "rgba(59, 130, 246, 0.15)";
+        statusBox.style.border = "1px solid rgba(59, 130, 246, 0.4)";
+        statusBox.style.color = "#93c5fd";
+        statusBox.textContent = "⏳ מבצע פנייה ל-Telegram API...";
+    }
+
+    try {
+        const res = await apiFetch("/api/telegram/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bot_token: token, chat_id: chatId }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            showToast("🧪 " + (data.message || "הודעת ניסיון נשלחה בהצלחה לטלגרם!"), "success");
+            if (statusBox) {
+                statusBox.style.background = "rgba(34, 197, 94, 0.15)";
+                statusBox.style.border = "1px solid rgba(34, 197, 94, 0.4)";
+                statusBox.style.color = "#86efac";
+                statusBox.textContent = "✅ " + (data.message || "הודעת ניסיון נשלחה בהצלחה לטלגרם!");
+            }
+        } else {
+            const err = data.error || data.message || "שגיאה בריענון טלגרם";
+            showToast("❌ " + err, "error");
+            if (statusBox) {
+                statusBox.style.background = "rgba(239, 68, 68, 0.15)";
+                statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+                statusBox.style.color = "#fca5a5";
+                statusBox.textContent = "❌ " + err;
+            }
+        }
+    } catch (err) {
+        showToast("❌ שגיאה בחיבור לשרת: " + err, "error");
+        if (statusBox) {
+            statusBox.style.background = "rgba(239, 68, 68, 0.15)";
+            statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+            statusBox.style.color = "#fca5a5";
+            statusBox.textContent = "❌ שגיאה תקשורת: " + err;
+        }
+    } finally {
+        if (testBtn) {
+            testBtn.disabled = false;
+            testBtn.textContent = "🧪 בדיקת חיבור (שלח הודעה)";
+        }
+    }
+}
+
+async function saveTelegramConfig() {
+    const saveBtn = document.getElementById("saveTelegramConfigBtn");
+    const enabled = !!document.getElementById("telegramEnabledToggle")?.checked;
+    const token = (document.getElementById("telegramTokenInput")?.value || "").trim();
+    const chatId = (document.getElementById("telegramChatIdInput")?.value || "").trim();
+    const url = (document.getElementById("telegramDashboardUrlInput")?.value || "").trim();
+
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "שומר...";
+    }
+
+    try {
+        const res = await apiFetch("/api/telegram", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                enabled: enabled,
+                bot_token: token,
+                chat_id: chatId,
+                dashboard_url: url,
+            }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            showToast("✈️ " + (data.message || "הגדרות טלגרם שנשמרו בהצלחה!"), "success");
+            closeTelegramModal();
+            await loadTelegramConfig();
+        } else {
+            showToast("❌ שגיאה בשמירת הגדרות: " + (data.error || "Unknown error"), "error");
+        }
+    } catch (err) {
+        showToast("❌ שגיאה בחיבור לשרת: " + err, "error");
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "שמור הגדרות 💾";
+        }
+    }
+}
+
