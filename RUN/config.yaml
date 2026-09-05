@@ -1,6 +1,8 @@
 run_mode: DRY_RUN
 exchange:
   name: binance
+  market_type: future
+  portfolio_margin: true
   timeout_ms: 30000
   rate_limit: true
   max_retries: 3
@@ -9,7 +11,7 @@ strategy:
   timeframe: 4h
   warmup_candles: 1200
   sma_regime_period: 150
-  bull_leverage: 2.0
+  bull_leverage: 1.0
   bear_short_hedge_weight: 0.0
   cash_apr: 0.0
   assets:

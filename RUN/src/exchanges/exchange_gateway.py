@@ -74,6 +74,8 @@ class ExchangeGateway:
             "timeout": self._config.timeout_ms,
             "defaultType": self._config.market_type,
         }
+        if getattr(self._config, "portfolio_margin", False):
+            options["portfolioMargin"] = True
 
         # API credentials (not needed for DRY_RUN with no real calls)
         api_key = self._config.api_key if self._config.api_key else None
@@ -361,6 +363,17 @@ class ExchangeGateway:
             try:
                 return func()
             except ccxt.AuthenticationError as e:
+                err_msg = str(e)
+                if "-2015" in err_msg and self._config.market_type == "future":
+                    raise ExchangeAuthError(
+                        f"Binance Futures authentication failed (-2015: Invalid API-key/permissions).\n"
+                        f"-> Your API credentials are valid for Binance Spot, but Binance rejected Futures access.\n"
+                        f"Action required on Binance:\n"
+                        f"  1. Go to Binance API Management -> Edit API Key -> Enable 'Enable Futures' permission.\n"
+                        f"  2. Ensure USDT-M Futures account is opened/activated on your Binance account.\n"
+                        f"  3. Check IP Whitelist restrictions on Binance if applicable.\n"
+                        f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
+                    )
                 raise ExchangeAuthError(f"Authentication failed: {e}")
             except ccxt.RateLimitExceeded as e:
                 if attempt < retries:

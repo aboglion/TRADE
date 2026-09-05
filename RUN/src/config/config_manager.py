@@ -30,6 +30,7 @@ class ExchangeConfig:
     api_key: str = ""           # Populated from env var
     api_secret: str = ""        # Populated from env var
     market_type: str = "future" # "spot" or "future"
+    portfolio_margin: bool = False
 
 
 @dataclass
@@ -167,6 +168,7 @@ class ConfigManager:
             api_key=os.environ.get("BINANCE_API_KEY", ""),
             api_secret=os.environ.get("BINANCE_API_SECRET", ""),
             market_type=ex_raw.get("market_type", "future"),
+            portfolio_margin=ex_raw.get("portfolio_margin", False),
         )
 
     def _load_strategy(self, config: BotConfig, raw: Dict) -> None:
