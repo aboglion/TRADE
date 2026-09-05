@@ -43,7 +43,7 @@
       "error_message": ""
     }
   ],
-  "last_run_ts": 1788612585045,
+  "last_run_ts": 1788612831617,
   "last_cycle_success": true,
   "critical_errors": [],
   "strategy_state": {
@@ -87,7 +87,7 @@
       "positions": {}
     }
   },
-  "session_initial_value_usd": 2949.4323937,
+  "session_initial_value_usd": 2949.45064457,
   "session_fees": {
     "USDT": 0.421569262429
   }

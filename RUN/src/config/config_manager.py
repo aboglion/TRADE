@@ -43,7 +43,7 @@ class AssetConfig:
 class StrategyConfig:
     timeframe: str = "4h"
     assets: Dict[str, AssetConfig] = field(default_factory=dict)
-    warmup_candles: int = 300
+    warmup_candles: int = 1200
     sma_regime_period: int = 150
     bull_leverage: float = 2.0
     bear_short_hedge_weight: float = 0.0   # 0 for spot-only (hold USDT)
@@ -187,7 +187,7 @@ class ConfigManager:
         config.strategy = StrategyConfig(
             timeframe=s_raw.get("timeframe", "4h"),
             assets=assets,
-            warmup_candles=s_raw.get("warmup_candles", 300),
+            warmup_candles=s_raw.get("warmup_candles", 1200),
             sma_regime_period=s_raw.get("sma_regime_period", 150),
             bull_leverage=s_raw.get("bull_leverage", 2.0),
             bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.0),

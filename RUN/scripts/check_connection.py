@@ -23,7 +23,8 @@ logger = setup_logger("scripts.check_connection")
 
 def main():
     load_dotenv()
-    cm = ConfigManager("config.yaml" if Path("config.yaml").exists() else None)
+    config_file = "RUN/config.yaml" if Path("RUN/config.yaml").exists() else ("config.yaml" if Path("config.yaml").exists() else None)
+    cm = ConfigManager(config_file)
     config = cm.load()
 
     logger.info("Testing connection to Binance (%s mode)...", config.run_mode.name)
