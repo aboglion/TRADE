@@ -1,26 +1,27 @@
-.PHONY: gp run live stop status logs test check balance
+.PHONY: gp dry run stop status logs test check balance
 
 gp:
 	git add .
 	git commit -m "Update trading bot system and web dashboard" || true
 	git push
 
-# Default 24/7 background execution
-run:
+# 24/7 Background execution modes
+dry:
 	@mkdir -p logs
 	@fuser -k 8090/tcp >/dev/null 2>&1 || true
 	@nohup python3 RUN/main.py --mode DRY_RUN --dashboard --port 8090 > logs/bot.log 2>&1 &
-	@echo "⚡ Bot started in DRY_RUN mode 24/7 in background on port 8090"
+	@echo "⚡ Bot started in DRY_RUN mode (24/7 background on port 8090)"
 
-live:
+run:
 	@mkdir -p logs
 	@fuser -k 8090/tcp >/dev/null 2>&1 || true
 	@nohup python3 RUN/main.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
-	@echo "🔥 Bot started in LIVE mode 24/7 in background on port 8090"
+	@echo "🔥 Bot started in LIVE mode (24/7 background on port 8090)"
 
+# Management and Diagnostics
 stop:
 	@fuser -k 8090/tcp >/dev/null 2>&1 || pkill -f "python3.*main\.py" || true
-	@echo "🛑 Stopped bot process"
+	@echo "🛑 Stopped all bot background processes"
 
 status:
 	@ps aux | grep "python3.*main\.py" | grep -v grep || echo "No bot process currently running"
