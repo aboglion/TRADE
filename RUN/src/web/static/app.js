@@ -5,10 +5,44 @@
  */
 
 let activeErrorsList = [];
+let authToken = sessionStorage.getItem("dash_password") || "";
 
-document.addEventListener("DOMContentLoaded", () => {
+function getAuthHeaders() {
+    const headers = {};
+    if (authToken) {
+        headers["X-Dashboard-Password"] = authToken;
+    }
+    return headers;
+}
+
+async function apiFetch(url, options = {}) {
+    options.headers = {
+        ...getAuthHeaders(),
+        ...(options.headers || {})
+    };
+
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        showLoginModal();
+    }
+    return res;
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
     initClock();
-    fetchDashboardData();
+
+    // Login listeners
+    const submitBtn = document.getElementById("submitLoginBtn");
+    if (submitBtn) submitBtn.addEventListener("click", performLogin);
+    const passInput = document.getElementById("dashboardPasswordInput");
+    if (passInput) passInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") performLogin();
+    });
+
+    const isAuthed = await checkAuthStatus();
+    if (isAuthed) {
+        fetchDashboardData();
+    }
     setInterval(fetchDashboardData, 5000);
 
     // Event listeners with instant visual feedback
@@ -34,6 +68,75 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.id === "errorsModal") closeErrorsModal();
     });
 });
+
+async function checkAuthStatus() {
+    try {
+        const res = await fetch("/api/auth_check", { headers: getAuthHeaders() });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.auth_required && !data.authenticated && !authToken) {
+                showLoginModal();
+                return false;
+            }
+        }
+    } catch (e) {
+        console.error("Auth check failed:", e);
+    }
+    return true;
+}
+
+function showLoginModal() {
+    const modal = document.getElementById("loginModal");
+    if (modal) modal.classList.add("active");
+}
+
+function closeLoginModal() {
+    const modal = document.getElementById("loginModal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function performLogin() {
+    const input = document.getElementById("dashboardPasswordInput");
+    const errorMsg = document.getElementById("loginErrorMsg");
+    const btn = document.getElementById("submitLoginBtn");
+
+    const password = input.value.trim();
+    if (!password) {
+        errorMsg.textContent = "אנא הכנס סיסמה";
+        errorMsg.style.display = "block";
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "מאמת...";
+    errorMsg.style.display = "none";
+
+    try {
+        const res = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            authToken = password;
+            sessionStorage.setItem("dash_password", password);
+            closeLoginModal();
+            showToast("🔑 התחברת בהצלחה ללוח הבקרה!", "success");
+            fetchDashboardData();
+        } else {
+            errorMsg.textContent = data.error || "סיסמה שגויה (Invalid password)";
+            errorMsg.style.display = "block";
+        }
+    } catch (err) {
+        errorMsg.textContent = "שגיאת תקשורת: " + err;
+        errorMsg.style.display = "block";
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "התחבר למערכת 🔑";
+    }
+}
 
 // ── Toast Notifications ─────────────────────────────────────
 
@@ -95,7 +198,7 @@ async function fetchDashboardData() {
 
 async function fetchStatus() {
     try {
-        const res = await fetch("/api/status");
+        const res = await apiFetch("/api/status");
         if (!res.ok) return;
         const data = await res.json();
 
@@ -177,7 +280,7 @@ async function fetchStatus() {
 
 async function fetchPortfolio() {
     try {
-        const res = await fetch("/api/portfolio");
+        const res = await apiFetch("/api/portfolio");
         if (!res.ok) return;
         const data = await res.json();
 
@@ -248,7 +351,7 @@ async function fetchPortfolio() {
 
 async function fetchOrders() {
     try {
-        const res = await fetch("/api/orders");
+        const res = await apiFetch("/api/orders");
         if (!res.ok) return;
         const data = await res.json();
 
@@ -271,6 +374,21 @@ async function fetchOrders() {
             const feeVal = typeof o.fees === 'number' ? o.fees : 0.0;
             const feeStr = feeVal > 0 ? `${feeVal.toFixed(4)} ${o.fee_currency || ''}`.trim() : "0.0";
 
+            let statusRaw = (o.status || "FILLED").toUpperCase();
+            let statusDisplay = statusRaw;
+            let statusClass = "tag-filled";
+
+            if (statusRaw === "FILLED") {
+                statusDisplay = "DONE";
+                statusClass = "tag-filled";
+            } else if (statusRaw === "FAILED" || statusRaw === "REJECTED") {
+                statusDisplay = "FAILED";
+                statusClass = "tag-sell";
+            } else if (statusRaw === "PENDING" || statusRaw === "OPEN") {
+                statusDisplay = "PENDING";
+                statusClass = "tag-buy";
+            }
+
             tr.innerHTML = `
                 <td><code>${(o.client_order_id || o.exchange_order_id || "N/A").substring(0, 18)}</code></td>
                 <td><span class="tag ${sideClass}">${(o.side || "BUY").toUpperCase()}</span></td>
@@ -278,7 +396,7 @@ async function fetchOrders() {
                 <td>${o.amount || o.filled_amount || 0}</td>
                 <td>${priceStr}</td>
                 <td>${feeStr}</td>
-                <td><span class="tag tag-filled">${(o.status || "FILLED").toUpperCase()}</span></td>
+                <td><span class="tag ${statusClass}">${statusDisplay}</span></td>
             `;
             tableBody.appendChild(tr);
         });
@@ -292,7 +410,7 @@ async function fetchOrders() {
 
 async function fetchLogs() {
     try {
-        const res = await fetch("/api/logs");
+        const res = await apiFetch("/api/logs");
         if (!res.ok) return;
         const data = await res.json();
 
@@ -366,7 +484,7 @@ async function triggerCycle() {
     btn.textContent = "⏳ Running...";
 
     try {
-        const res = await fetch("/api/trigger", { method: "POST" });
+        const res = await apiFetch("/api/trigger", { method: "POST" });
         const data = await res.json();
         await fetchDashboardData();
         showToast("▶ מחזור מסחר הופעל והושלם בהצלחה!", "success");
@@ -380,7 +498,7 @@ async function triggerCycle() {
 
 async function toggleKillSwitch() {
     try {
-        const res = await fetch("/api/killswitch", { method: "POST" });
+        const res = await apiFetch("/api/killswitch", { method: "POST" });
         const data = await res.json();
         await fetchStatus();
         const statusMsg = data.kill_switch ? "⚠️ KILL SWITCH ACTIVATED — Trading Halts!" : "🛡️ KILL SWITCH DEACTIVATED — Trading Active";
@@ -400,7 +518,7 @@ async function resetSessionStats() {
     btn.textContent = "⏳ Resetting...";
 
     try {
-        const res = await fetch("/api/reset_stats", { method: "POST" });
+        const res = await apiFetch("/api/reset_stats", { method: "POST" });
         const data = await res.json();
         if (res.ok && data.success) {
             showToast("🧹 נתוני הסשן (רווחים ועמלות) אופסו בהצלחה!", "success");
@@ -421,7 +539,7 @@ async function resetSessionStats() {
 async function openDryRunModal() {
     const modal = document.getElementById("dryRunModal");
     try {
-        const res = await fetch("/api/dry_run/balances");
+        const res = await apiFetch("/api/dry_run/balances");
         if (res.ok) {
             const data = await res.json();
             const bal = data.balances || {};
@@ -454,7 +572,7 @@ async function saveDryRunBalances() {
     saveBtn.textContent = "שומר...";
 
     try {
-        const res = await fetch("/api/dry_run/balances", {
+        const res = await apiFetch("/api/dry_run/balances", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ balances }),
@@ -506,7 +624,7 @@ async function clearSystemErrors() {
     btn.textContent = "מנקה...";
 
     try {
-        const res = await fetch("/api/errors/clear", { method: "POST" });
+        const res = await apiFetch("/api/errors/clear", { method: "POST" });
         const data = await res.json();
         if (res.ok && data.success) {
             showToast("🧹 שגיאות המערכת נוקו בהצלחה!", "success");

@@ -37,3 +37,6 @@ check:
 
 balance:
 	python3 RUN/scripts/show_balances.py
+restart:
+	@make stop
+	@make dry 

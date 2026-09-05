@@ -11,14 +11,85 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
+from threading import Lock
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("bot.web.server")
 
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
+
+
+class LoginRateLimiter:
+    """In-memory rate limiter and brute-force lockout manager."""
+
+    def __init__(self, max_attempts: int = 5, lockout_seconds: int = 300, delay_seconds: float = 1.0):
+        self.max_attempts = max_attempts
+        self.lockout_seconds = lockout_seconds
+        self.delay_seconds = delay_seconds
+        self.attempts: Dict[str, list[float]] = {}
+        self.lockouts: Dict[str, float] = {}
+        self._lock = Lock()
+
+    def get_client_ip(self, handler: Any) -> str:
+        try:
+            forwarded = handler.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            real_ip = handler.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip.strip()
+            if handler.client_address and len(handler.client_address) > 0:
+                return str(handler.client_address[0])
+        except Exception:
+            pass
+        return "127.0.0.1"
+
+    def is_locked_out(self, ip: str) -> tuple[bool, int]:
+        """Returns (is_locked, remaining_seconds)."""
+        with self._lock:
+            now = time.time()
+            if ip in self.lockouts:
+                lockout_until = self.lockouts[ip]
+                if now < lockout_until:
+                    return True, max(1, int(lockout_until - now))
+                else:
+                    del self.lockouts[ip]
+                    self.attempts[ip] = []
+            return False, 0
+
+    def record_failed_attempt(self, ip: str) -> tuple[bool, int]:
+        """Record failed attempt and return (is_now_locked, remaining_seconds)."""
+        with self._lock:
+            now = time.time()
+            timestamps = [t for t in self.attempts.get(ip, []) if now - t < 600]
+            timestamps.append(now)
+            self.attempts[ip] = timestamps
+
+            if len(timestamps) >= self.max_attempts:
+                lockout_until = now + self.lockout_seconds
+                self.lockouts[ip] = lockout_until
+                logger.warning(
+                    "🚨 BRUTE-FORCE PROTECTION: IP %s locked out for %d seconds (%d failed login attempts)",
+                    ip,
+                    self.lockout_seconds,
+                    len(timestamps),
+                )
+                return True, self.lockout_seconds
+
+            return False, 0
+
+    def record_successful_login(self, ip: str) -> None:
+        with self._lock:
+            self.attempts.pop(ip, None)
+            self.lockouts.pop(ip, None)
+
+
+# Global rate-limiter instance for the server
+rate_limiter = LoginRateLimiter(max_attempts=5, lockout_seconds=300, delay_seconds=1.0)
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -66,8 +137,50 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             
         return str(target_file)
 
+    def _is_authenticated(self) -> bool:
+        expected_pass = os.environ.get("DASHBOARD_PASSWORD", "").strip()
+        if not expected_pass:
+            return True
+        client_pass = self.headers.get("X-Dashboard-Password", "").strip()
+        if client_pass == expected_pass:
+            return True
+        cookie_header = self.headers.get("Cookie", "")
+        if f"dash_auth={expected_pass}" in cookie_header:
+            return True
+        if f"token={expected_pass}" in self.path or f"password={expected_pass}" in self.path:
+            return True
+        return False
+
+    def _require_auth(self) -> bool:
+        ip = rate_limiter.get_client_ip(self)
+        is_locked, remaining = rate_limiter.is_locked_out(ip)
+        if is_locked:
+            self._send_json(
+                {
+                    "error": f"Too many failed login attempts. IP {ip} temporarily blocked for {remaining}s.",
+                    "auth_required": True,
+                    "locked_out": True,
+                    "retry_after_seconds": remaining,
+                },
+                status=429,
+            )
+            return False
+
+        if self._is_authenticated():
+            return True
+        self._send_json({"error": "Unauthorized. Password required.", "auth_required": True}, status=401)
+        return False
+
     def do_GET(self) -> None:
         clean_path = self.path.split("?")[0]
+        if clean_path == "/api/auth_check":
+            self._handle_auth_check()
+            return
+
+        if clean_path.startswith("/api/"):
+            if not self._require_auth():
+                return
+
         if clean_path == "/api/status":
             self._handle_status()
         elif clean_path == "/api/portfolio":
@@ -88,6 +201,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         clean_path = self.path.split("?")[0]
+        if clean_path == "/api/login":
+            self._handle_login()
+            return
+
+        if clean_path.startswith("/api/"):
+            if not self._require_auth():
+                return
+
         if clean_path == "/api/trigger":
             self._handle_trigger_cycle()
         elif clean_path == "/api/killswitch":
@@ -100,6 +221,73 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_reset_stats()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
+
+    def _handle_auth_check(self) -> None:
+        expected_pass = os.environ.get("DASHBOARD_PASSWORD", "").strip()
+        ip = rate_limiter.get_client_ip(self)
+        is_locked, remaining = rate_limiter.is_locked_out(ip)
+        self._send_json({
+            "auth_required": bool(expected_pass),
+            "authenticated": self._is_authenticated(),
+            "locked_out": is_locked,
+            "retry_after_seconds": remaining,
+        })
+
+    def _handle_login(self) -> None:
+        expected_pass = os.environ.get("DASHBOARD_PASSWORD", "").strip()
+        if not expected_pass:
+            self._send_json({"success": True, "auth_required": False, "message": "No password configured"})
+            return
+
+        ip = rate_limiter.get_client_ip(self)
+        is_locked, remaining = rate_limiter.is_locked_out(ip)
+        if is_locked:
+            logger.warning("Rejected login attempt from locked-out IP %s (%d seconds remaining)", ip, remaining)
+            self._send_json(
+                {
+                    "success": False,
+                    "error": f"חשבון ננעל זמנית עקב ניסיונות ניחוש סיסמה רבים! נסה שוב בעוד {remaining} שניות (Too many failed attempts. Locked out for {remaining}s).",
+                    "locked_out": True,
+                    "retry_after_seconds": remaining,
+                },
+                status=429,
+            )
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+            provided_pass = str(data.get("password", "")).strip()
+
+            if provided_pass == expected_pass:
+                rate_limiter.record_successful_login(ip)
+                content = json.dumps({"success": True, "token": expected_pass, "message": "Authenticated successfully"}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie", f"dash_auth={expected_pass}; Path=/; SameSite=Strict")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(content)
+            else:
+                # Artificial delay to throttle automated bots
+                time.sleep(rate_limiter.delay_seconds)
+                is_locked_now, rem_sec = rate_limiter.record_failed_attempt(ip)
+                if is_locked_now:
+                    self._send_json(
+                        {
+                            "success": False,
+                            "error": f"נחסמת! בוצעו {rate_limiter.max_attempts} ניסיונות ניחוש סיסמה שגויים. הגישה ננעלה ל-{rem_sec} שניות.",
+                            "locked_out": True,
+                            "retry_after_seconds": rem_sec,
+                        },
+                        status=429,
+                    )
+                else:
+                    self._send_json({"success": False, "error": "סיסמה שגויה (Invalid password)"}, status=401)
+        except Exception as e:
+            self._send_json({"success": False, "error": str(e)}, status=400)
 
     # ── REST API Handlers ─────────────────────────────────────
 

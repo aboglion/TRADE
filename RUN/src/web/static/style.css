@@ -435,7 +435,7 @@ body {
 
 .tag-buy { background: rgba(16, 185, 129, 0.15); color: var(--accent-success); }
 .tag-sell { background: rgba(239, 68, 68, 0.15); color: var(--accent-danger); }
-.tag-filled { background: rgba(56, 189, 248, 0.15); color: var(--accent-primary); }
+.tag-filled { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
 
 /* Log Console */
 .log-console {
