@@ -18,7 +18,7 @@
       "reason": "Rebalance: -14.05% deviation in BTC/USDT",
       "status": "filled",
       "fees": 0.421569262429,
-      "fee_currency": "USDT",
+      "fee_currency": "BTC",
       "timestamp": 1788523445188,
       "exchange_order_id": "dry_c4268d2f5bd9",
       "filled_amount": 0.0052267,
@@ -43,7 +43,7 @@
       "error_message": ""
     }
   ],
-  "last_run_ts": 1788612831617,
+  "last_run_ts": 1788613090876,
   "last_cycle_success": true,
   "critical_errors": [],
   "strategy_state": {
@@ -87,8 +87,8 @@
       "positions": {}
     }
   },
-  "session_initial_value_usd": 2949.45064457,
+  "session_initial_value_usd": 2949.6306137,
   "session_fees": {
-    "USDT": 0.421569262429
+    "BTC": 0.421569262429
   }
 }
