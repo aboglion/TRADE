@@ -470,8 +470,22 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "net_change_pct": round(net_change_pct, 2),
                 })
 
+            crypto_value_usd = sum(
+                h.value_usd for sym, h in snapshot.holdings.items()
+                if sym not in ("USDT", "USD", "BUSD", "USDC")
+            )
+            estimated_exit_fees_usd = crypto_value_usd * 0.001
+            net_total_value_usd = snapshot.total_value_usd - estimated_exit_fees_usd
+
+            net_pnl_usd = (net_total_value_usd - initial_val) if initial_val is not None else 0.0
+            net_pnl_pct = (net_pnl_usd / initial_val * 100.0) if (initial_val and initial_val > 0) else 0.0
+
             data = {
                 "total_value_usd": round(snapshot.total_value_usd, 2),
+                "net_total_value_usd": round(net_total_value_usd, 2),
+                "estimated_exit_fees_usd": round(estimated_exit_fees_usd, 2),
+                "net_pnl_usd": round(net_pnl_usd, 2),
+                "net_pnl_pct": round(net_pnl_pct, 2),
                 "holdings": holdings_list,
                 "timestamp_ms": snapshot.timestamp_ms,
                 "session_initial_value_usd": round(initial_val, 2) if initial_val is not None else None,

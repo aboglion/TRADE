@@ -499,18 +499,20 @@ async function fetchPortfolio() {
         if (!res.ok) return;
         const data = await res.json();
 
-        // Total Portfolio Value
-        document.getElementById("portfolioValue").textContent = `$${data.total_value_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        // Net Total Portfolio Value (after deducting estimated 0.1% sell fee on open holdings)
+        const netValue = data.net_total_value_usd !== undefined ? data.net_total_value_usd : data.total_value_usd;
+        document.getElementById("portfolioValue").textContent = `$${netValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-        // PNL and Fees
+        // Net PNL and Fees
         const initialVal = data.session_initial_value_usd;
         if (initialVal !== null && initialVal !== undefined) {
-            const pnl = data.total_value_usd - initialVal;
-            const pnlPct = initialVal > 0 ? (pnl / initialVal) * 100 : 0;
+            const pnl = data.net_pnl_usd !== undefined ? data.net_pnl_usd : (netValue - initialVal);
+            const pnlPct = data.net_pnl_pct !== undefined ? data.net_pnl_pct : (initialVal > 0 ? (pnl / initialVal) * 100 : 0);
             const pnlEl = document.getElementById("sessionPnl");
             if (pnlEl) {
-                pnlEl.textContent = `PNL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+                pnlEl.textContent = `NET PNL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
                 pnlEl.className = pnl >= 0 ? "tag tag-buy" : "tag tag-sell";
+                pnlEl.title = "Net Liquidation PnL (Deducting entry fees and 0.1% estimated exit fees upon selling)";
             }
         }
         
