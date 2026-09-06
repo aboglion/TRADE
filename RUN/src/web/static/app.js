@@ -57,121 +57,100 @@ document.addEventListener("DOMContentLoaded", async () => {
     initRegimeChart();
     initHealthChart();
 
-    // Event listeners with instant visual feedback
-    document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
-    document.getElementById("triggerCycleBtn").addEventListener("click", openTriggerCycleModal);
-    document.getElementById("killSwitchBtn").addEventListener("click", openKillSwitchModal);
-    document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
-    document.getElementById("manualPullBtn").addEventListener("click", triggerManualPull);
+    function safeAddListener(id, event, handler) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener(event, handler);
+    }
 
-    const resetStatsBtn = document.getElementById("resetStatsBtn");
-    if (resetStatsBtn) resetStatsBtn.addEventListener("click", openResetPnlModal);
-    const miniResetBtn = document.getElementById("pnlResetMiniBtn");
-    if (miniResetBtn) miniResetBtn.addEventListener("click", openResetPnlModal);
+    // Event listeners with instant visual feedback
+    safeAddListener("refreshBtn", "click", manualRefresh);
+    safeAddListener("triggerCycleBtn", "click", openTriggerCycleConfirmModal);
+    safeAddListener("killSwitchBtn", "click", openKillSwitchModal);
+    safeAddListener("toggleUpdaterBtn", "click", toggleUpdater);
+    safeAddListener("manualPullBtn", "click", triggerManualPull);
+
+    safeAddListener("resetStatsBtn", "click", openResetPnlModal);
+    safeAddListener("pnlResetMiniBtn", "click", openResetPnlModal);
 
     // Reset PnL Modal listeners
-    const closeResetModal = document.getElementById("closeResetPnlModal");
-    if (closeResetModal) closeResetModal.addEventListener("click", closeResetPnlModal);
-    const cancelResetBtn = document.getElementById("cancelResetPnlBtn");
-    if (cancelResetBtn) cancelResetBtn.addEventListener("click", closeResetPnlModal);
-    const confirmResetBtn = document.getElementById("confirmResetPnlBtn");
-    if (confirmResetBtn) confirmResetBtn.addEventListener("click", confirmResetPnlStats);
-    const resetModal = document.getElementById("resetPnlConfirmModal");
-    if (resetModal) resetModal.addEventListener("click", (e) => {
+    safeAddListener("closeResetPnlModal", "click", closeResetPnlModal);
+    safeAddListener("cancelResetPnlBtn", "click", closeResetPnlModal);
+    safeAddListener("confirmResetPnlBtn", "click", confirmResetPnlStats);
+    safeAddListener("resetPnlConfirmModal", "click", (e) => {
         if (e.target.id === "resetPnlConfirmModal") closeResetPnlModal();
     });
 
     // Logs & Orders toolbar listeners
-    const copyLogsBtn = document.getElementById("copyLogsBtn");
-    if (copyLogsBtn) copyLogsBtn.addEventListener("click", copyLogsToClipboard);
-    const clearLogsBtn = document.getElementById("clearLogsBtn");
-    if (clearLogsBtn) clearLogsBtn.addEventListener("click", clearLogsConsole);
-
-    const copyOrdersBtn = document.getElementById("copyOrdersBtn");
-    if (copyOrdersBtn) copyOrdersBtn.addEventListener("click", copyOrdersToClipboard);
-    const clearOrdersBtn = document.getElementById("clearOrdersBtn");
-    if (clearOrdersBtn) clearOrdersBtn.addEventListener("click", clearOrdersTable);
+    safeAddListener("copyLogsBtn", "click", copyLogsToClipboard);
+    safeAddListener("clearLogsBtn", "click", clearLogsConsole);
+    safeAddListener("copyOrdersBtn", "click", copyOrdersToClipboard);
+    safeAddListener("clearOrdersBtn", "click", clearOrdersTable);
 
     // Trigger Cycle Confirm Modal listeners
-    const triggerBtn = document.getElementById("triggerCycleBtn");
-    if (triggerBtn) triggerBtn.addEventListener("click", openTriggerCycleConfirmModal);
-    document.getElementById("closeTriggerCycleConfirmModal").addEventListener("click", closeTriggerCycleConfirmModal);
-    document.getElementById("cancelTriggerCycleConfirmBtn").addEventListener("click", closeTriggerCycleConfirmModal);
-    document.getElementById("confirmTriggerCycleBtn").addEventListener("click", confirmTriggerCycle);
-    document.getElementById("triggerCycleConfirmModal").addEventListener("click", (e) => {
+    safeAddListener("closeTriggerCycleConfirmModal", "click", closeTriggerCycleConfirmModal);
+    safeAddListener("cancelTriggerCycleConfirmBtn", "click", closeTriggerCycleConfirmModal);
+    safeAddListener("confirmTriggerCycleBtn", "click", confirmTriggerCycle);
+    safeAddListener("triggerCycleConfirmModal", "click", (e) => {
         if (e.target.id === "triggerCycleConfirmModal") closeTriggerCycleConfirmModal();
     });
 
     // Kill Switch Modal listeners
-    document.getElementById("closeKillSwitchModal").addEventListener("click", closeKillSwitchModal);
-    document.getElementById("cancelKillSwitchBtn").addEventListener("click", closeKillSwitchModal);
-    document.getElementById("confirmKillSwitchBtn").addEventListener("click", confirmToggleKillSwitch);
-    document.getElementById("killSwitchModal").addEventListener("click", (e) => {
+    safeAddListener("closeKillSwitchModal", "click", closeKillSwitchModal);
+    safeAddListener("cancelKillSwitchBtn", "click", closeKillSwitchModal);
+    safeAddListener("confirmKillSwitchBtn", "click", confirmToggleKillSwitch);
+    safeAddListener("killSwitchModal", "click", (e) => {
         if (e.target.id === "killSwitchModal") closeKillSwitchModal();
     });
 
     // Dry Run modal event listeners
-    document.getElementById("dryRunModalBtn").addEventListener("click", openDryRunModal);
-    document.getElementById("closeDryRunModal").addEventListener("click", closeDryRunModal);
-    document.getElementById("cancelDryRunSave").addEventListener("click", closeDryRunModal);
-    document.getElementById("saveDryRunBalances").addEventListener("click", openDryRunConfirmModal);
-    document.getElementById("dryRunModal").addEventListener("click", (e) => {
+    safeAddListener("dryRunModalBtn", "click", openDryRunModal);
+    safeAddListener("closeDryRunModal", "click", closeDryRunModal);
+    safeAddListener("cancelDryRunSave", "click", closeDryRunModal);
+    safeAddListener("saveDryRunBalances", "click", openDryRunConfirmModal);
+    safeAddListener("dryRunModal", "click", (e) => {
         if (e.target.id === "dryRunModal") closeDryRunModal();
     });
 
     // Dry Run Confirm modal event listeners
-    document.getElementById("closeDryRunConfirmModal").addEventListener("click", closeDryRunConfirmModal);
-    document.getElementById("cancelDryRunConfirmBtn").addEventListener("click", closeDryRunConfirmModal);
-    document.getElementById("confirmDryRunSaveBtn").addEventListener("click", confirmSaveDryRunBalances);
-    document.getElementById("dryRunConfirmModal").addEventListener("click", (e) => {
+    safeAddListener("closeDryRunConfirmModal", "click", closeDryRunConfirmModal);
+    safeAddListener("cancelDryRunConfirmBtn", "click", closeDryRunConfirmModal);
+    safeAddListener("confirmDryRunSaveBtn", "click", confirmSaveDryRunBalances);
+    safeAddListener("dryRunConfirmModal", "click", (e) => {
         if (e.target.id === "dryRunConfirmModal") closeDryRunConfirmModal();
     });
 
     // Telegram modal event listeners
-    const tgBtn = document.getElementById("telegramModalBtn");
-    if (tgBtn) tgBtn.addEventListener("click", openTelegramModal);
-    const closeTgModal = document.getElementById("closeTelegramModal");
-    if (closeTgModal) closeTgModal.addEventListener("click", closeTelegramModal);
-    const cancelTgSave = document.getElementById("cancelTelegramSave");
-    if (cancelTgSave) cancelTgSave.addEventListener("click", closeTelegramModal);
-    const saveTgBtn = document.getElementById("saveTelegramConfigBtn");
-    if (saveTgBtn) saveTgBtn.addEventListener("click", saveTelegramConfig);
-    const testTgBtn = document.getElementById("testTelegramBtn");
-    if (testTgBtn) testTgBtn.addEventListener("click", testTelegramConnection);
-    const toggleEyeBtn = document.getElementById("toggleTokenVisibilityBtn");
-    if (toggleEyeBtn) toggleEyeBtn.addEventListener("click", toggleTokenVisibility);
-    const tgModal = document.getElementById("telegramModal");
-    if (tgModal) tgModal.addEventListener("click", (e) => {
+    safeAddListener("telegramModalBtn", "click", openTelegramModal);
+    safeAddListener("closeTelegramModal", "click", closeTelegramModal);
+    safeAddListener("cancelTelegramSave", "click", closeTelegramModal);
+    safeAddListener("saveTelegramConfigBtn", "click", saveTelegramConfig);
+    safeAddListener("testTelegramBtn", "click", testTelegramConnection);
+    safeAddListener("toggleTokenVisibilityBtn", "click", toggleTokenVisibility);
+    safeAddListener("telegramModal", "click", (e) => {
         if (e.target.id === "telegramModal") closeTelegramModal();
     });
 
-    // System Errors modal event listeners
-    document.getElementById("systemHealthCard").addEventListener("click", openErrorsModal);
-    document.getElementById("closeErrorsModal").addEventListener("click", closeErrorsModal);
-    document.getElementById("closeErrorsModalFooter").addEventListener("click", closeErrorsModal);
-    document.getElementById("clearErrorsBtn").addEventListener("click", clearSystemErrors);
-    document.getElementById("errorsModal").addEventListener("click", (e) => {
+    // System Errors modal event listeners (support both healthCard and systemHealthCard)
+    safeAddListener("healthCard", "click", openErrorsModal);
+    safeAddListener("systemHealthCard", "click", openErrorsModal);
+    safeAddListener("closeErrorsModal", "click", closeErrorsModal);
+    safeAddListener("closeErrorsModalFooter", "click", closeErrorsModal);
+    safeAddListener("clearErrorsBtn", "click", clearSystemErrors);
+    safeAddListener("errorsModal", "click", (e) => {
         if (e.target.id === "errorsModal") closeErrorsModal();
     });
 
     // Strategy Conditions modal event listeners
-    const condBtn = document.getElementById("conditionsModalBtn");
-    if (condBtn) condBtn.addEventListener("click", openConditionsModal);
-    const closeCondModal = document.getElementById("closeConditionsModal");
-    if (closeCondModal) closeCondModal.addEventListener("click", closeConditionsModal);
-    const closeCondFooter = document.getElementById("closeConditionsModalFooter");
-    if (closeCondFooter) closeCondFooter.addEventListener("click", closeConditionsModal);
-    const condModal = document.getElementById("conditionsModal");
-    if (condModal) condModal.addEventListener("click", (e) => {
+    safeAddListener("conditionsModalBtn", "click", openConditionsModal);
+    safeAddListener("closeConditionsModal", "click", closeConditionsModal);
+    safeAddListener("closeConditionsModalFooter", "click", closeConditionsModal);
+    safeAddListener("conditionsModal", "click", (e) => {
         if (e.target.id === "conditionsModal") closeConditionsModal();
     });
 
-    const tabTreeBtn = document.getElementById("tabBinaryTreeBtn");
-    if (tabTreeBtn) tabTreeBtn.addEventListener("click", () => switchConditionsTab("tree"));
-    const tabLiveBtn = document.getElementById("tabLiveConditionsBtn");
-    if (tabLiveBtn) tabLiveBtn.addEventListener("click", () => switchConditionsTab("live"));
-    const tabRulesBtn = document.getElementById("tabStrategyRulesBtn");
-    if (tabRulesBtn) tabRulesBtn.addEventListener("click", () => switchConditionsTab("rules"));
+    safeAddListener("tabBinaryTreeBtn", "click", () => switchConditionsTab("tree"));
+    safeAddListener("tabLiveConditionsBtn", "click", () => switchConditionsTab("live"));
+    safeAddListener("tabStrategyRulesBtn", "click", () => switchConditionsTab("rules"));
 
     initBinaryTreeControls();
 });
