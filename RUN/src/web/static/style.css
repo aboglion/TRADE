@@ -258,8 +258,14 @@ body {
 .toolbar-actions {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex-wrap: nowrap;
+}
+
+.toolbar-actions .btn {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.8rem;
+    gap: 0.35rem;
 }
 
 /* Buttons */
@@ -1344,6 +1350,12 @@ body {
         grid-template-columns: repeat(2, 1fr);
         gap: 0.45rem;
         width: 100%;
+    }
+
+    .toolbar-actions .btn {
+        padding: 0.55rem 0.75rem;
+        font-size: 0.85rem;
+        gap: 0.45rem;
     }
 
     .btn-icon {
