@@ -1629,7 +1629,10 @@ function renderBinaryTree(data) {
         html += `
             <div class="tree-node ${nodeClass}">
                 <div class="tree-node-header">
-                    <span class="tree-node-title">${icon} ${node.title}</span>
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="tree-node-title">${icon} ${node.title}</span>
+                        ${node.subtitle ? `<span class="tree-node-subtitle" style="font-size: 0.76rem; color: #94a3b8; font-weight: 500;">${node.subtitle}</span>` : ''}
+                    </div>
                     <span class="tree-node-status-badge ${badgeClass}">${badgeText}</span>
                 </div>
                 <div class="tree-node-body">

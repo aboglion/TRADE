@@ -589,6 +589,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         try:
             import time
             import numpy as np
+            import pandas as pd
             from src.strategy.indicators import add_indicators, candles_to_dataframe
             from src.core.models import Candle
 
@@ -615,6 +616,27 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             else:
                 exchange = ccxt.binance({"timeout": 10000, "enableRateLimit": False})
 
+            # 1. Fetch BTC daily first to establish Macro Regime parameters
+            try:
+                btc_daily_ohlcv = exchange.fetch_ohlcv("BTC/USDT", timeframe="1d", limit=200)
+                if btc_daily_ohlcv:
+                    df_btc_daily = pd.DataFrame(btc_daily_ohlcv, columns=["ts", "Open", "High", "Low", "Close", "Vol"])
+                    btc_daily_close = float(df_btc_daily["Close"].iloc[-1])
+                    if len(df_btc_daily) >= 150:
+                        btc_sma150 = float(df_btc_daily["Close"].rolling(150).mean().iloc[-1])
+                    if len(df_btc_daily) >= 20:
+                        btc_ema20_daily = float(df_btc_daily["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+            except Exception as ex_btc:
+                logger.warning("Failed fetching BTC daily candles for macro regime: %s", ex_btc)
+
+            macro_regime = "BULL" if (btc_daily_close > btc_sma150 and btc_sma150 > 0) else "BEAR"
+            peak = max(bull_peak, btc_daily_close)
+            pullback_pct = round(((btc_daily_close - peak) / peak) * 100.0, 2) if peak > 0 else 0.0
+            under_ema = (btc_daily_close < btc_ema20_daily) if btc_ema20_daily > 0 else False
+            risk_guard = (pullback_pct < -8.0 or under_ema)
+            leverage = 1.0 if (risk_guard or macro_regime == "BEAR") else 2.0
+
+            # 2. Iterate each symbol and compute decision tree & indicator meters
             for pair in symbols:
                 coin = pair.split("/")[0]
                 try:
@@ -779,24 +801,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         "sell_tree_nodes": sell_tree_nodes,
                     }
 
-                    if coin == "BTC":
-                        btc_daily = df["Close"].resample("D").last().dropna()
-                        if len(btc_daily) >= 1:
-                            btc_daily_close = float(btc_daily.iloc[-1])
-                        if len(btc_daily) >= 150:
-                            btc_sma150 = float(btc_daily.rolling(150).mean().iloc[-1])
-                        if len(btc_daily) >= 20:
-                            btc_ema20_daily = float(btc_daily.ewm(span=20, adjust=False).mean().iloc[-1])
-
                 except Exception as ex:
-                    logger.debug("Failed processing conditions for %s: %s", pair, ex)
-
-            macro_regime = "BULL" if (btc_daily_close > btc_sma150 and btc_sma150 > 0) else "BEAR"
-            peak = max(bull_peak, btc_daily_close)
-            pullback_pct = round(((btc_daily_close - peak) / peak) * 100.0, 2) if peak > 0 else 0.0
-            under_ema = (btc_daily_close < btc_ema20_daily) if btc_ema20_daily > 0 else False
-            risk_guard = (pullback_pct < -8.0 or under_ema)
-            leverage = 1.0 if (risk_guard or macro_regime == "BEAR") else 2.0
+                    logger.warning("Failed processing conditions for %s: %s", pair, ex)
 
             result = {
                 "timestamp_ms": int(time.time() * 1000),
