@@ -310,7 +310,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         else:
             logger.info("Full Bull Leverage active: %.1fx", effective_leverage)
 
-        total_crypto_weight = min(1.0, 0.70 * effective_leverage / 2.0 + 0.30)
+        total_crypto_weight = 0.70 * (effective_leverage / 2.0) * self._bull_leverage + 0.30
 
         assigned_crypto_weight = 0.0
 

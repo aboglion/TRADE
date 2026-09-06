@@ -84,6 +84,48 @@ class TestRegimeAdaptiveStrategyParity:
         assert decision.target_allocation.weights["USDT"] == 1.0
         assert decision.target_allocation.weights["BTC/USDT"] == 0.0
 
+    def test_bear_regime_short_hedge(self):
+        strategy = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.15)
+        btc_candles = make_candle_series(1_600_000_000_000, count=1000, base_price=60000.0, trend=-20.0)
+        candles_by_asset = {"BTC/USDT": btc_candles}
+        portfolio = PortfolioSnapshot(
+            timestamp_ms=1_600_000_000_000,
+            holdings={"USDT": AssetHolding("USDT", 1000.0, 0.0, 1000.0, 1000.0)},
+            total_value_usd=1000.0,
+        )
+
+        decision = strategy.compute_signals(candles_by_asset, portfolio)
+        assert decision.regime == Regime.BEAR
+        assert decision.target_allocation.weights["BTC/USDT"] == -0.15
+
+    def test_bull_regime_leverage_allocation(self):
+        strategy = RegimeAdaptiveStrategy(sma_regime_period=150, bull_leverage=2.0)
+        # Create candles in strong bull trend
+        btc_candles = make_candle_series(1_600_000_000_000, count=1000, base_price=30000.0, trend=50.0)
+        eth_candles = make_candle_series(1_600_000_000_000, count=1000, base_price=2000.0, trend=5.0)
+        sol_candles = make_candle_series(1_600_000_000_000, count=1000, base_price=100.0, trend=0.5)
+
+        candles_by_asset = {
+            "BTC/USDT": btc_candles,
+            "ETH/USDT": eth_candles,
+            "SOL/USDT": sol_candles,
+        }
+        portfolio = PortfolioSnapshot(
+            timestamp_ms=1_600_000_000_000,
+            holdings={"USDT": AssetHolding("USDT", 1000.0, 0.0, 1000.0, 1000.0)},
+            total_value_usd=1000.0,
+        )
+
+        # Trigger entry signals for all 3 assets
+        decision = strategy.compute_signals(candles_by_asset, portfolio)
+        assert decision.regime == Regime.BULL
+        total_crypto = (
+            decision.target_allocation.weights.get("BTC/USDT", 0.0) +
+            decision.target_allocation.weights.get("ETH/USDT", 0.0) +
+            decision.target_allocation.weights.get("SOL/USDT", 0.0)
+        )
+        assert total_crypto > 1.0  # Demonstrates >100% allocation (2.0x leverage target)
+
     def test_state_export_and_import(self):
         strategy = RegimeAdaptiveStrategy()
         initial_state = {

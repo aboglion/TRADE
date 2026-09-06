@@ -18,7 +18,7 @@ strategy:
   warmup_candles: 1000
   sma_regime_period: 150
   bull_leverage: 2.0
-  bear_short_hedge_weight: 0.0    # 0 = hold USDT in bear (spot-only)
+  bear_short_hedge_weight: 0.15    # 0.15 = 15% BTC short hedge in bear regime
   cash_apr: 0.0                   # Set > 0 if using Binance Earn
 
   assets:
