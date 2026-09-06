@@ -707,6 +707,43 @@ body {
     overflow-wrap: anywhere;
 }
 
+/* Custom Log Row Color Highlights */
+.log-row-strategy {
+    background: rgba(56, 189, 248, 0.08) !important;
+    border-left: 3px solid #38bdf8 !important;
+}
+.log-row-strategy .log-msg {
+    color: #7dd3fc !important;
+    font-weight: 600;
+}
+
+.log-row-risk {
+    background: rgba(245, 158, 11, 0.12) !important;
+    border-left: 3px solid #f59e0b !important;
+}
+.log-row-risk .log-msg {
+    color: #fef08a !important;
+    font-weight: 600;
+}
+
+.log-row-executed {
+    background: rgba(16, 185, 129, 0.12) !important;
+    border-left: 3px solid #10b981 !important;
+}
+.log-row-executed .log-msg {
+    color: #86efac !important;
+    font-weight: 700;
+}
+
+.log-row-error {
+    background: rgba(244, 63, 94, 0.12) !important;
+    border-left: 3px solid #f43f5e !important;
+}
+.log-row-error .log-msg {
+    color: #fecdd3 !important;
+    font-weight: 600;
+}
+
 .pulse-indicator {
     display: flex;
     align-items: center;

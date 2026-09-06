@@ -372,7 +372,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         data = {
             "pending": state.pending_orders,
-            "completed": state.completed_orders[-50:],  # Last 50 completed
+            "completed": state.completed_orders[-100:],  # Last 100 completed
         }
         self._send_json(data)
 
@@ -399,8 +399,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def _handle_trigger_cycle(self) -> None:
         if self.orchestrator:
             try:
-                success = self.orchestrator.run_once()
-                self._send_json({"success": success, "message": "Cycle completed"})
+                success = self.orchestrator.run_once(force=True)
+                self._send_json({"success": success, "message": "Cycle completed (forced evaluation)"})
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, status=500)
         else:

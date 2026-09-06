@@ -101,9 +101,12 @@ class BotOrchestrator:
         self._consecutive_errors = 0
         self._save_state(success=True)
 
-    def run_once(self) -> bool:
+    def run_once(self, force: bool = False) -> bool:
         """
         Execute a single trading cycle.
+
+        Args:
+            force: If True, bypass closed candle check and evaluate strategy on latest available data.
 
         Returns True if the cycle completed successfully (even if no
         trades were needed), False if there was a recoverable error.
@@ -114,7 +117,7 @@ class BotOrchestrator:
         now_ms = self._clock.now_ms()
 
         logger.info("=" * 60)
-        logger.info("CYCLE START | %s | Mode: %s", ms_to_iso(now_ms), self._config.run_mode.name)
+        logger.info("CYCLE START | %s | Mode: %s%s", ms_to_iso(now_ms), self._config.run_mode.name, " | FORCED" if force else "")
 
         try:
             # 0. Kill switch check
@@ -163,7 +166,7 @@ class BotOrchestrator:
                     has_new_candles = True
                     new_candles_by_pair[pair] = new_candles
 
-            if not has_new_candles:
+            if not has_new_candles and not force:
                 logger.info("No new closed candles — cycle idle")
                 self._save_state(success=True)
                 return True
@@ -236,7 +239,9 @@ class BotOrchestrator:
             self._risk_manager.reset_cycle()
             executed_count = 0
 
-            for intent in plan.orders:
+            for idx, intent in enumerate(plan.orders):
+                if idx > 0:
+                    time.sleep(1.0)
                 approved, reason = self._risk_manager.approve_order(
                     intent, portfolio
                 )

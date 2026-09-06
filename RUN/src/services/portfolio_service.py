@@ -211,7 +211,9 @@ class PortfolioService:
         buy_orders: List[OrderIntent] = []
 
         for symbol, deviation in deviations.items():
-            if abs(deviation) < self._deviation_threshold:
+            target_weight = target.weights.get(symbol, 0.0)
+            # Skip small deviations unless target is 0 and we have a position to liquidate
+            if abs(deviation) < self._deviation_threshold and not (target_weight == 0.0 and deviation < 0):
                 continue
 
             price = prices.get(symbol, 0.0)

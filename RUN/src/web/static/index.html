@@ -159,7 +159,11 @@
                         <span class="card-icon">⚡</span>
                         <span class="card-title">RECENT ORDERS & FILLS</span>
                     </div>
-                    <span class="badge-count" id="orderCount">0</span>
+                    <div class="card-header-right" style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <button class="btn btn-sm btn-outline" id="copyOrdersBtn" title="העתק את היסטוריית העסקאות ללוח">📋 העתק עסקאות</button>
+                        <button class="btn btn-sm btn-outline" id="clearOrdersBtn" title="נקה את תצוגת העסקאות">🧹 נקה עסקאות</button>
+                        <span class="badge-count" id="orderCount">0 / 100+</span>
+                    </div>
                 </div>
                 <div class="table-container">
                     <table class="data-table">
@@ -189,9 +193,14 @@
                         <span class="card-icon">🖥️</span>
                         <span class="card-title">REAL-TIME SYSTEM LOGS</span>
                     </div>
-                    <div class="pulse-indicator">
-                        <span class="dot pulse"></span>
-                        <span>LIVE STREAM</span>
+                    <div class="card-header-right" style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <button class="btn btn-sm btn-outline" id="copyLogsBtn" title="העתק את כל הלוגים ללוח">📋 העתק לוגים</button>
+                        <button class="btn btn-sm btn-outline" id="clearLogsBtn" title="נקה את תצוגת הלוגים">🧹 נקה לוגים</button>
+                        <span class="badge-count" id="logCount">0 / 100</span>
+                        <div class="pulse-indicator">
+                            <span class="dot pulse"></span>
+                            <span>LIVE STREAM</span>
+                        </div>
                     </div>
                 </div>
                 <div class="log-console" id="logConsole">

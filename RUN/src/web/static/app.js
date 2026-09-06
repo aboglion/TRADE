@@ -56,6 +56,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
     document.getElementById("manualPullBtn").addEventListener("click", triggerManualPull);
 
+    // Logs & Orders toolbar listeners
+    const copyLogsBtn = document.getElementById("copyLogsBtn");
+    if (copyLogsBtn) copyLogsBtn.addEventListener("click", copyLogsToClipboard);
+    const clearLogsBtn = document.getElementById("clearLogsBtn");
+    if (clearLogsBtn) clearLogsBtn.addEventListener("click", clearLogsConsole);
+
+    const copyOrdersBtn = document.getElementById("copyOrdersBtn");
+    if (copyOrdersBtn) copyOrdersBtn.addEventListener("click", copyOrdersToClipboard);
+    const clearOrdersBtn = document.getElementById("clearOrdersBtn");
+    if (clearOrdersBtn) clearOrdersBtn.addEventListener("click", clearOrdersTable);
+
     // Trigger Cycle Confirm Modal listeners
     document.getElementById("closeTriggerCycleConfirmModal").addEventListener("click", closeTriggerCycleConfirmModal);
     document.getElementById("cancelTriggerCycleConfirmBtn").addEventListener("click", closeTriggerCycleConfirmModal);
@@ -525,7 +536,7 @@ async function fetchOrders() {
             return;
         }
 
-        allOrders.slice(0, 15).forEach(o => {
+        allOrders.slice(0, 100).forEach(o => {
             const tr = document.createElement("tr");
             const side = (o.side || "BUY").toUpperCase();
             const sideClass = side === "BUY" ? "tag-buy" : "tag-sell";
@@ -600,6 +611,9 @@ async function fetchLogs() {
         const data = await res.json();
 
         const logConsole = document.getElementById("logConsole");
+        const logCountEl = document.getElementById("logCount");
+        if (logCountEl) logCountEl.textContent = `${data.logs ? data.logs.length : 0} / 100`;
+
         const wasScrolledToBottom = logConsole.scrollHeight - logConsole.clientHeight <= logConsole.scrollTop + 20;
 
         logConsole.innerHTML = "";
@@ -613,8 +627,21 @@ async function fetchLogs() {
             if (rawLine.includes("Loaded state:") || rawLine.includes("Portfolio snapshot:") || rawLine.includes("No state file found at")) {
                 return;
             }
+
+            // Determine custom highlight style based on line contents
+            let customClass = "";
+            if (rawLine.includes("STRATEGY DECISION") || rawLine.includes("Target allocation") || rawLine.includes("Signal:") || rawLine.includes("Regime:")) {
+                customClass = "log-row-strategy";
+            } else if (rawLine.includes("Order REJECTED") || rawLine.includes("Risk manager") || rawLine.includes("rejected:") || rawLine.includes("Kill switch")) {
+                customClass = "log-row-risk";
+            } else if (rawLine.includes("Order executed:") || rawLine.includes("APPROVED by risk manager") || rawLine.includes("Order executed") || rawLine.includes("Cycle completed")) {
+                customClass = "log-row-executed";
+            } else if (rawLine.includes("ERROR") || rawLine.includes("CRITICAL") || rawLine.includes("failed")) {
+                customClass = "log-row-error";
+            }
+
             const row = document.createElement("div");
-            row.className = "log-row";
+            row.className = `log-row ${customClass}`.trim();
 
             // Parse pattern: "2026-09-04T12:16:54+0300 | INFO     | bot.services.state | Loaded state..."
             const match = rawLine.match(/^(\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})\S*)\s*\|\s*(\w+)\s*\|\s*([\w\.]+)\s*\|\s*(.*)$/);
@@ -658,6 +685,63 @@ async function fetchLogs() {
     } catch (err) {
         console.error("Failed to fetch logs:", err);
     }
+}
+
+// ── Copy & Clear Actions for Logs & Orders ─────────────────────
+
+function copyLogsToClipboard() {
+    const logConsole = document.getElementById("logConsole");
+    if (!logConsole) return;
+    const text = logConsole.innerText || logConsole.textContent;
+    if (!text || text.trim() === "No logs recorded yet") {
+        showToast("⚠️ אין תוכן לוגים להעתקה", "info");
+        return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        showToast("📋 כל הלוגים הועתקו בהצלחה ללוח!", "success");
+    }).catch(err => {
+        showToast("❌ שגיאה בהעתקת לוגים: " + err, "error");
+    });
+}
+
+function clearLogsConsole() {
+    const logConsole = document.getElementById("logConsole");
+    if (logConsole) {
+        logConsole.innerHTML = `<div class="log-line text-muted">הלוגים נוקו על ידי המשתמש (תצוגת המסך נוקתה)</div>`;
+    }
+    const logCountEl = document.getElementById("logCount");
+    if (logCountEl) logCountEl.textContent = "0 / 100";
+    showToast("🧹 תצוגת הלוגים נוקתה!", "info");
+}
+
+function copyOrdersToClipboard() {
+    const table = document.querySelector(".data-table");
+    if (!table) return;
+    const rows = Array.from(table.querySelectorAll("tr"));
+    const textLines = rows.map(r => {
+        const cells = Array.from(r.querySelectorAll("th, td")).map(c => c.innerText.trim());
+        return cells.join("\t");
+    });
+    const text = textLines.join("\n");
+    if (!text || text.includes("No order history available")) {
+        showToast("⚠️ אין היסטוריית עסקאות להעתקה", "info");
+        return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        showToast("📋 היסטוריית העסקאות הועתקה בהצלחה ללוח!", "success");
+    }).catch(err => {
+        showToast("❌ שגיאה בהעתקת עסקאות: " + err, "error");
+    });
+}
+
+function clearOrdersTable() {
+    const tableBody = document.getElementById("ordersTableBody");
+    if (tableBody) {
+        tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">תצוגת העסקאות נוקתה על ידי המשתמש</td></tr>`;
+    }
+    const orderCountEl = document.getElementById("orderCount");
+    if (orderCountEl) orderCountEl.textContent = "0 / 100+";
+    showToast("🧹 תצוגת העסקאות נוקתה!", "info");
 }
 
 function escapeHtml(str) {
