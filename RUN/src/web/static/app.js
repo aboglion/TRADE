@@ -1974,7 +1974,7 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_1",
                 shortTitle: "1. משטר מקרו",
                 fullTitle: "1. משטר שוק מקרו (Macro Regime)",
-                criteria: "BTC Daily Close > SMA150 ($70,085)",
+                criteria: `BTC Daily Close > SMA150 ($${(macro.btc_sma150||0).toLocaleString()})`,
                 actual: isBull ? `BULL REGIME ($${(macro.btc_close||0).toLocaleString()} > $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME ($${(macro.btc_close||0).toLocaleString()} < $${(macro.btc_sma150||0).toLocaleString()})`,
                 met: isBull,
                 explanation: "מאמת ששוק הקריפטו נמצא במגמת עלייה ראשית. כשהנר היומי של ביטקוין מעל ממוצע 150 יום, מאושר מסחר ממונף בלונגים."
@@ -2242,10 +2242,10 @@ function renderDashboardPipeline(data) {
                     id: `dash_${coin}_sell_5`,
                     shortTitle: "5. EMA Exit",
                     fullTitle: "5. שבירת ממוצעים (EMA Breakdown Exit)",
-                    criteria: sellNodesRaw[4]?.criteria || "Close < EMA50 / EMA200",
+                    criteria: sellNodesRaw[4]?.criteria || "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
                     actual: sellNodesRaw[4]?.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
                     triggered: !!sellNodesRaw[4]?.triggered,
-                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 (Trend) או EMA200 (Strong Bull) מעידה על סיום מומנטום ומחייבת מכירה."
+                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 כשה-Mode הוא TREND. יציאת EMA200 ב-Strong Bull מושבתת (ema_exit_strong=False)."
                 }
             ];
 
