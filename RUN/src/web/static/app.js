@@ -803,19 +803,83 @@ async function fetchLogs() {
 
 // ── Copy & Clear Actions for Logs & Orders ─────────────────────
 
-function copyLogsToClipboard() {
+async function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (err) {
+            console.warn("navigator.clipboard.writeText failed, attempting execCommand fallback:", err);
+        }
+    }
+
+    // Universal Fallback: execCommand with hidden textarea (works over non-secure HTTP and IP addresses)
+    let success = false;
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.width = "2em";
+    textArea.style.height = "2em";
+    textArea.style.padding = "0";
+    textArea.style.border = "none";
+    textArea.style.outline = "none";
+    textArea.style.boxShadow = "none";
+    textArea.style.background = "transparent";
+    textArea.setAttribute("readonly", "");
+    document.body.appendChild(textArea);
+
+    textArea.focus();
+    textArea.select();
+    if (textArea.setSelectionRange) {
+        textArea.setSelectionRange(0, 999999);
+    }
+
+    try {
+        success = document.execCommand("copy");
+    } catch (err) {
+        console.error("document.execCommand copy failed:", err);
+        success = false;
+    }
+
+    document.body.removeChild(textArea);
+    return success;
+}
+
+async function copyLogsToClipboard() {
     const logConsole = document.getElementById("logConsole");
     if (!logConsole) return;
-    const text = logConsole.innerText || logConsole.textContent;
-    if (!text || text.trim() === "No logs recorded yet") {
+
+    const rows = logConsole.querySelectorAll(".log-row");
+    let text = "";
+    if (rows && rows.length > 0) {
+        const textLines = Array.from(rows).map(r => {
+            const time = r.querySelector(".log-time")?.innerText || "";
+            const badge = r.querySelector(".log-badge")?.innerText || "";
+            const module = r.querySelector(".log-module")?.innerText || "";
+            const msg = r.querySelector(".log-msg")?.innerText || "";
+            if (time || badge || module || msg) {
+                return `${time} | ${badge.padEnd(5)} | ${module} | ${msg}`.trim();
+            }
+            return r.innerText.trim();
+        });
+        text = textLines.join("\n");
+    } else {
+        text = (logConsole.innerText || logConsole.textContent || "").trim();
+    }
+
+    if (!text || text === "No logs recorded yet" || text === "Initializing dashboard stream..." || text === "Logs console cleared by user") {
         showToast("⚠️ No log content to copy", "info");
         return;
     }
-    navigator.clipboard.writeText(text).then(() => {
+
+    const copied = await copyTextToClipboard(text);
+    if (copied) {
         showToast("📋 All system logs copied to clipboard!", "success");
-    }).catch(err => {
-        showToast("❌ Error copying logs: " + err, "error");
-    });
+    } else {
+        showToast("❌ Failed to copy system logs", "error");
+    }
 }
 
 function clearLogsConsole() {
@@ -828,24 +892,37 @@ function clearLogsConsole() {
     showToast("🧹 Log console display cleared!", "info");
 }
 
-function copyOrdersToClipboard() {
+async function copyOrdersToClipboard() {
+    const tableBody = document.getElementById("ordersTableBody");
+    if (!tableBody) return;
+
+    const bodyText = (tableBody.innerText || "").trim();
+    if (!bodyText || bodyText.includes("No order history available") || bodyText.includes("No orders executed yet") || bodyText.includes("Orders display cleared by user")) {
+        showToast("⚠️ No order history to copy", "info");
+        return;
+    }
+
     const table = document.querySelector(".data-table");
     if (!table) return;
+
     const rows = Array.from(table.querySelectorAll("tr"));
+    if (rows.length <= 1) {
+        showToast("⚠️ No order history to copy", "info");
+        return;
+    }
+
     const textLines = rows.map(r => {
         const cells = Array.from(r.querySelectorAll("th, td")).map(c => c.innerText.trim());
         return cells.join("\t");
     });
     const text = textLines.join("\n");
-    if (!text || text.includes("No order history available")) {
-        showToast("⚠️ No order history to copy", "info");
-        return;
-    }
-    navigator.clipboard.writeText(text).then(() => {
+
+    const copied = await copyTextToClipboard(text);
+    if (copied) {
         showToast("📋 Order history copied to clipboard!", "success");
-    }).catch(err => {
-        showToast("❌ Error copying order history: " + err, "error");
-    });
+    } else {
+        showToast("❌ Failed to copy order history", "error");
+    }
 }
 
 function clearOrdersTable() {
