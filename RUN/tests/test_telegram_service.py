@@ -106,8 +106,13 @@ class TestTelegramService(unittest.TestCase):
         self.assertIn("successfully", msg)
 
     def test_config_manager_persistence(self):
-        yaml_content = """
+        with tempfile.NamedTemporaryFile("w+", suffix=".json", delete=False) as st_tf:
+            st_path = st_tf.name
+
+        yaml_content = f"""
 run_mode: DRY_RUN
+state:
+  path: {st_path}
 telegram:
   enabled: false
   bot_token: ""
@@ -141,6 +146,7 @@ telegram:
 
         finally:
             Path(tf_path).unlink(missing_ok=True)
+            Path(st_path).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

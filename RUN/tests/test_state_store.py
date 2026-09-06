@@ -91,17 +91,18 @@ class TestCorruptionHandling:
 
 
 class TestCompletedOrdersTruncation:
-    def test_keeps_last_100_orders(self, tmp_path):
+    def test_keeps_orders_up_to_limit(self, tmp_path):
         path = str(tmp_path / "state.json")
         store = JsonStateStore(path)
 
         state = BotState()
-        state.completed_orders = [{"id": f"order_{i}"} for i in range(200)]
+        state.completed_orders = [{"id": f"order_{i}"} for i in range(6000)]
 
         store.save_state(state)
         loaded = store.load_state()
 
-        assert len(loaded.completed_orders) <= 100
+        assert len(loaded.completed_orders) == 5000
+        assert loaded.completed_orders[0]["id"] == "order_1000"
 
 
 class TestPnlHistoryPersistence:

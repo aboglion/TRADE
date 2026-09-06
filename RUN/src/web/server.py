@@ -545,7 +545,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         data = {
             "pending": state.pending_orders,
-            "completed": state.completed_orders[-100:],  # Last 100 completed
+            "completed": state.completed_orders[-1000:],  # Return up to 1000 completed orders
         }
         self._send_json(data)
 
@@ -903,6 +903,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 cm.save_telegram_config(enabled=enabled, bot_token=bot_token, chat_id=chat_id, dashboard_url=dashboard_url)
             except Exception as ex:
                 logger.warning("Could not save telegram config to config.yaml: %s", ex)
+
+            if self.state_store:
+                try:
+                    st = self.state_store.load_state()
+                    st.strategy_state["telegram"] = {
+                        "enabled": enabled,
+                        "bot_token": bot_token,
+                        "chat_id": chat_id,
+                        "dashboard_url": dashboard_url,
+                    }
+                    self.state_store.save_state(st)
+                    logger.info("Persisted Telegram configuration to state_store")
+                except Exception as ex:
+                    logger.warning("Could not persist Telegram config into state_store: %s", ex)
 
             if self.config and hasattr(self.config, "telegram"):
                 self.config.telegram.enabled = enabled

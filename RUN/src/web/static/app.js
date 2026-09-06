@@ -1394,11 +1394,11 @@ function renderPnlChart() {
     if (highPill) highPill.textContent = `High: ${highPnl >= 0 ? '+' : ''}$${highPnl.toFixed(3)}`;
     if (lowPill) lowPill.textContent = `Low: ${lowPnl >= 0 ? '+' : ''}$${lowPnl.toFixed(3)}`;
 
-    // Canvas Paddings
-    const paddingLeft = 70;
-    const paddingRight = 20;
-    const paddingTop = 25;
-    const paddingBottom = 30;
+    // Canvas Paddings for embedded mini-chart
+    const paddingLeft = 56;
+    const paddingRight = 12;
+    const paddingTop = 12;
+    const paddingBottom = 20;
 
     const plotWidth = width - paddingLeft - paddingRight;
     const plotHeight = height - paddingTop - paddingBottom;
@@ -1415,11 +1415,11 @@ function renderPnlChart() {
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
     ctx.fillStyle = "#64748b";
-    ctx.font = "11px 'JetBrains Mono', monospace";
+    ctx.font = "10px 'JetBrains Mono', monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
 
-    const steps = 4;
+    const steps = 3;
     for (let i = 0; i <= steps; i++) {
         const y = paddingTop + (plotHeight * i / steps);
         const val = maxVal - (valRange * i / steps);
@@ -1430,7 +1430,7 @@ function renderPnlChart() {
         ctx.stroke();
 
         const valStr = `${val >= 0 ? '+' : ''}$${val.toFixed(3)}`;
-        ctx.fillText(valStr, paddingLeft - 8, y);
+        ctx.fillText(valStr, paddingLeft - 5, y);
     }
 
     // Zero Baseline Line
@@ -1480,7 +1480,7 @@ function renderPnlChart() {
         // Stroke line
         ctx.beginPath();
         ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2.2;
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
 
@@ -1493,26 +1493,27 @@ function renderPnlChart() {
         // Glowing last point dot
         const lastPt = currentChartPoints[currentChartPoints.length - 1];
         ctx.beginPath();
-        ctx.arc(lastPt.x, lastPt.y, 4.5, 0, Math.PI * 2);
+        ctx.arc(lastPt.x, lastPt.y, 4, 0, Math.PI * 2);
         ctx.fillStyle = strokeColor;
         ctx.fill();
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.8;
         ctx.strokeStyle = "#ffffff";
         ctx.stroke();
     }
 
     // X-Axis Timestamps
     ctx.fillStyle = "#64748b";
+    ctx.font = "10px 'JetBrains Mono', monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     if (count > 0) {
-        const xStep = Math.max(1, Math.floor(count / 5));
+        const xStep = Math.max(1, Math.floor(count / 4));
         for (let i = 0; i < count; i += xStep) {
             const pt = currentChartPoints[i];
             if (!pt) continue;
             const date = new Date(pt.data.ts || Date.now());
             const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            ctx.fillText(timeStr, pt.x, paddingTop + plotHeight + 6);
+            ctx.fillText(timeStr, pt.x, paddingTop + plotHeight + 4);
         }
     }
 }

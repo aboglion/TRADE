@@ -7,7 +7,10 @@ API secrets are read ONLY from environment variables — never from files.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,6 +19,9 @@ import yaml
 
 from src.core.enums import RunMode
 from src.core.exceptions import ConfigError
+
+logger = logging.getLogger("bot.config")
+
 
 
 # ── Typed config sections ────────────────────────────────────
@@ -130,9 +136,22 @@ class ConfigManager:
     def load(self) -> BotConfig:
         """Load and validate configuration."""
         raw: Dict[str, Any] = {}
-        if self._config_path and Path(self._config_path).exists():
-            with open(self._config_path, "r") as f:
-                raw = yaml.safe_load(f) or {}
+        if self._config_path:
+            cfg_p = Path(self._config_path)
+            if not cfg_p.exists():
+                parent_dir = cfg_p.parent
+                example_p = parent_dir / "config.example.yaml"
+                if not example_p.exists():
+                    example_p = Path("RUN/config.example.yaml")
+                if example_p.exists():
+                    try:
+                        shutil.copy2(example_p, cfg_p)
+                        logger.info("Auto-created missing config file %s from %s", cfg_p, example_p)
+                    except Exception as ex:
+                        logger.warning("Could not auto-create config file: %s", ex)
+            if cfg_p.exists():
+                with open(cfg_p, "r", encoding="utf-8") as f:
+                    raw = yaml.safe_load(f) or {}
 
         config = BotConfig()
         self._load_run_mode(config, raw)
@@ -258,41 +277,92 @@ class ConfigManager:
         else:
             enabled = bool(tg_raw.get("enabled", False))
 
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", tg_raw.get("bot_token", ""))
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", tg_raw.get("chat_id", ""))
+        dashboard_url = os.environ.get("TELEGRAM_DASHBOARD_URL", tg_raw.get("dashboard_url", ""))
+
+        # Fallback: Recover telegram settings from state store (bot_state.json) if missing in config.yaml
+        if not bot_token or not chat_id:
+            try:
+                state_path_str = config.state.path if (config and hasattr(config, "state")) else "data/bot_state.json"
+                state_p = Path(state_path_str)
+                if state_p.exists():
+                    with open(state_p, "r", encoding="utf-8") as f:
+                        state_data = json.load(f)
+                    saved_tg = state_data.get("strategy_state", {}).get("telegram", {})
+                    saved_token = saved_tg.get("bot_token", "")
+                    saved_chat = saved_tg.get("chat_id", "")
+                    if saved_token and saved_chat:
+                        if not bot_token:
+                            bot_token = saved_token
+                        if not chat_id:
+                            chat_id = saved_chat
+                        if not dashboard_url:
+                            dashboard_url = saved_tg.get("dashboard_url", "")
+                        if env_enabled is None and "enabled" in saved_tg:
+                            enabled = bool(saved_tg.get("enabled", enabled))
+                        logger.info("Recovered Telegram settings from bot_state.json backup")
+            except Exception as ex:
+                logger.debug("Failed to load Telegram backup from state store: %s", ex)
+
         config.telegram = TelegramConfig(
             enabled=enabled,
-            bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", tg_raw.get("bot_token", "")),
-            chat_id=os.environ.get("TELEGRAM_CHAT_ID", tg_raw.get("chat_id", "")),
-            dashboard_url=os.environ.get("TELEGRAM_DASHBOARD_URL", tg_raw.get("dashboard_url", "")),
+            bot_token=bot_token,
+            chat_id=chat_id,
+            dashboard_url=dashboard_url,
         )
 
     def save_telegram_config(
         self, enabled: bool, bot_token: str, chat_id: str, dashboard_url: str = ""
     ) -> None:
-        """Persist updated telegram settings back to config.yaml."""
+        """Persist updated telegram settings back to config.yaml AND bot_state.json backup."""
         if self._config:
             self._config.telegram.enabled = enabled
             self._config.telegram.bot_token = bot_token
             self._config.telegram.chat_id = chat_id
             self._config.telegram.dashboard_url = dashboard_url
 
-        if not self._config_path or not Path(self._config_path).exists():
-            return
+        if self._config_path and Path(self._config_path).exists():
+            try:
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
 
-        try:
-            with open(self._config_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                if "telegram" not in data:
+                    data["telegram"] = {}
+                data["telegram"]["enabled"] = enabled
+                data["telegram"]["bot_token"] = bot_token
+                data["telegram"]["chat_id"] = chat_id
+                data["telegram"]["dashboard_url"] = dashboard_url
 
-            if "telegram" not in data:
-                data["telegram"] = {}
-            data["telegram"]["enabled"] = enabled
-            data["telegram"]["bot_token"] = bot_token
-            data["telegram"]["chat_id"] = chat_id
-            data["telegram"]["dashboard_url"] = dashboard_url
+                with open(self._config_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+            except Exception as e:
+                logger.error("Failed to save telegram config to %s: %s", self._config_path, e)
 
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
-        except Exception as e:
-            logger.error("Failed to save telegram config to %s: %s", self._config_path, e)
+        # Backup copy to bot_state.json if state path exists
+        if self._config and hasattr(self._config, "state") and self._config.state.path:
+            state_path_str = self._config.state.path
+            state_p = Path(state_path_str)
+            try:
+                if state_p.exists():
+                    with open(state_p, "r", encoding="utf-8") as f:
+                        s_data = json.load(f)
+                    if "strategy_state" not in s_data or not isinstance(s_data["strategy_state"], dict):
+                        s_data["strategy_state"] = {}
+                    s_data["strategy_state"]["telegram"] = {
+                        "enabled": enabled,
+                        "bot_token": bot_token,
+                        "chat_id": chat_id,
+                        "dashboard_url": dashboard_url,
+                    }
+                    tmp_p = state_p.with_suffix(".tmp")
+                    with open(tmp_p, "w", encoding="utf-8") as f:
+                        json.dump(s_data, f, indent=2, ensure_ascii=False)
+                    tmp_p.replace(state_p)
+                    logger.info("Backed up Telegram settings to state store %s", state_p)
+            except Exception as ex:
+                logger.warning("Could not backup Telegram settings to state store: %s", ex)
+
 
     def save_dry_run_balances(self, balances: Dict[str, float]) -> None:
         """Persist updated dry_run.initial_balances back to config.yaml."""

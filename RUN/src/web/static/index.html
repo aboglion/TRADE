@@ -86,18 +86,43 @@
 
         <!-- Main Dashboard Content -->
         <main class="dashboard-grid">
-            <!-- Metric Card 1: Total Value -->
-            <div class="card glass metric-card">
+            <!-- Metric Card 1: Total Value & PnL History -->
+            <div class="card glass metric-card portfolio-card">
                 <div class="card-header">
                     <div class="card-header-left">
                         <span class="card-icon">💰</span>
                         <span class="card-title">TOTAL PORTFOLIO VALUE</span>
                     </div>
+                    <div class="timeframe-selector mini-tf" id="pnlTfSelector" title="Timeframe filter for PnL history chart">
+                        <button class="tf-btn" data-tf="1h">1H</button>
+                        <button class="tf-btn" data-tf="24h">24H</button>
+                        <button class="tf-btn" data-tf="7d">7D</button>
+                        <button class="tf-btn active" data-tf="all">ALL</button>
+                    </div>
                 </div>
-                <div class="metric-value-container">
-                    <div class="metric-value" id="portfolioValue">$0.00</div>
-                    <div class="metric-subtitle" id="portfolioSub">Allocated across BTC, ETH, SOL & USDT</div>
+                <div class="portfolio-card-body">
+                    <div class="metric-value-container">
+                        <div class="metric-value" id="portfolioValue">$0.00</div>
+                        <div class="metric-subtitle" id="portfolioSub">Allocated across BTC, ETH, SOL & USDT</div>
+                    </div>
+
+                    <!-- Mini PNL History Chart embedded side-by-side on mobile / stacked on desktop -->
+                    <div class="mini-chart-container">
+                        <div class="mini-chart-sub-header">
+                            <span class="mini-chart-title">PORTFOLIO PNL HISTORY</span>
+                            <div class="pnl-summary-pills mini-pnl-pills">
+                                <span class="pnl-pill pnl-pill-high" id="pnlHighPill" title="Session High PNL">H: +$0.00</span>
+                                <span class="pnl-pill pnl-pill-low" id="pnlLowPill" title="Session Low PNL">L: -$0.00</span>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper mini-chart-wrapper">
+                            <canvas id="pnlCanvas"></canvas>
+                            <div id="pnlTooltip" class="chart-tooltip"></div>
+                            <div id="pnlChartEmpty" class="chart-empty-overlay">Recording PNL performance history...</div>
+                        </div>
+                    </div>
                 </div>
+
                 <div class="tags-container">
                     <span id="sessionPnl" class="tag tag-pnl">PNL: +$0.00 (+0.00%)</span>
                     <span id="sessionFees" class="tag tag-fee">Fees: 0.00</span>
@@ -135,33 +160,6 @@
                 </div>
                 <div class="metric-sub-footer" id="systemHealthSub">
                     <span>Last cycle:</span> <strong id="lastCycleTime">Never</strong>
-                </div>
-            </div>
-
-            <!-- PNL Performance History Chart Card -->
-            <div class="card glass full-width pnl-chart-card">
-                <div class="card-header">
-                    <div class="card-header-left">
-                        <span class="card-icon">📈</span>
-                        <span class="card-title">PORTFOLIO PNL HISTORY</span>
-                    </div>
-                    <div class="pnl-chart-header-right">
-                        <div class="pnl-summary-pills">
-                            <span class="pnl-pill pnl-pill-high" id="pnlHighPill" title="Session High PNL">High: +$0.00</span>
-                            <span class="pnl-pill pnl-pill-low" id="pnlLowPill" title="Session Low PNL">Low: -$0.00</span>
-                        </div>
-                        <div class="timeframe-selector" id="pnlTfSelector">
-                            <button class="tf-btn" data-tf="1h">1H</button>
-                            <button class="tf-btn" data-tf="24h">24H</button>
-                            <button class="tf-btn" data-tf="7d">7D</button>
-                            <button class="tf-btn active" data-tf="all">ALL</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="chart-wrapper">
-                    <canvas id="pnlCanvas"></canvas>
-                    <div id="pnlTooltip" class="chart-tooltip"></div>
-                    <div id="pnlChartEmpty" class="chart-empty-overlay">Recording PNL performance history...</div>
                 </div>
             </div>
 

@@ -40,3 +40,10 @@ logs/
 .env.*
 !.env.example
 
+# Local runtime configuration files (do not overwrite on git pull)
+RUN/config.yaml
+config.yaml
+!config.example.yaml
+!RUN/config.example.yaml
+
+

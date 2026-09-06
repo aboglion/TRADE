@@ -408,7 +408,64 @@ body {
     font-size: 1.1rem;
 }
 
-/* PNL Chart Card & Canvas */
+/* Embedded Mini PNL History Chart inside Portfolio Card */
+.portfolio-card {
+    min-height: 310px;
+}
+
+.portfolio-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.mini-tf {
+    padding: 1px;
+}
+
+.mini-tf .tf-btn {
+    padding: 0.15rem 0.45rem;
+    font-size: 0.7rem;
+}
+
+.mini-chart-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.35rem 0;
+    width: 100%;
+}
+
+.mini-chart-sub-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+}
+
+.mini-chart-title {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+}
+
+.mini-pnl-pills .pnl-pill {
+    font-size: 0.68rem;
+    padding: 0.1rem 0.45rem;
+}
+
+.mini-chart-wrapper {
+    height: 120px;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 .pnl-chart-card {
     padding: 1.25rem 1.5rem;
     gap: 0.85rem;
@@ -1283,6 +1340,33 @@ body {
     .card {
         padding: 1rem;
         gap: 0.85rem;
+    }
+
+    .portfolio-card {
+        min-height: auto;
+    }
+
+    .portfolio-card-body {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        width: 100%;
+    }
+
+    .portfolio-card-body .metric-value-container {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .portfolio-card-body .mini-chart-container {
+        flex: 1.15;
+        min-width: 0;
+        margin: 0;
+    }
+
+    .portfolio-card-body .mini-chart-wrapper {
+        height: 100px;
     }
 
     .metric-value {

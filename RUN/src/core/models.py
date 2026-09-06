@@ -193,7 +193,7 @@ class BotState:
             "last_processed_candle_ts": self.last_processed_candle_ts,
             "last_regime": self.last_regime,
             "pending_orders": self.pending_orders,
-            "completed_orders": self.completed_orders[-100:],  # Keep last 100
+            "completed_orders": self.completed_orders[-5000:],  # Keep last 5000 trades
             "last_run_ts": self.last_run_ts,
             "last_cycle_success": self.last_cycle_success,
             "critical_errors": self.critical_errors[-50:],
