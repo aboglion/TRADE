@@ -151,6 +151,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("errorsModal").addEventListener("click", (e) => {
         if (e.target.id === "errorsModal") closeErrorsModal();
     });
+
+    // Strategy Conditions modal event listeners
+    const condBtn = document.getElementById("conditionsModalBtn");
+    if (condBtn) condBtn.addEventListener("click", openConditionsModal);
+    const closeCondModal = document.getElementById("closeConditionsModal");
+    if (closeCondModal) closeCondModal.addEventListener("click", closeConditionsModal);
+    const closeCondFooter = document.getElementById("closeConditionsModalFooter");
+    if (closeCondFooter) closeCondFooter.addEventListener("click", closeConditionsModal);
+    const condModal = document.getElementById("conditionsModal");
+    if (condModal) condModal.addEventListener("click", (e) => {
+        if (e.target.id === "conditionsModal") closeConditionsModal();
+    });
+
+    const tabLiveBtn = document.getElementById("tabLiveConditionsBtn");
+    if (tabLiveBtn) tabLiveBtn.addEventListener("click", () => switchConditionsTab("live"));
+    const tabRulesBtn = document.getElementById("tabStrategyRulesBtn");
+    if (tabRulesBtn) tabRulesBtn.addEventListener("click", () => switchConditionsTab("rules"));
 });
 
 async function checkAuthStatus() {
@@ -1420,6 +1437,230 @@ async function saveTelegramConfig() {
             saveBtn.textContent = "Save Settings 💾";
         }
     }
+}
+
+// ── Strategy Conditions Modal Handlers ──────────────────────────
+
+async function openConditionsModal() {
+    const modal = document.getElementById("conditionsModal");
+    if (modal) {
+        modal.classList.add("active");
+        await fetchStrategyConditions();
+    }
+}
+
+function closeConditionsModal() {
+    const modal = document.getElementById("conditionsModal");
+    if (modal) modal.classList.remove("active");
+}
+
+function switchConditionsTab(tabName) {
+    const liveBtn = document.getElementById("tabLiveConditionsBtn");
+    const rulesBtn = document.getElementById("tabStrategyRulesBtn");
+    const liveContent = document.getElementById("tabLiveConditionsContent");
+    const rulesContent = document.getElementById("tabStrategyRulesContent");
+
+    if (tabName === "live") {
+        if (liveBtn) liveBtn.classList.add("active");
+        if (rulesBtn) rulesBtn.classList.remove("active");
+        if (liveContent) liveContent.classList.add("active");
+        if (rulesContent) rulesContent.classList.remove("active");
+    } else {
+        if (rulesBtn) rulesBtn.classList.add("active");
+        if (liveBtn) liveBtn.classList.remove("active");
+        if (rulesContent) rulesContent.classList.add("active");
+        if (liveContent) liveContent.classList.remove("active");
+    }
+}
+
+async function fetchStrategyConditions() {
+    const grid = document.getElementById("assetCondGrid");
+    try {
+        const res = await apiFetch("/api/strategy/conditions");
+        if (!res.ok) {
+            if (grid) grid.innerHTML = `<div class="empty-state text-danger">Error loading conditions (Status: ${res.status})</div>`;
+            return;
+        }
+        const data = await res.json();
+        renderStrategyConditions(data);
+    } catch (err) {
+        console.error("Failed to fetch strategy conditions:", err);
+        if (grid) grid.innerHTML = `<div class="empty-state text-danger">Server communication error: ${err.message || err}</div>`;
+    }
+}
+
+function renderStrategyConditions(data) {
+    if (!data) return;
+
+    // 1. Render Macro Regime Banner
+    const macro = data.macro_regime || {};
+    const isBull = macro.regime === "BULL";
+    const regimeBadge = document.getElementById("macroBannerRegime");
+    const smaGapEl = document.getElementById("macroBannerSmaGap");
+    const riskGuardEl = document.getElementById("macroBannerRiskGuard");
+    const levEl = document.getElementById("macroBannerLev");
+
+    if (regimeBadge) {
+        regimeBadge.textContent = isBull ? "🐂 BULL REGIME" : "🐻 BEAR REGIME";
+        regimeBadge.className = isBull ? "macro-banner-badge" : "macro-banner-badge bear";
+    }
+    if (smaGapEl) {
+        const gap = macro.sma_gap_pct || 0.0;
+        const sign = gap >= 0 ? "+" : "";
+        smaGapEl.textContent = `${sign}${gap.toFixed(2)}% (BTC $${(macro.btc_close || 0).toLocaleString()} vs SMA $${(macro.btc_sma150 || 0).toLocaleString()})`;
+    }
+    if (riskGuardEl) {
+        const active = !!macro.risk_guard_active;
+        riskGuardEl.textContent = active ? "⚠️ Risk Guard: ACTIVE" : "🛡️ Risk Guard: INACTIVE";
+        riskGuardEl.className = active ? "macro-banner-pill pill-active" : "macro-banner-pill";
+    }
+    if (levEl) {
+        const lev = macro.effective_leverage || 1.0;
+        levEl.textContent = `Leverage: ${lev.toFixed(1)}x`;
+    }
+
+    // 2. Render Asset Condition Cards
+    const grid = document.getElementById("assetCondGrid");
+    if (!grid) return;
+
+    const assets = data.assets || {};
+    const coinIcons = { BTC: "₿", ETH: "⟠", SOL: "◎" };
+    let cardsHtml = "";
+
+    const coinKeys = Object.keys(assets);
+    if (coinKeys.length === 0) {
+        grid.innerHTML = `<div class="empty-state">No live asset indicators computed yet.</div>`;
+        return;
+    }
+
+    coinKeys.forEach(coin => {
+        const a = assets[coin];
+        const icon = coinIcons[coin] || "🪙";
+        const entryCond = a.entry_conditions || {};
+        const pos = a.position || {};
+
+        const allMet = !!entryCond.all_met;
+        const isPosActive = !!pos.active;
+
+        const statusTagClass = isPosActive ? "tag-cond-met" : (allMet ? "tag-cond-met" : "tag-cond-waiting");
+        const statusTagText = isPosActive ? "✅ POSITION ACTIVE" : (allMet ? "🎯 BREAKOUT MET" : "⏳ WAITING BREAKOUT");
+
+        // Donchian breakout calculation
+        const donchian = a.donchian30 || 0;
+        const close = a.close || 0;
+        const donchianPct = donchian > 0 ? Math.min(100, Math.max(0, (close / donchian) * 100)) : 0;
+        const donchianGapPct = entryCond.donchian_gap_pct || 0;
+        const donchianGapUsd = entryCond.donchian_gap_usd || 0;
+        const gapSign = donchianGapPct >= 0 ? "+" : "";
+        const barColorClass = donchianPct >= 100 ? "bar-green" : (donchianPct >= 97 ? "bar-yellow" : "bar-red");
+
+        // ADX calculation
+        const adx = a.adx || 0;
+        const minAdx = a.min_adx || 20;
+        const adxPct = Math.min(100, Math.max(0, (adx / 50) * 100));
+        const adxMet = adx >= minAdx;
+        const adxBarColor = adxMet ? "bar-green" : "bar-yellow";
+
+        // Regime/EMA
+        const assetRegime = a.asset_regime || "UNKNOWN";
+        const regimeMet = !!entryCond.regime_ok;
+
+        cardsHtml += `
+            <div class="cond-card">
+                <div class="cond-card-header">
+                    <div class="cond-coin-name">
+                        <span>${icon}</span>
+                        <span>${coin}</span>
+                    </div>
+                    <div class="cond-coin-price">$${close.toLocaleString()}</div>
+                </div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span class="cond-status-tag ${statusTagClass}">${statusTagText}</span>
+                    <span style="font-size: 0.76rem; color: var(--text-muted); font-weight: 700;">Target: ${a.target_weight_pct}% Portfolio</span>
+                </div>
+
+                <div class="cond-meter-group">
+                    <!-- Donchian 30 Breakout Meter -->
+                    <div class="cond-meter-item">
+                        <div class="cond-meter-label">
+                            <span>Donchian 30 High (Breakout Target):</span>
+                            <span class="cond-meter-val" style="color: ${donchianPct >= 100 ? '#34d399' : '#e2e8f0'};">
+                                $${donchian.toLocaleString()} (${gapSign}${donchianGapPct.toFixed(2)}%)
+                            </span>
+                        </div>
+                        <div class="cond-bar-bg">
+                            <div class="cond-bar-fill ${barColorClass}" style="width: ${donchianPct.toFixed(1)}%;"></div>
+                        </div>
+                        <div style="font-size: 0.72rem; color: var(--text-dim); display: flex; justify-content: space-between; margin-top: 1px;">
+                            <span>Current: $${close.toLocaleString()}</span>
+                            <span>Gap: ${donchianGapUsd >= 0 ? '+' : ''}$${donchianGapUsd.toLocaleString()}</span>
+                        </div>
+                    </div>
+
+                    <!-- ADX Trend Filter Meter -->
+                    <div class="cond-meter-item">
+                        <div class="cond-meter-label">
+                            <span>ADX Trend Strength:</span>
+                            <span class="cond-meter-val" style="color: ${adxMet ? '#34d399' : '#fbbf24'};">
+                                ${adx.toFixed(1)} / Min ${minAdx.toFixed(1)} ${adxMet ? '✓' : '✗'}
+                            </span>
+                        </div>
+                        <div class="cond-bar-bg">
+                            <div class="cond-bar-fill ${adxBarColor}" style="width: ${adxPct.toFixed(1)}%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- EMA Alignment Regime -->
+                    <div class="cond-meter-item">
+                        <div class="cond-meter-label">
+                            <span>EMA Alignment:</span>
+                            <span class="cond-meter-val" style="color: ${regimeMet ? '#34d399' : '#fecdd3'}; font-size: 0.78rem;">
+                                ${assetRegime} ${regimeMet ? '✓' : '✗'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Position & Stop Loss Details -->
+                <div class="cond-position-box">
+                    <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; display: flex; justify-content: space-between;">
+                        <span>🛡️ Exit & Stop Loss Levels</span>
+                        <span style="color: ${isPosActive ? '#34d399' : '#94a3b8'};">${isPosActive ? 'HOLDING' : 'IDLE / CASH'}</span>
+                    </div>
+                    ${isPosActive ? `
+                        <div class="cond-pos-row">
+                            <span>Entry Price:</span>
+                            <strong>$${(pos.entry_price || 0).toLocaleString()}</strong>
+                        </div>
+                        <div class="cond-pos-row">
+                            <span>High Water Mark:</span>
+                            <strong>$${(pos.high_water || 0).toLocaleString()}</strong>
+                        </div>
+                        <div class="cond-pos-row">
+                            <span>ATR Trailing Stop:</span>
+                            <strong style="color: #fbbf24;">$${(pos.trailing_stop || 0).toLocaleString()}</strong>
+                        </div>
+                        <div class="cond-pos-row">
+                            <span>Initial Risk Stop:</span>
+                            <strong style="color: #f43f5e;">$${(pos.initial_stop || 0).toLocaleString()}</strong>
+                        </div>
+                    ` : `
+                        <div class="cond-pos-row">
+                            <span>EMA 50 Breakdown Exit:</span>
+                            <strong>$${(pos.ema50_exit_price || 0).toLocaleString()}</strong>
+                        </div>
+                        <div class="cond-pos-row">
+                            <span>EMA 200 Emergency Exit:</span>
+                            <strong>$${(pos.ema200_exit_price || 0).toLocaleString()}</strong>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    });
+
+    grid.innerHTML = cardsHtml;
 }
 
 // ── PNL History Canvas Chart ───────────────────────────

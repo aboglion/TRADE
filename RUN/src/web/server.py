@@ -284,6 +284,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_get_updater_status()
         elif clean_path == "/api/telegram":
             self._handle_get_telegram()
+        elif clean_path == "/api/strategy/conditions":
+            self._handle_strategy_conditions()
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
             if clean_path in ("/", "", "/index", "/index.html"):
@@ -582,6 +584,167 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             lines = ["No log file generated yet."]
 
         self._send_json({"logs": lines})
+
+    def _handle_strategy_conditions(self) -> None:
+        try:
+            import time
+            import numpy as np
+            from src.strategy.indicators import add_indicators, candles_to_dataframe
+            from src.core.models import Candle
+
+            state = self.state_store.load_state() if self.state_store else None
+            strat_state = state.strategy_state if state else {}
+            positions_state = strat_state.get("positions", {}) if isinstance(strat_state, dict) else {}
+            bull_peak = float(strat_state.get("bull_peak", 0.0) if isinstance(strat_state, dict) else 0.0)
+
+            min_adx_map = {"BTC": 20.0, "ETH": 22.0, "SOL": 24.0}
+            weight_map = {"BTC": 0.40, "ETH": 0.30, "SOL": 0.30}
+            trail_atr_map = {"BTC": (10.0, 5.0), "ETH": (9.0, 4.5), "SOL": (7.5, 5.0)}
+            init_risk_atr_map = {"BTC": 4.0, "ETH": 4.0, "SOL": 3.0}
+
+            symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+            assets_data = {}
+            btc_daily_close = 0.0
+            btc_sma150 = 0.0
+            btc_ema20_daily = 0.0
+
+            import ccxt
+            exchange = None
+            if self.gateway and hasattr(self.gateway, "_ccxt"):
+                exchange = self.gateway._ccxt
+            else:
+                exchange = ccxt.binance({"timeout": 10000, "enableRateLimit": False})
+
+            for pair in symbols:
+                coin = pair.split("/")[0]
+                try:
+                    ohlcv = exchange.fetch_ohlcv(pair, timeframe="4h", limit=120)
+                    if not ohlcv:
+                        continue
+                    candles = [
+                        Candle(
+                            timestamp_ms=int(c[0]),
+                            open=float(c[1]),
+                            high=float(c[2]),
+                            low=float(c[3]),
+                            close=float(c[4]),
+                            volume=float(c[5]),
+                        )
+                        for c in ohlcv
+                    ]
+                    df = candles_to_dataframe(candles)
+                    df_ind = add_indicators(df)
+                    if df_ind.empty:
+                        continue
+
+                    r_last = df_ind.iloc[-1]
+                    c_close = float(r_last["Close"])
+                    c_high = float(r_last["High"])
+                    c_low = float(r_last["Low"])
+                    c_atr = float(r_last["ATR"])
+                    c_adx = float(r_last["ADX"]) if not np.isnan(r_last["ADX"]) else 0.0
+                    donchian30 = float(r_last["Donchian30"]) if not np.isnan(r_last["Donchian30"]) else 0.0
+                    ema20 = float(r_last["EMA20"])
+                    ema50 = float(r_last["EMA50"])
+                    ema200 = float(r_last["EMA200"])
+                    asset_regime = str(r_last["Regime"])
+
+                    min_adx = min_adx_map.get(coin, 20.0)
+                    target_weight = weight_map.get(coin, 0.33)
+
+                    regime_ok = asset_regime in ("STRONG_BULL_TREND", "TREND")
+                    donchian_ok = (c_close >= donchian30) if donchian30 > 0 else False
+                    adx_ok = (c_adx >= min_adx)
+                    all_entry_met = (regime_ok and donchian_ok and adx_ok)
+
+                    gap_usd = round(c_close - donchian30, 2) if donchian30 > 0 else 0.0
+                    gap_pct = round(((c_close - donchian30) / donchian30) * 100.0, 2) if donchian30 > 0 else 0.0
+
+                    pos_info = positions_state.get(coin, {})
+                    is_active = bool(pos_info.get("active", False))
+                    entry_px = float(pos_info.get("entry_px", 0.0) or 0.0)
+                    high_water = float(pos_info.get("high_water", 0.0) or 0.0)
+                    atr_at_entry = float(pos_info.get("atr_at_entry", 0.0) or 0.0)
+                    entry_mode = str(pos_info.get("mode", "STRONG_BULL_TREND"))
+
+                    trail_tuple = trail_atr_map.get(coin, (10.0, 5.0))
+                    tb = trail_tuple[0] if entry_mode == "STRONG_BULL_TREND" else trail_tuple[1]
+                    init_risk_atr = init_risk_atr_map.get(coin, 4.0)
+
+                    trailing_stop = round(high_water - tb * c_atr, 2) if is_active and high_water > 0 else None
+                    initial_stop = round(entry_px - init_risk_atr * atr_at_entry, 2) if is_active and entry_px > 0 else None
+
+                    assets_data[coin] = {
+                        "symbol": pair,
+                        "close": round(c_close, 2),
+                        "high": round(c_high, 2),
+                        "low": round(c_low, 2),
+                        "donchian30": round(donchian30, 2),
+                        "adx": round(c_adx, 1),
+                        "min_adx": min_adx,
+                        "atr": round(c_atr, 2),
+                        "ema20": round(ema20, 2),
+                        "ema50": round(ema50, 2),
+                        "ema200": round(ema200, 2),
+                        "asset_regime": asset_regime,
+                        "target_weight_pct": round(target_weight * 100, 0),
+                        "entry_conditions": {
+                            "regime_ok": regime_ok,
+                            "donchian_ok": donchian_ok,
+                            "adx_ok": adx_ok,
+                            "all_met": all_entry_met,
+                            "donchian_gap_usd": gap_usd,
+                            "donchian_gap_pct": gap_pct,
+                        },
+                        "position": {
+                            "active": is_active,
+                            "entry_price": round(entry_px, 2) if entry_px > 0 else None,
+                            "high_water": round(high_water, 2) if high_water > 0 else None,
+                            "trailing_stop": trailing_stop,
+                            "initial_stop": initial_stop,
+                            "ema50_exit_price": round(ema50, 2),
+                            "ema200_exit_price": round(ema200, 2),
+                        }
+                    }
+
+                    if coin == "BTC":
+                        btc_daily = df["Close"].resample("D").last().dropna()
+                        if len(btc_daily) >= 1:
+                            btc_daily_close = float(btc_daily.iloc[-1])
+                        if len(btc_daily) >= 150:
+                            btc_sma150 = float(btc_daily.rolling(150).mean().iloc[-1])
+                        if len(btc_daily) >= 20:
+                            btc_ema20_daily = float(btc_daily.ewm(span=20, adjust=False).mean().iloc[-1])
+
+                except Exception as ex:
+                    logger.debug("Failed processing conditions for %s: %s", pair, ex)
+
+            macro_regime = "BULL" if (btc_daily_close > btc_sma150 and btc_sma150 > 0) else "BEAR"
+            peak = max(bull_peak, btc_daily_close)
+            pullback_pct = round(((btc_daily_close - peak) / peak) * 100.0, 2) if peak > 0 else 0.0
+            under_ema = (btc_daily_close < btc_ema20_daily) if btc_ema20_daily > 0 else False
+            risk_guard = (pullback_pct < -8.0 or under_ema)
+            leverage = 1.0 if (risk_guard or macro_regime == "BEAR") else 2.0
+
+            result = {
+                "timestamp_ms": int(time.time() * 1000),
+                "macro_regime": {
+                    "regime": macro_regime,
+                    "btc_close": round(btc_daily_close, 2),
+                    "btc_sma150": round(btc_sma150, 2),
+                    "sma_gap_pct": round(((btc_daily_close - btc_sma150) / btc_sma150) * 100.0, 2) if btc_sma150 > 0 else 0.0,
+                    "bull_peak": round(peak, 2),
+                    "pullback_pct": pullback_pct,
+                    "under_ema20_daily": under_ema,
+                    "risk_guard_active": risk_guard,
+                    "effective_leverage": leverage,
+                },
+                "assets": assets_data,
+            }
+            self._send_json(result)
+        except Exception as e:
+            logger.error("Failed to compute strategy conditions: %s", e)
+            self._send_json({"error": str(e)}, status=500)
 
     def _handle_trigger_cycle(self) -> None:
         if self.orchestrator:

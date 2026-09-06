@@ -73,6 +73,10 @@
                         <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
                     </button>
 
+                    <button class="btn btn-outline btn-conditions" id="conditionsModalBtn" title="View visual real-time strategy buy/sell conditions & logic">
+                        <span>🎯</span> <span class="btn-text">Strategy Conditions</span>
+                    </button>
+
                     <button class="btn btn-icon" id="refreshBtn" title="Force immediate data refresh">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     </button>
@@ -507,6 +511,111 @@
         </div>
     </div>
 
-    <script src="app.js?v=10"></script>
+    <!-- Visual Strategy Conditions Modal -->
+    <div class="modal-backdrop" id="conditionsModal">
+        <div class="modal-content glass modal-large">
+            <div class="modal-header">
+                <h3>🎯 תנאי אסטרטגיה בלייב — Strategy Conditions</h3>
+                <button class="modal-close" id="closeConditionsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Tab Selector: Live Indicators vs Rules Diagram -->
+                <div class="conditions-tabs">
+                    <button class="cond-tab-btn active" id="tabLiveConditionsBtn">📊 מצב תנאים בזמן אמת (Live Gauges)</button>
+                    <button class="cond-tab-btn" id="tabStrategyRulesBtn">🗺️ מדריך תנאי קנייה ומכירה (Rules Guide)</button>
+                </div>
+
+                <!-- Tab 1 Content: Live Gauges & Status -->
+                <div class="cond-tab-content active" id="tabLiveConditionsContent">
+                    <!-- Macro Regime Banner -->
+                    <div class="macro-cond-banner" id="macroCondBanner">
+                        <div class="macro-banner-left">
+                            <span class="macro-banner-badge" id="macroBannerRegime">BULL REGIME</span>
+                            <span class="macro-banner-title">BTC vs SMA-150: <strong id="macroBannerSmaGap">+0.00%</strong></span>
+                        </div>
+                        <div class="macro-banner-right">
+                            <span class="macro-banner-pill" id="macroBannerRiskGuard">Risk Guard: INACTIVE</span>
+                            <span class="macro-banner-pill pill-lev" id="macroBannerLev">Leverage: 2.0x</span>
+                        </div>
+                    </div>
+
+                    <!-- Asset Condition Cards Grid -->
+                    <div class="asset-cond-grid" id="assetCondGrid">
+                        <div class="cond-loading">Loading live indicator conditions...</div>
+                    </div>
+                </div>
+
+                <!-- Tab 2 Content: Rules Guide & Flowchart -->
+                <div class="cond-tab-content" id="tabStrategyRulesContent">
+                    <div class="rules-visual-container">
+                        <div class="rule-card">
+                            <div class="rule-card-header">
+                                <span class="rule-icon">🐂</span>
+                                <h4>תנאי כניסה לקנייה (BUY / LONG Entry)</h4>
+                            </div>
+                            <ul class="rule-steps">
+                                <li>
+                                    <span class="step-num">1</span>
+                                    <div><strong>משטר שוק (Macro Regime):</strong> ביטקוין מעל SMA-150 יומית (BTC Daily Close > SMA150).</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">2</span>
+                                    <div><strong>פריצת דונצ'יאן 30 (Donchian30 Breakout):</strong> סגירת נר 4 שעות גבוהה משיא 30 הנרות האחרונים (Close >= Donchian30 High).</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">3</span>
+                                    <div><strong>עוצמת מגמה (ADX Filter):</strong> ADX מעל הסף הנדרש (BTC >= 20, ETH >= 22, SOL >= 24).</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">4</span>
+                                    <div><strong>מבנה ממוצעים (EMA Alignment):</strong> הנכס במגמת עלייה (STRONG_BULL_TREND / TREND).</div>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="rule-card">
+                            <div class="rule-card-header">
+                                <span class="rule-icon">🛡️</span>
+                                <h4>תנאי מכירה ויציאה (SELL / Exit Triggers)</h4>
+                            </div>
+                            <ul class="rule-steps">
+                                <li>
+                                    <span class="step-num">1</span>
+                                    <div><strong>סטופ נגרר דינמי (ATR Trailing Stop):</strong> המחיר יורד מתחת לסטופ המחושב משיא הפוזיציה (High Water - N × ATR).</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">2</span>
+                                    <div><strong>סטופ סיכון ראשוני (Initial Risk Stop):</strong> המחיר צונח מתחת למחיר כניסה מינוס 3-4 × ATR.</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">3</span>
+                                    <div><strong>שבירת ממוצעים (EMA Breakdown):</strong> סגירה מתחת ל-EMA50 בטרנד רגיל או מתחת ל-EMA200.</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">4</span>
+                                    <div><strong>מעבר למשטר דובים (Bear Regime):</strong> ביטקוין יורד מתחת ל-SMA-150 -> יציאה מיידית ל-100% מזומן USDT.</div>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="rule-card full-width-rule">
+                            <div class="rule-card-header">
+                                <span class="rule-icon">⚡</span>
+                                <h4>מנגנון הגנת סיכון (Dynamic Bullish Risk Guard)</h4>
+                            </div>
+                            <div class="rule-body-text">
+                                כשהשוק ב-Bull Regime, המערכת משתמשת במינוף <strong>2.0x</strong>. במידה וביטקוין חווה תיקון של מעל <strong>8%</strong> מהשיא או יורד מתחת ל-EMA20 יומית, מופעל <strong>Risk Guard</strong> המוריד את המינוף ל-<strong>1.0x</strong> בלבד להגנה על ההון.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="closeConditionsModalFooter">Close / סגור</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=11"></script>
 </body>
 </html>
