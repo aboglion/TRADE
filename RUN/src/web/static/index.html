@@ -73,7 +73,7 @@
                         <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
                     </button>
 
-                    <button class="btn btn-outline btn-conditions" id="conditionsModalBtn" title="View visual real-time strategy buy/sell conditions & logic">
+                    <button class="btn btn-outline btn-conditions" id="conditionsModalBtn" title="View visual real-time strategy buy/sell conditions & logic" onclick="openConditionsModal()">
                         <span>🎯</span> <span class="btn-text">Strategy Conditions</span>
                     </button>
 
@@ -520,14 +520,14 @@
         <div class="modal-content glass modal-large">
             <div class="modal-header">
                 <h3>🎯 תנאי אסטרטגיה בלייב — Strategy Conditions</h3>
-                <button class="modal-close" id="closeConditionsModal">&times;</button>
+                <button class="modal-close" id="closeConditionsModal" onclick="closeConditionsModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <!-- Tab Selector: Binary Tree vs Live Gauges vs Rules Diagram -->
                 <div class="conditions-tabs">
-                    <button class="cond-tab-btn active" id="tabBinaryTreeBtn">🌳 עץ תנאים בינארי (Binary Tree)</button>
-                    <button class="cond-tab-btn" id="tabLiveConditionsBtn">📊 מדדים בלייב (Live Gauges)</button>
-                    <button class="cond-tab-btn" id="tabStrategyRulesBtn">🗺️ מדריך תנאים (Rules Guide)</button>
+                    <button class="cond-tab-btn active" id="tabBinaryTreeBtn" onclick="switchConditionsTab('tree')">🌳 עץ תנאים בינארי (Binary Tree)</button>
+                    <button class="cond-tab-btn" id="tabLiveConditionsBtn" onclick="switchConditionsTab('live')">📊 מדדים בלייב (Live Gauges)</button>
+                    <button class="cond-tab-btn" id="tabStrategyRulesBtn" onclick="switchConditionsTab('rules')">🗺️ מדריך תנאים (Rules Guide)</button>
                 </div>
 
                 <!-- Tab 1 Content: Interactive Visual Binary Tree -->
@@ -645,11 +645,11 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" id="closeConditionsModalFooter">Close / סגור</button>
+                <button class="btn btn-outline" id="closeConditionsModalFooter" onclick="closeConditionsModal()">Close / סגור</button>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=13"></script>
 </body>
 </html>

@@ -1462,24 +1462,42 @@ function initBinaryTreeControls() {
     }
 }
 
+window.openConditionsModal = openConditionsModal;
+window.closeConditionsModal = closeConditionsModal;
+window.switchConditionsTab = switchConditionsTab;
+
 async function openConditionsModal() {
+    console.log("[StrategyConditions] Opening modal...");
     const modal = document.getElementById("conditionsModal");
     if (modal) {
         modal.classList.add("active");
+        modal.style.display = "flex";
+        modal.style.opacity = "1";
+        modal.style.pointerEvents = "auto";
+        modal.style.zIndex = "99999";
         
         // Render immediate placeholder if needed
         const treeContainer = document.getElementById("binaryTreeContainer");
-        if (treeContainer && !latestConditionsData) {
-            treeContainer.innerHTML = `<div class="cond-loading">טוען עץ תנאים בינארי בלייב... Fetching strategy decision tree...</div>`;
+        if (treeContainer) {
+            if (!latestConditionsData) {
+                treeContainer.innerHTML = `<div class="cond-loading">טוען עץ תנאים בינארי בלייב... Fetching strategy decision tree...</div>`;
+            } else {
+                renderBinaryTree(latestConditionsData);
+            }
         }
         
         await fetchStrategyConditions();
+    } else {
+        console.error("[StrategyConditions] Modal element #conditionsModal not found!");
     }
 }
 
 function closeConditionsModal() {
     const modal = document.getElementById("conditionsModal");
-    if (modal) modal.classList.remove("active");
+    if (modal) {
+        modal.classList.remove("active");
+        modal.style.display = "none";
+    }
 }
 
 function switchConditionsTab(tabName) {
