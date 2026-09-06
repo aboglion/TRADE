@@ -166,10 +166,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (e.target.id === "conditionsModal") closeConditionsModal();
     });
 
+    const tabTreeBtn = document.getElementById("tabBinaryTreeBtn");
+    if (tabTreeBtn) tabTreeBtn.addEventListener("click", () => switchConditionsTab("tree"));
     const tabLiveBtn = document.getElementById("tabLiveConditionsBtn");
     if (tabLiveBtn) tabLiveBtn.addEventListener("click", () => switchConditionsTab("live"));
     const tabRulesBtn = document.getElementById("tabStrategyRulesBtn");
     if (tabRulesBtn) tabRulesBtn.addEventListener("click", () => switchConditionsTab("rules"));
+
+    initBinaryTreeControls();
 });
 
 async function checkAuthStatus() {
@@ -1441,12 +1445,55 @@ async function saveTelegramConfig() {
     }
 }
 
-// ── Strategy Conditions Modal Handlers ──────────────────────────
+// ── Strategy Conditions Modal & Binary Tree Handlers ───────────
+
+let latestConditionsData = null;
+let selectedTreeCoin = "BTC";
+let selectedTreeMode = "BUY"; // "BUY", "SELL", "RISK"
+
+function initBinaryTreeControls() {
+    const coinSelector = document.getElementById("treeCoinSelector");
+    if (coinSelector) {
+        coinSelector.addEventListener("click", (e) => {
+            const btn = e.target.closest(".tree-pill-btn");
+            if (!btn) return;
+            const coin = btn.getAttribute("data-coin");
+            if (coin) {
+                selectedTreeCoin = coin;
+                coinSelector.querySelectorAll(".tree-pill-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                if (latestConditionsData) renderBinaryTree(latestConditionsData);
+            }
+        });
+    }
+
+    const modeSelector = document.getElementById("treeModeSelector");
+    if (modeSelector) {
+        modeSelector.addEventListener("click", (e) => {
+            const btn = e.target.closest(".tree-pill-btn");
+            if (!btn) return;
+            const mode = btn.getAttribute("data-mode");
+            if (mode) {
+                selectedTreeMode = mode;
+                modeSelector.querySelectorAll(".tree-pill-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                if (latestConditionsData) renderBinaryTree(latestConditionsData);
+            }
+        });
+    }
+}
 
 async function openConditionsModal() {
     const modal = document.getElementById("conditionsModal");
     if (modal) {
         modal.classList.add("active");
+        
+        // Render immediate placeholder if needed
+        const treeContainer = document.getElementById("binaryTreeContainer");
+        if (treeContainer && !latestConditionsData) {
+            treeContainer.innerHTML = `<div class="cond-loading">טוען עץ תנאים בינארי בלייב... Fetching strategy decision tree...</div>`;
+        }
+        
         await fetchStrategyConditions();
     }
 }
@@ -1457,42 +1504,234 @@ function closeConditionsModal() {
 }
 
 function switchConditionsTab(tabName) {
+    const treeBtn = document.getElementById("tabBinaryTreeBtn");
     const liveBtn = document.getElementById("tabLiveConditionsBtn");
     const rulesBtn = document.getElementById("tabStrategyRulesBtn");
+
+    const treeContent = document.getElementById("tabBinaryTreeContent");
     const liveContent = document.getElementById("tabLiveConditionsContent");
     const rulesContent = document.getElementById("tabStrategyRulesContent");
 
-    if (tabName === "live") {
+    [treeBtn, liveBtn, rulesBtn].forEach(btn => { if (btn) btn.classList.remove("active"); });
+    [treeContent, liveContent, rulesContent].forEach(cnt => { if (cnt) cnt.classList.remove("active"); });
+
+    if (tabName === "tree") {
+        if (treeBtn) treeBtn.classList.add("active");
+        if (treeContent) treeContent.classList.add("active");
+        if (latestConditionsData) renderBinaryTree(latestConditionsData);
+    } else if (tabName === "live") {
         if (liveBtn) liveBtn.classList.add("active");
-        if (rulesBtn) rulesBtn.classList.remove("active");
         if (liveContent) liveContent.classList.add("active");
-        if (rulesContent) rulesContent.classList.remove("active");
-    } else {
+    } else if (tabName === "rules") {
         if (rulesBtn) rulesBtn.classList.add("active");
-        if (liveBtn) liveBtn.classList.remove("active");
         if (rulesContent) rulesContent.classList.add("active");
-        if (liveContent) liveContent.classList.remove("active");
     }
 }
 
 async function fetchStrategyConditions() {
     const grid = document.getElementById("assetCondGrid");
+    const treeContainer = document.getElementById("binaryTreeContainer");
     try {
         const res = await apiFetch("/api/strategy/conditions");
         if (!res.ok) {
-            if (grid) grid.innerHTML = `<div class="empty-state text-danger">Error loading conditions (Status: ${res.status})</div>`;
+            const errHtml = `<div class="empty-state text-danger">Error loading strategy conditions (Status: ${res.status})</div>`;
+            if (grid) grid.innerHTML = errHtml;
+            if (treeContainer) treeContainer.innerHTML = errHtml;
             return;
         }
         const data = await res.json();
+        latestConditionsData = data;
         renderStrategyConditions(data);
     } catch (err) {
         console.error("Failed to fetch strategy conditions:", err);
-        if (grid) grid.innerHTML = `<div class="empty-state text-danger">Server communication error: ${err.message || err}</div>`;
+        const errHtml = `<div class="empty-state text-danger">Server communication error: ${err.message || err}</div>`;
+        if (grid) grid.innerHTML = errHtml;
+        if (treeContainer) treeContainer.innerHTML = errHtml;
     }
+}
+
+function renderBinaryTree(data) {
+    const container = document.getElementById("binaryTreeContainer");
+    if (!container || !data) return;
+
+    const assets = data.assets || {};
+    const macro = data.macro_regime || {};
+    const coinData = assets[selectedTreeCoin];
+
+    let isBuyMode = selectedTreeMode === "BUY";
+    let isSellMode = selectedTreeMode === "SELL";
+    let isRiskMode = selectedTreeMode === "RISK";
+
+    if (!coinData && !isRiskMode) {
+        container.innerHTML = `<div class="empty-state">אין נתונים זמינים עבור ${selectedTreeCoin}</div>`;
+        return;
+    }
+
+    let nodes = [];
+
+    if (isBuyMode) {
+        nodes = coinData ? (coinData.buy_tree_nodes || []) : [];
+    } else if (isSellMode) {
+        nodes = coinData ? (coinData.sell_tree_nodes || []) : [];
+    } else if (isRiskMode) {
+        const isBull = macro.regime === "BULL";
+        const pullback = macro.pullback_pct || 0;
+        const underEma = !!macro.under_ema20_daily;
+
+        nodes = [
+            {
+                id: "risk_node_regime",
+                title: "1. משטר שוק מקרו (Macro Regime)",
+                criteria: "BTC Daily Close > SMA-150",
+                actual: isBull ? `BULL REGIME (BTC $${(macro.btc_close||0).toLocaleString()} > SMA $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME (BTC $${(macro.btc_close||0).toLocaleString()} < SMA $${(macro.btc_sma150||0).toLocaleString()})`,
+                met: isBull,
+            },
+            {
+                id: "risk_node_pullback",
+                title: "2. הגנת נסיגה מהשיא (Pullback Guard)",
+                criteria: "Pullback > -8.0% from Peak",
+                actual: `${pullback.toFixed(2)}% (Peak $${(macro.bull_peak||0).toLocaleString()})`,
+                met: pullback >= -8.0,
+            },
+            {
+                id: "risk_node_ema",
+                title: "3. ממוצע 20 יומי (EMA20 Daily Guard)",
+                criteria: "BTC Daily Close >= EMA20 Daily",
+                actual: underEma ? "מתחת ל-EMA20 (Under EMA20)" : "מעל EMA20 (Above EMA20)",
+                met: !underEma,
+            }
+        ];
+    }
+
+    let html = `<div class="binary-tree-flow">`;
+    let allPassed = true;
+
+    nodes.forEach((node, index) => {
+        const isMet = isRiskMode ? node.met : (isBuyMode ? node.met : !node.triggered);
+        if (!isMet) allPassed = false;
+
+        const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
+        const badgeClass = isMet ? "badge-pass" : "badge-fail";
+        const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
+        const icon = isMet ? "🟢" : "🔴";
+
+        html += `
+            <div class="tree-node ${nodeClass}">
+                <div class="tree-node-header">
+                    <span class="tree-node-title">${icon} ${node.title}</span>
+                    <span class="tree-node-status-badge ${badgeClass}">${badgeText}</span>
+                </div>
+                <div class="tree-node-body">
+                    <span class="tree-node-criteria">🎯 תנאי: ${node.criteria}</span>
+                    <span class="tree-node-actual">📊 בפועל: ${node.actual}</span>
+                </div>
+            </div>
+        `;
+
+        // Connecting Branch Line to next step
+        if (index < nodes.length - 1) {
+            const branchClass = isMet ? "tree-branch-pass" : "tree-branch-fail";
+            const labelClass = isMet ? "label-pass" : "label-fail";
+            const labelText = isMet ? "YES 🟢" : "NO 🔴";
+            html += `
+                <div class="tree-branch-container">
+                    <div class="tree-branch-line ${branchClass}"></div>
+                    <span class="tree-branch-label ${labelClass}">${labelText}</span>
+                </div>
+            `;
+        }
+    });
+
+    // Connecting Branch to Leaf Outcome Node
+    const branchToLeafClass = allPassed ? "tree-branch-pass" : "tree-branch-fail";
+    const branchToLeafLabel = allPassed ? "YES 🟢" : "NO 🔴";
+    html += `
+        <div class="tree-branch-container">
+            <div class="tree-branch-line ${branchToLeafClass}"></div>
+            <span class="tree-branch-label ${allPassed ? 'label-pass' : 'label-fail'}">${branchToLeafLabel}</span>
+        </div>
+    `;
+
+    // Render Final Leaf Outcome Node
+    if (isBuyMode) {
+        const isPosActive = coinData && coinData.position && coinData.position.active;
+        if (isPosActive) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">✅ פוזיציה פתוחה ופעילה (ACTIVE POSITION)</div>
+                    <div class="outcome-desc">הבוט מחזיק פוזיציה ב-${selectedTreeCoin}. תנאי הכניסה התקיימו ומנוהלים ע"י סטופ נגרר דינמי.</div>
+                </div>
+            `;
+        } else if (allPassed) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">🚀 אות קנייה פעיל! (BUY SIGNAL TRIGGERED)</div>
+                    <div class="outcome-desc">כל התנאים הבינאריים מתקיימים במלואם! הבוט מורשה לפתוח פוזיציה ב-${selectedTreeCoin}.</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-waiting">
+                    <div class="outcome-title">⏳ ממתין להתקיימות תנאים (WAITING FOR ENTRY)</div>
+                    <div class="outcome-desc">לא כל תנאי הקנייה מתקיימים. פתיחת פוזיציה ב-${selectedTreeCoin} כרגע חסומה להגנה על ההון.</div>
+                </div>
+            `;
+        }
+    } else if (isSellMode) {
+        const sellTriggered = nodes.some(n => n.triggered);
+
+        if (sellTriggered) {
+            html += `
+                <div class="tree-leaf-outcome outcome-sell-triggered">
+                    <div class="outcome-title">🚨 טריגר מכירה ויציאה הופעל! (EXIT TRIGGERED)</div>
+                    <div class="outcome-desc">טריגר יציאה הופעל ב-${selectedTreeCoin}! הבוט יבצע סגירה/מכירה מיידית בנכס.</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="tree-leaf-outcome outcome-sell-safe">
+                    <div class="outcome-title">🛡️ פוזיציה בטוחה / אין טריגר מכירה (POSITION SAFE)</div>
+                    <div class="outcome-desc">אף תנאי מכירה לא הופעל ב-${selectedTreeCoin}. הנכס נשאר מוחזק בבטחה.</div>
+                </div>
+            `;
+        }
+    } else if (isRiskMode) {
+        const lev = macro.effective_leverage || 1.0;
+        const riskActive = !!macro.risk_guard_active;
+
+        if (macro.regime === "BEAR") {
+            html += `
+                <div class="tree-leaf-outcome outcome-sell-triggered">
+                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 100% USDT)</div>
+                    <div class="outcome-desc">מינוף 0.0x — הגנת מזומן מלאה בדולרים (USDT) ללא חשיפה לפוזיציות לונג.</div>
+                </div>
+            `;
+        } else if (riskActive) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-waiting">
+                    <div class="outcome-title">⚠️ מנגנון הגנת סיכון פעיל (RISK GUARD ACTIVE — 1.0x)</div>
+                    <div class="outcome-desc">ביטקוין בחוויית תיקון/ירידה. המינוף צומצם ל-1.0x למניעת סיכונים.</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">⚡ מינוף מלא בולארד פעיל (FULL BULL LEVERAGE — 2.0x)</div>
+                    <div class="outcome-desc">שוק עולה חזק ויציב. הבוט פועל במינוף מירבי מורשה 2.0x להשאת תשואה.</div>
+                </div>
+            `;
+        }
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 function renderStrategyConditions(data) {
     if (!data) return;
+
+    // Render Binary Tree
+    renderBinaryTree(data);
 
     // 1. Render Macro Regime Banner
     const macro = data.macro_regime || {};

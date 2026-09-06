@@ -674,6 +674,76 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     trailing_stop = round(high_water - tb * c_atr, 2) if is_active and high_water > 0 else None
                     initial_stop = round(entry_px - init_risk_atr * atr_at_entry, 2) if is_active and entry_px > 0 else None
 
+                    buy_tree_nodes = [
+                        {
+                            "id": "node_macro_regime",
+                            "title": "1. משטר שוק (Macro Regime)",
+                            "subtitle": "BTC מעל SMA-150 יומית",
+                            "criteria": f"BTC Close > SMA150 (${btc_sma150:,.0f})",
+                            "actual": f"${btc_daily_close:,.0f} vs ${btc_sma150:,.0f}",
+                            "met": macro_regime == "BULL",
+                        },
+                        {
+                            "id": "node_ema_alignment",
+                            "title": "2. מבנה ממוצעים (EMA Trend)",
+                            "subtitle": "טרנד עולה מוגדר בנכס",
+                            "criteria": "Regime in [STRONG_BULL, TREND]",
+                            "actual": asset_regime,
+                            "met": regime_ok,
+                        },
+                        {
+                            "id": "node_donchian_breakout",
+                            "title": "3. פריצת דונצ'יאן 30 (Donchian High)",
+                            "subtitle": "סגירת 4H מעל שיא 30 נרות",
+                            "criteria": f"Close >= Donchian30 (${donchian30:,.2f})",
+                            "actual": f"${c_close:,.2f} ({gap_pct:+.2f}%)",
+                            "met": donchian_ok,
+                        },
+                        {
+                            "id": "node_adx_filter",
+                            "title": "4. עוצמת מגמה (ADX Filter)",
+                            "subtitle": "מדד ADX מעל סף המינימום",
+                            "criteria": f"ADX >= {min_adx}",
+                            "actual": f"{c_adx:.1f}",
+                            "met": adx_ok,
+                        }
+                    ]
+
+                    sell_tree_nodes = [
+                        {
+                            "id": "node_bear_emergency",
+                            "title": "1. יציאת חירום דובים (Bear Regime Exit)",
+                            "subtitle": "נפילה למשטר דובים (BTC < SMA150)",
+                            "criteria": "BTC < SMA150 -> Sell to 100% USDT",
+                            "actual": "BEAR ACTIVE (Sell All)" if macro_regime == "BEAR" else "BULL ACTIVE (Safe)",
+                            "triggered": macro_regime == "BEAR",
+                        },
+                        {
+                            "id": "node_initial_risk_stop",
+                            "title": "2. סטופ סיכון ראשוני (Initial Risk Stop)",
+                            "subtitle": "ירידה מתחת לסיכון הראשוני המורשה",
+                            "criteria": f"Low <= Initial Stop (${initial_stop:,.2f})" if initial_stop else f"Initial Stop = ${c_close - init_risk_atr * c_atr:,.2f}",
+                            "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${initial_stop:,.2f}" if initial_stop else ""),
+                            "triggered": (c_low <= initial_stop) if (is_active and initial_stop) else False,
+                        },
+                        {
+                            "id": "node_atr_trailing_stop",
+                            "title": "3. סטופ נגרר דינמי (ATR Trailing Stop)",
+                            "subtitle": "נפילה מהשיא מעבר למרחק ATR",
+                            "criteria": f"Low <= Trailing Stop (${trailing_stop:,.2f})" if trailing_stop else f"Trailing Stop = ${c_high - tb * c_atr:,.2f}",
+                            "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${trailing_stop:,.2f}" if trailing_stop else ""),
+                            "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop) else False,
+                        },
+                        {
+                            "id": "node_ema_breakdown",
+                            "title": "4. שבירת ממוצעים (EMA Exit)",
+                            "subtitle": "סגירה מתחת ל-EMA50 או EMA200",
+                            "criteria": "Close < EMA50 / EMA200",
+                            "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
+                            "triggered": (c_close < ema50) if (entry_mode == "TREND") else ((c_close < ema200) if (entry_mode == "STRONG_BULL_TREND") else False),
+                        }
+                    ]
+
                     assets_data[coin] = {
                         "symbol": pair,
                         "close": round(c_close, 2),
@@ -704,7 +774,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "initial_stop": initial_stop,
                             "ema50_exit_price": round(ema50, 2),
                             "ema200_exit_price": round(ema200, 2),
-                        }
+                        },
+                        "buy_tree_nodes": buy_tree_nodes,
+                        "sell_tree_nodes": sell_tree_nodes,
                     }
 
                     if coin == "BTC":

@@ -523,15 +523,37 @@
                 <button class="modal-close" id="closeConditionsModal">&times;</button>
             </div>
             <div class="modal-body">
-                <!-- Tab Selector: Live Indicators vs Rules Diagram -->
+                <!-- Tab Selector: Binary Tree vs Live Gauges vs Rules Diagram -->
                 <div class="conditions-tabs">
-                    <button class="cond-tab-btn active" id="tabLiveConditionsBtn">📊 מצב תנאים בזמן אמת (Live Gauges)</button>
-                    <button class="cond-tab-btn" id="tabStrategyRulesBtn">🗺️ מדריך תנאי קנייה ומכירה (Rules Guide)</button>
+                    <button class="cond-tab-btn active" id="tabBinaryTreeBtn">🌳 עץ תנאים בינארי (Binary Tree)</button>
+                    <button class="cond-tab-btn" id="tabLiveConditionsBtn">📊 מדדים בלייב (Live Gauges)</button>
+                    <button class="cond-tab-btn" id="tabStrategyRulesBtn">🗺️ מדריך תנאים (Rules Guide)</button>
                 </div>
 
-                <!-- Tab 1 Content: Live Gauges & Status -->
-                <div class="cond-tab-content active" id="tabLiveConditionsContent">
-                    <!-- Macro Regime Banner -->
+                <!-- Tab 1 Content: Interactive Visual Binary Tree -->
+                <div class="cond-tab-content active" id="tabBinaryTreeContent">
+                    <!-- Tree Control Bar -->
+                    <div class="tree-controls-bar">
+                        <div class="tree-controls-group">
+                            <span class="tree-control-label">נכס למעקב (Asset):</span>
+                            <div class="tree-pill-selector" id="treeCoinSelector">
+                                <button class="tree-pill-btn active" data-coin="BTC">₿ BTC</button>
+                                <button class="tree-pill-btn" data-coin="ETH">⟠ ETH</button>
+                                <button class="tree-pill-btn" data-coin="SOL">◎ SOL</button>
+                            </div>
+                        </div>
+
+                        <div class="tree-controls-group">
+                            <span class="tree-control-label">סוג עץ (Tree Type):</span>
+                            <div class="tree-pill-selector" id="treeModeSelector">
+                                <button class="tree-pill-btn active tree-btn-buy" data-mode="BUY">🟢 עץ תנאי קנייה (BUY)</button>
+                                <button class="tree-pill-btn tree-btn-sell" data-mode="SELL">🔴 עץ תנאי מכירה (SELL)</button>
+                                <button class="tree-pill-btn tree-btn-risk" data-mode="RISK">⚡ עץ סיכונים (RISK GUARD)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Macro Regime Quick Summary Banner in Tree Tab -->
                     <div class="macro-cond-banner" id="macroCondBanner">
                         <div class="macro-banner-left">
                             <span class="macro-banner-badge" id="macroBannerRegime">BULL REGIME</span>
@@ -543,13 +565,21 @@
                         </div>
                     </div>
 
+                    <!-- Visual Binary Tree Canvas / Node Container -->
+                    <div class="binary-tree-container" id="binaryTreeContainer">
+                        <div class="cond-loading">טוען עץ תנאים בינארי... Loading binary condition tree...</div>
+                    </div>
+                </div>
+
+                <!-- Tab 2 Content: Live Gauges & Status -->
+                <div class="cond-tab-content" id="tabLiveConditionsContent">
                     <!-- Asset Condition Cards Grid -->
                     <div class="asset-cond-grid" id="assetCondGrid">
                         <div class="cond-loading">Loading live indicator conditions...</div>
                     </div>
                 </div>
 
-                <!-- Tab 2 Content: Rules Guide & Flowchart -->
+                <!-- Tab 3 Content: Rules Guide & Flowchart -->
                 <div class="cond-tab-content" id="tabStrategyRulesContent">
                     <div class="rules-visual-container">
                         <div class="rule-card">

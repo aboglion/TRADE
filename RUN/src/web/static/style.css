@@ -1923,3 +1923,299 @@ body {
     line-height: 1.5;
 }
 
+/* ==========================================================================
+   VISUAL BINARY DECISION TREE STYLES (עץ בינארי לתנאי אסטרטגיה)
+   ========================================================================== */
+
+.tree-controls-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.tree-controls-group {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.tree-control-label {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.tree-pill-selector {
+    display: flex;
+    gap: 0.35rem;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 0.25rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tree-pill-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tree-pill-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tree-pill-btn.active {
+    background: var(--accent-primary, #38bdf8);
+    color: #030712;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
+.tree-pill-btn.tree-btn-buy.active {
+    background: #10b981;
+    color: #030712;
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+.tree-pill-btn.tree-btn-sell.active {
+    background: #f43f5e;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.4);
+}
+
+.tree-pill-btn.tree-btn-risk.active {
+    background: #f59e0b;
+    color: #030712;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+}
+
+/* Binary Tree Flow Layout */
+.binary-tree-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 1rem 0;
+}
+
+.binary-tree-flow {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Tree Nodes */
+.tree-node {
+    width: 100%;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 0.9rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+/* PASS / MET Node (GREEN 🟢) */
+.tree-node-pass {
+    border-color: rgba(16, 185, 129, 0.6) !important;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%) !important;
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.25), inset 0 0 15px rgba(16, 185, 129, 0.08) !important;
+}
+
+/* FAIL / UNMET Node (RED 🔴) */
+.tree-node-fail {
+    border-color: rgba(244, 63, 94, 0.6) !important;
+    background: linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%) !important;
+    box-shadow: 0 0 20px rgba(244, 63, 94, 0.25), inset 0 0 15px rgba(244, 63, 94, 0.08) !important;
+}
+
+.tree-node-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.tree-node-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #ffffff;
+}
+
+.tree-node-status-badge {
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 0.25rem 0.65rem;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.badge-pass {
+    background: rgba(16, 185, 129, 0.25);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.5);
+}
+
+.badge-fail {
+    background: rgba(244, 63, 94, 0.25);
+    color: #fecdd3;
+    border: 1px solid rgba(244, 63, 94, 0.5);
+}
+
+.tree-node-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.84rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.tree-node-criteria {
+    font-weight: 600;
+    color: #cbd5e1;
+}
+
+.tree-node-actual {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.9rem;
+}
+
+.tree-node-pass .tree-node-actual {
+    color: #34d399;
+}
+
+.tree-node-fail .tree-node-actual {
+    color: #fca5a5;
+}
+
+/* Branch Line Connectors */
+.tree-branch-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 38px;
+    position: relative;
+}
+
+.tree-branch-line {
+    width: 3px;
+    height: 100%;
+    transition: all 0.3s ease;
+}
+
+.tree-branch-pass {
+    background: linear-gradient(180deg, #10b981, #34d399);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+}
+
+.tree-branch-fail {
+    background: linear-gradient(180deg, #f43f5e, #fecdd3);
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.8);
+}
+
+.tree-branch-label {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(15, 23, 42, 0.9);
+    padding: 0.15rem 0.55rem;
+    border-radius: 12px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.label-pass {
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.4);
+}
+
+.label-fail {
+    color: #fecdd3;
+    border-color: rgba(244, 63, 94, 0.4);
+}
+
+/* Leaf Outcome Node */
+.tree-leaf-outcome {
+    width: 100%;
+    padding: 1.1rem;
+    border-radius: 14px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 800;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    border: 2px solid transparent;
+}
+
+.outcome-buy-success {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%);
+    border-color: #10b981;
+    color: #34d399;
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.35);
+}
+
+.outcome-buy-waiting {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(15, 23, 42, 0.95) 100%);
+    border-color: #f59e0b;
+    color: #fef08a;
+    box-shadow: 0 0 25px rgba(245, 158, 11, 0.25);
+}
+
+.outcome-sell-triggered {
+    background: linear-gradient(135deg, rgba(244, 63, 94, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%);
+    border-color: #f43f5e;
+    color: #fecdd3;
+    box-shadow: 0 0 30px rgba(244, 63, 94, 0.35);
+}
+
+.outcome-sell-safe {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(15, 23, 42, 0.95) 100%);
+    border-color: #38bdf8;
+    color: #93c5fd;
+    box-shadow: 0 0 25px rgba(56, 189, 248, 0.25);
+}
+
+.outcome-title {
+    font-size: 1.15rem;
+    font-weight: 800;
+}
+
+.outcome-desc {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+
