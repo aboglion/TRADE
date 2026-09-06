@@ -583,16 +583,16 @@ body {
     position: absolute;
     display: none;
     pointer-events: none;
-    background: rgba(15, 23, 42, 0.92);
-    backdrop-filter: blur(8px);
+    background: #0f172a;
+    background-color: #0f172a;
     border: 1px solid var(--border-accent);
     padding: 0.45rem 0.75rem;
     border-radius: var(--radius-sm);
     font-size: 0.78rem;
     font-family: var(--font-mono);
     color: #ffffff;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-    z-index: 20;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+    z-index: 1000;
     white-space: nowrap;
     transform: translate(-50%, -120%);
     transition: opacity 0.1s ease;
@@ -2377,7 +2377,7 @@ body {
     width: 100%;
     position: relative;
     padding: 0.35rem 0.2rem 0.85rem 0.2rem;
-    overflow-x: auto;
+    overflow: visible;
     scrollbar-width: thin;
     scrollbar-color: rgba(56, 189, 248, 0.3) transparent;
 }
@@ -2424,6 +2424,11 @@ body {
     z-index: 2;
     min-width: 62px;
     flex-shrink: 0;
+}
+
+.pipeline-node-wrapper:hover,
+.pipeline-node-wrapper.active {
+    z-index: 10000;
 }
 
 .pipeline-node-circle {
@@ -2489,17 +2494,17 @@ body {
     left: 50%;
     transform: translateX(-50%) translateY(10px);
     width: 270px;
-    background: rgba(15, 23, 42, 0.98);
-    backdrop-filter: blur(16px);
-    border: 1.5px solid rgba(56, 189, 248, 0.4);
+    background: #0f172a !important;
+    background-color: #0f172a !important;
+    border: 1.5px solid rgba(56, 189, 248, 0.6);
     border-radius: 12px;
     padding: 0.75rem 0.9rem;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7), 0 0 25px rgba(56, 189, 248, 0.2);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.95), 0 0 25px rgba(56, 189, 248, 0.3);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 100;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 10000;
     direction: rtl;
     text-align: right;
 }
@@ -2512,7 +2517,7 @@ body {
     transform: translateX(-50%);
     border-width: 7px;
     border-style: solid;
-    border-color: rgba(56, 189, 248, 0.4) transparent transparent transparent;
+    border-color: #0f172a transparent transparent transparent;
 }
 
 .pipeline-node-wrapper:hover .pipeline-popover,
@@ -2658,8 +2663,10 @@ body {
         transform: translateX(-50%) translateY(20px) !important;
         width: calc(100vw - 32px);
         max-width: 340px;
+        background: #0f172a !important;
+        background-color: #0f172a !important;
         z-index: 999999;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9), 0 0 25px rgba(56, 189, 248, 0.35);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95), 0 0 25px rgba(56, 189, 248, 0.35);
     }
 
     .pipeline-node-wrapper:hover .pipeline-popover,
