@@ -100,6 +100,7 @@ class MicroSatelliteStrategy:
             latest = df.iloc[-1]
             current_bar = len(df)
             c_close = latest.Close
+            c_high = latest.High
             c_atr = latest.ATR
             regime = latest.MicroRegime
 
@@ -135,15 +136,16 @@ class MicroSatelliteStrategy:
                 entry_px = pos_state["entry_px"]
                 alloc = pos_state["alloc"]
 
-                pos_state["extreme_px"] = max(prev_extreme, c_close)
+                pos_state["extreme_px"] = max(prev_extreme, c_high)
                 open_profit_atr = (c_close - entry_px) / max(c_atr, 1e-6)
+                high_profit_atr = (c_high - entry_px) / max(c_atr, 1e-6)
                 
                 raw_trail = prev_extreme - self._cfg["trail_atr"] * c_atr
                 stop_px = max(entry_px - self._cfg["init_stop_atr"] * c_atr, raw_trail)
                 
                 # Check TP1
                 tp1_signal = False
-                if not pos_state["tp1_done"] and open_profit_atr >= self._cfg["tp1_atr"]:
+                if not pos_state["tp1_done"] and high_profit_atr >= self._cfg["tp1_atr"]:
                     pos_state["tp1_done"] = True
                     alloc *= (1.0 - self._cfg["tp1_fraction"])
                     pos_state["alloc"] = alloc

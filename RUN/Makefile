@@ -26,7 +26,8 @@ run:
 
 # Management and Diagnostics
 stop:
-	@fuser -k 8090/tcp >/dev/null 2>&1 || pkill -f "python3.*(main\.py|bot_runner\.py)" || true
+	@pkill -SIGTERM -f "python3.*(main\.py|bot_runner\.py)" >/dev/null 2>&1 || true
+	@fuser -k 8090/tcp >/dev/null 2>&1 || true
 	@echo "🛑 Stopped all bot background processes"
 
 status:

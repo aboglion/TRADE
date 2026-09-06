@@ -619,7 +619,7 @@
                         <div class="rule-card">
                             <div class="rule-card-header">
                                 <span class="rule-icon">🐂</span>
-                                <h4>תנאי כניסה לקנייה (BUY / LONG Entry)</h4>
+                                <h4>תנאי כניסה ופירמידינג (BUY Entry & Pyramiding)</h4>
                             </div>
                             <ul class="rule-steps">
                                 <li>
@@ -628,15 +628,19 @@
                                 </li>
                                 <li>
                                     <span class="step-num">2</span>
-                                    <div><strong>פריצת דונצ'יאן 30 (Donchian30 Breakout):</strong> סגירת נר 4 שעות גבוהה משיא 30 הנרות האחרונים (Close >= Donchian30 High).</div>
+                                    <div><strong>מבנה ממוצעים (EMA Trend):</strong> הנכס במגמת עלייה מוגדרת (STRONG_BULL_TREND / TREND).</div>
                                 </li>
                                 <li>
                                     <span class="step-num">3</span>
-                                    <div><strong>עוצמת מגמה (ADX Filter):</strong> ADX מעל הסף הנדרש (BTC >= 20, ETH >= 22, SOL >= 24).</div>
+                                    <div><strong>פריצת דונצ'יאן 30 / כניסה ב-EMA20:</strong> סגירת 4H מעל Donchian30 High, או נגיעה ב-EMA20 בטרנד חזק (EMA20 Re-entry).</div>
                                 </li>
                                 <li>
                                     <span class="step-num">4</span>
-                                    <div><strong>מבנה ממוצעים (EMA Alignment):</strong> הנכס במגמת עלייה (STRONG_BULL_TREND / TREND).</div>
+                                    <div><strong>עוצמת מגמה (ADX Filter):</strong> ADX מעל הסף הנדרש (BTC >= 20, ETH >= 22, SOL >= 24).</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">5</span>
+                                    <div><strong>פירמידינג (Pyramiding Scaling):</strong> ב-STRONG_BULL_TREND, כשרווח פתוח >= 0.6 ATR ותיקון >= 1.5 ATR מעל EMA20 → הוספת כניסה 2 (+50%) וכניסה 3 (+30%).</div>
                                 </li>
                             </ul>
                         </div>
@@ -644,24 +648,28 @@
                         <div class="rule-card">
                             <div class="rule-card-header">
                                 <span class="rule-icon">🛡️</span>
-                                <h4>תנאי מכירה ויציאה (SELL / Exit Triggers)</h4>
+                                <h4>תנאי מכירה, שורט וקטיעת הפסד (SELL / Short / Exits)</h4>
                             </div>
                             <ul class="rule-steps">
                                 <li>
                                     <span class="step-num">1</span>
-                                    <div><strong>סטופ נגרר דינמי (ATR Trailing Stop):</strong> המחיר יורד מתחת לסטופ המחושב משיא הפוזיציה (High Water - N × ATR).</div>
+                                    <div><strong>משטר דובים ושורט 15% (Bear Short Hedge):</strong> BTC מתחת ל-SMA150 -> סגירת כל הלונגים + פתיחת <strong>15% שורט על BTC</strong> לצד 85% מזומן USDT.</div>
                                 </li>
                                 <li>
                                     <span class="step-num">2</span>
-                                    <div><strong>סטופ סיכון ראשוני (Initial Risk Stop):</strong> המחיר צונח מתחת למחיר כניסה מינוס 3-4 × ATR.</div>
+                                    <div><strong>סטופ נגרר דינמי (ATR Trailing Stop):</strong> ירידה מתחת לסטופ המחושב משיא הפוזיציה (High Water - N × ATR).</div>
                                 </li>
                                 <li>
                                     <span class="step-num">3</span>
-                                    <div><strong>שבירת ממוצעים (EMA Breakdown):</strong> סגירה מתחת ל-EMA50 בטרנד רגיל או מתחת ל-EMA200.</div>
+                                    <div><strong>סטופ סיכון ראשוני (Initial Risk Stop):</strong> צניחה מתחת למחיר כניסה מינוס 1.8-4.0 × ATR.</div>
                                 </li>
                                 <li>
                                     <span class="step-num">4</span>
-                                    <div><strong>מעבר למשטר דובים (Bear Regime):</strong> ביטקוין יורד מתחת ל-SMA-150 -> יציאה מיידית ל-100% מזומן USDT.</div>
+                                    <div><strong>מיקרו TP1 בשיא הנר (Micro Intraday High TP1):</strong> פגיעה בשיא הנר (High >= Entry + 2.5 ATR) -> מימוש 50% והגנת רווח.</div>
+                                </li>
+                                <li>
+                                    <span class="step-num">5</span>
+                                    <div><strong>שבירת ממוצעים (EMA Exit):</strong> סגירת 4H מתחת ל-EMA50 בטרנד רגיל או מתחת ל-EMA200 בטרנד חזק.</div>
                                 </li>
                             </ul>
                         </div>
@@ -669,10 +677,10 @@
                         <div class="rule-card full-width-rule">
                             <div class="rule-card-header">
                                 <span class="rule-icon">⚡</span>
-                                <h4>מנגנון הגנת סיכון (Dynamic Bullish Risk Guard)</h4>
+                                <h4>מנגנון ניהול סיכונים ומינוף (Dynamic Bullish Risk Guard & Leverage 2.0x)</h4>
                             </div>
                             <div class="rule-body-text">
-                                כשהשוק ב-Bull Regime, המערכת משתמשת במינוף <strong>2.0x</strong>. במידה וביטקוין חווה תיקון של מעל <strong>8%</strong> מהשיא או יורד מתחת ל-EMA20 יומית, מופעל <strong>Risk Guard</strong> המוריד את המינוף ל-<strong>1.0x</strong> בלבד להגנה על ההון.
+                                כשהשוק ב-Bull Regime, המערכת פועלת במינוף מורשה של <strong>2.0x</strong>. במידה וביטקוין יורד מתחת ל-EMA20 יומית או מתקן מעל <strong>8%</strong> משיא השוק, מופעל <strong>Risk Guard</strong> המוריד מיידית את המינוף ל-<strong>1.0x</strong> בלבד להגנת ההון. בשוק דובי (BEAR), מופעל <strong>15% Short Hedge על BTC</strong>.
                             </div>
                         </div>
                     </div>

@@ -110,6 +110,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         bull_leverage: float = 2.0,
         bear_short_hedge_weight: float = 0.15,
         asset_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        core_ratio: float = 0.80,
     ):
         self._weights = asset_weights or DEFAULT_WEIGHTS
         self._sma_period = sma_regime_period
@@ -117,6 +118,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         self._bear_short_hedge = bear_short_hedge_weight
         self._asset_configs = asset_configs or ASSET_CONFIGS
         self._trail_overrides = TRAIL_OVERRIDES
+        self._core_ratio = max(0.01, min(1.0, core_ratio))
 
         # Active position tracking state per asset symbol
         # {"BTC": {"active": bool, "entry_px": float, "atr_at_entry": float, "high_water": float, "mode": str}}
@@ -254,15 +256,16 @@ class RegimeAdaptiveStrategy(IStrategy):
 
             # Assign short hedge to BTC (or default btc_key)
             btc_key = self._find_btc_key(candles_by_asset)
+            target_short = -self._bear_short_hedge / max(0.01, self._core_ratio)
             
             for symbol in candles_by_asset:
                 if symbol == btc_key and self._bear_short_hedge > 0:
-                    target_weights[symbol] = -self._bear_short_hedge
+                    target_weights[symbol] = target_short
                     signals.append(StrategySignal(
                         symbol=symbol,
                         action=PositionAction.OPEN,
                         asset_regime=AssetRegime.BEAR,
-                        target_weight=-self._bear_short_hedge,
+                        target_weight=target_short,
                         reason=f"Bear regime — {self._bear_short_hedge * 100:.0f}% short hedge on BTC",
                     ))
                 else:
@@ -356,6 +359,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                     "atr_at_entry": c_atr if not np.isnan(c_atr) else 1.0,
                     "high_water": c_high,
                     "mode": asset_regime_str,
+                    "entries": [{"px": c_close, "atr": c_atr if not np.isnan(c_atr) else 1.0}],
                 }
                 self._positions[base] = pos
 
@@ -369,6 +373,31 @@ class RegimeAdaptiveStrategy(IStrategy):
                 current_high_water = pos.get("high_water", entry_px)
 
                 open_r = (c_close - entry_px) / max(atr_entry, 1e-6)
+
+                # Check Pyramiding (Adding to position in STRONG_BULL_TREND)
+                entries = pos.setdefault("entries", [{"px": entry_px, "atr": atr_entry}])
+                max_adds = cfg.get("max_add_entries", 2)
+                pyramid_profit_r = cfg.get("pyramid_profit_r", 0.6)
+                pyramid_pullback_atr = cfg.get("pyramid_pullback_atr", 1.5)
+
+                if len(entries) < max_adds + 1 and entry_mode == "STRONG_BULL_TREND":
+                    if open_r >= pyramid_profit_r:
+                        last_px = entries[-1]["px"]
+                        pullback = (last_px - c_low) / max(c_atr, 1e-6)
+                        if pullback >= pyramid_pullback_atr and c_close > r_last["EMA20"]:
+                            entries.append({"px": c_close, "atr": c_atr})
+                            pos["entries"] = entries
+                            logger.info(
+                                "PYRAMID ADD TRIGGERED for %s (entry #%d @ %.2f, pullback=%.1f ATR)",
+                                symbol, len(entries), c_close, pullback
+                            )
+
+                # Pyramiding weight multiplier: 1.0 for initial entry, 1.5 for add 1, 1.8 for add 2
+                pyramid_mult = 1.0
+                if len(entries) == 2:
+                    pyramid_mult = 1.5
+                elif len(entries) >= 3:
+                    pyramid_mult = 1.8
 
                 # Compute dynamic trailing stop
                 tb = trail_override[0] if entry_mode == "STRONG_BULL_TREND" else trail_override[1]
@@ -404,6 +433,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                 if exit_now:
                     logger.info("EXIT SIGNAL triggered for %s: %s", symbol, reason)
                     pos["active"] = False
+                    pos["entries"] = []
                     self._positions[base] = pos
                     target_weights[symbol] = 0.0
                     signals.append(StrategySignal(
@@ -417,7 +447,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                     # Update high_water only if the position is held
                     pos["high_water"] = max(current_high_water, c_high)
                     self._positions[base] = pos
-                    weight = base_weight * total_crypto_weight
+                    weight = base_weight * total_crypto_weight * pyramid_mult
                     target_weights[symbol] = weight
                     assigned_crypto_weight += weight
                     signals.append(StrategySignal(
@@ -425,7 +455,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                         action=PositionAction.HOLD,
                         asset_regime=asset_regime,
                         target_weight=weight,
-                        reason=f"Active position held (trail_stop={trail_stop:.2f})",
+                        reason=f"Active position held (entries={len(entries)}, trail_stop={trail_stop:.2f})",
                     ))
 
             # ── NEW ENTRY EVALUATION ─────────────────────────
@@ -457,6 +487,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                         "atr_at_entry": c_atr if not np.isnan(c_atr) else 1.0,
                         "high_water": c_high,
                         "mode": entry_mode,
+                        "entries": [{"px": c_close, "atr": c_atr if not np.isnan(c_atr) else 1.0}],
                     }
                     self._positions[base] = pos
                     weight = base_weight * total_crypto_weight

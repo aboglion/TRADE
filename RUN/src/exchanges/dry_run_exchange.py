@@ -222,11 +222,15 @@ class DryRunExchange:
 
         # Basic margin/balance check
         quote = intent.symbol.split("/")[1] if "/" in intent.symbol else "USDT"
-        if intent.side == OrderSide.BUY and cost > (self._get_free(quote) + 1e-4):
+        is_futures = True  # Strategy operates in futures mode
+        leverage = 2.0
+        margin_req = cost / leverage if is_futures else cost
+
+        if intent.side == OrderSide.BUY and margin_req > (self._get_free(quote) + 1e-4):
              return OrderResult(
                  client_order_id=intent.client_order_id,
                  status=OrderStatus.FAILED,
-                 error_message=f"Insufficient balance: need {cost} {quote}",
+                 error_message=f"Insufficient balance: need {margin_req:.2f} {quote} margin (cost={cost:.2f})",
              )
 
         # Handle Futures execution

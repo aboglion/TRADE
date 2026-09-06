@@ -677,11 +677,21 @@ def main() -> None:
     log_runner("Starting Bot Supervisor loop 24/7...")
 
     shutdown_flag = False
+    proc: Optional[subprocess.Popen] = None
 
     def handle_signal(sig, frame):
         nonlocal shutdown_flag
-        log_runner(f"Received signal {sig}. Terminating bot runner...")
+        log_runner(f"Received signal {sig}. Terminating bot runner and main process...")
         shutdown_flag = True
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -700,18 +710,19 @@ def main() -> None:
             exit_code = proc.wait()
         except KeyboardInterrupt:
             log_runner("KeyboardInterrupt received while waiting for main.py. Terminating child process...")
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
             break
 
         log_runner(f"main.py exited with code: {exit_code}")
 
-        # If clean exit (0), don't trigger emergency server unless requested
-        if exit_code == 0:
-            log_runner("main.py exited normally (Code 0). Exiting supervisor.")
+        # If clean exit (0), intentional termination (-15/143), or shutdown requested, don't trigger emergency server
+        if shutdown_flag or exit_code in (0, -15, 143):
+            log_runner(f"main.py stopped gracefully (Code {exit_code}). Exiting supervisor.")
             break
 
         # Read last 50 lines of logs/bot.log for Telegram crash alert

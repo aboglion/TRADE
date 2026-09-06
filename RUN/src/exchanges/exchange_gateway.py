@@ -114,6 +114,28 @@ class ExchangeGateway:
             len(self._markets),
         )
 
+        # Set default leverage for futures markets if applicable
+        if self._config.market_type == "future":
+            for symbol in ("BTC/USDT", "ETH/USDT", "SOL/USDT"):
+                if symbol in self._markets:
+                    self.set_leverage(2, symbol)
+
+    def set_leverage(self, leverage: int, symbol: str) -> None:
+        """Set leverage for a futures market symbol."""
+        try:
+            self._retry(lambda: self.exchange.set_leverage(leverage, symbol))
+            logger.info("Set leverage=%dx for %s", leverage, symbol)
+        except Exception as e:
+            logger.warning("Could not set leverage=%dx for %s: %s", leverage, symbol, e)
+
+    def set_margin_mode(self, margin_mode: str, symbol: str) -> None:
+        """Set margin mode ('cross' or 'isolated') for a futures market symbol."""
+        try:
+            self._retry(lambda: self.exchange.set_margin_mode(margin_mode.upper(), symbol))
+            logger.info("Set margin_mode=%s for %s", margin_mode, symbol)
+        except Exception as e:
+            logger.warning("Could not set margin_mode=%s for %s: %s", margin_mode, symbol, e)
+
     @property
     def exchange(self) -> ccxt.Exchange:
         if not self._initialized or self._exchange is None:

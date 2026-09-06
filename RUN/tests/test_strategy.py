@@ -85,7 +85,11 @@ class TestRegimeAdaptiveStrategyParity:
         assert decision.target_allocation.weights["BTC/USDT"] == 0.0
 
     def test_bear_regime_short_hedge(self):
-        strategy = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.15)
+        from src.strategy.hybrid_strategy import HybridStrategy
+        macro = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.15, core_ratio=0.80)
+        micro = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.0, core_ratio=0.20)
+        hybrid = HybridStrategy(macro_strategy=macro, micro_strategy=micro, core_ratio=0.80)
+
         btc_candles = make_candle_series(1_600_000_000_000, count=1000, base_price=60000.0, trend=-20.0)
         candles_by_asset = {"BTC/USDT": btc_candles}
         portfolio = PortfolioSnapshot(
@@ -94,9 +98,9 @@ class TestRegimeAdaptiveStrategyParity:
             total_value_usd=1000.0,
         )
 
-        decision = strategy.compute_signals(candles_by_asset, portfolio)
+        decision = hybrid.compute_signals(candles_by_asset, portfolio)
         assert decision.regime == Regime.BEAR
-        assert decision.target_allocation.weights["BTC/USDT"] == -0.15
+        assert pytest.approx(decision.target_allocation.weights["BTC/USDT"], abs=1e-4) == -0.15
 
     def test_bull_regime_leverage_allocation(self):
         strategy = RegimeAdaptiveStrategy(sma_regime_period=150, bull_leverage=2.0)
