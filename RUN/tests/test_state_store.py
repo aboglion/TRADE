@@ -102,3 +102,23 @@ class TestCompletedOrdersTruncation:
         loaded = store.load_state()
 
         assert len(loaded.completed_orders) <= 100
+
+
+class TestPnlHistoryPersistence:
+    def test_pnl_history_roundtrip(self, tmp_path):
+        path = str(tmp_path / "state.json")
+        store = JsonStateStore(path)
+
+        state = BotState()
+        state.pnl_history = [
+            {"ts": 1700000000000, "val": 1000.0, "pnl_usd": 0.0, "pnl_pct": 0.0},
+            {"ts": 1700000060000, "val": 1025.5, "pnl_usd": 25.5, "pnl_pct": 2.55},
+        ]
+
+        store.save_state(state)
+        loaded = store.load_state()
+
+        assert len(loaded.pnl_history) == 2
+        assert loaded.pnl_history[1]["pnl_usd"] == 25.5
+        assert loaded.pnl_history[1]["pnl_pct"] == 2.55
+

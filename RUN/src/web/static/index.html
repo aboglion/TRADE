@@ -138,6 +138,33 @@
                 </div>
             </div>
 
+            <!-- PNL Performance History Chart Card -->
+            <div class="card glass full-width pnl-chart-card">
+                <div class="card-header">
+                    <div class="card-header-left">
+                        <span class="card-icon">📈</span>
+                        <span class="card-title">PORTFOLIO PNL HISTORY</span>
+                    </div>
+                    <div class="pnl-chart-header-right">
+                        <div class="pnl-summary-pills">
+                            <span class="pnl-pill pnl-pill-high" id="pnlHighPill" title="Session High PNL">High: +$0.00</span>
+                            <span class="pnl-pill pnl-pill-low" id="pnlLowPill" title="Session Low PNL">Low: -$0.00</span>
+                        </div>
+                        <div class="timeframe-selector" id="pnlTfSelector">
+                            <button class="tf-btn" data-tf="1h">1H</button>
+                            <button class="tf-btn" data-tf="24h">24H</button>
+                            <button class="tf-btn" data-tf="7d">7D</button>
+                            <button class="tf-btn active" data-tf="all">ALL</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="pnlCanvas"></canvas>
+                    <div id="pnlTooltip" class="chart-tooltip"></div>
+                    <div id="pnlChartEmpty" class="chart-empty-overlay">Recording PNL performance history...</div>
+                </div>
+            </div>
+
             <!-- Asset Allocations Card -->
             <div class="card glass full-width">
                 <div class="card-header">

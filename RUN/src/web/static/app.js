@@ -49,12 +49,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     setInterval(fetchDashboardData, 5000);
 
+    initPnlChart();
+
     // Event listeners with instant visual feedback
     document.getElementById("refreshBtn").addEventListener("click", manualRefresh);
     document.getElementById("triggerCycleBtn").addEventListener("click", openTriggerCycleModal);
     document.getElementById("killSwitchBtn").addEventListener("click", openKillSwitchModal);
     document.getElementById("toggleUpdaterBtn").addEventListener("click", toggleUpdater);
     document.getElementById("manualPullBtn").addEventListener("click", triggerManualPull);
+
+    const resetStatsBtn = document.getElementById("resetStatsBtn");
+    if (resetStatsBtn) resetStatsBtn.addEventListener("click", resetSessionStats);
 
     // Logs & Orders toolbar listeners
     const copyLogsBtn = document.getElementById("copyLogsBtn");
@@ -503,25 +508,29 @@ async function fetchPortfolio() {
         const netValue = data.net_total_value_usd !== undefined ? data.net_total_value_usd : data.total_value_usd;
         document.getElementById("portfolioValue").textContent = `$${netValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-        // Net PNL and Fees
+        // Net PNL and Fees (3 decimal places precision per user request)
         const initialVal = data.session_initial_value_usd;
         if (initialVal !== null && initialVal !== undefined) {
             const pnl = data.net_pnl_usd !== undefined ? data.net_pnl_usd : (netValue - initialVal);
             const pnlPct = data.net_pnl_pct !== undefined ? data.net_pnl_pct : (initialVal > 0 ? (pnl / initialVal) * 100 : 0);
             const pnlEl = document.getElementById("sessionPnl");
             if (pnlEl) {
-                pnlEl.textContent = `NET PNL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`;
+                pnlEl.textContent = `NET PNL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(3)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
                 pnlEl.className = pnl >= 0 ? "tag tag-buy" : "tag tag-sell";
                 pnlEl.title = "Net Liquidation PnL (Deducting entry fees and 0.1% estimated exit fees upon selling)";
             }
         }
         
         const feesObj = data.session_fees || {};
-        const feeStrings = Object.entries(feesObj).map(([curr, amt]) => `${amt.toFixed(4)} ${curr}`);
+        const feeStrings = Object.entries(feesObj).map(([curr, amt]) => `${amt.toFixed(3)} ${curr}`);
         const feeEl = document.getElementById("sessionFees");
         if (feeEl) {
-            feeEl.textContent = feeStrings.length > 0 ? `Fees: ${feeStrings.join(', ')}` : "Fees: 0.00";
+            feeEl.textContent = feeStrings.length > 0 ? `Fees: ${feeStrings.join(', ')}` : "Fees: 0.000";
         }
+
+        // Store and render historical PNL chart
+        pnlHistoryData = data.pnl_history || [];
+        renderPnlChart();
 
         // Coin performance summary tags removed from metric card 1 (user requested PNL & FEES only)
         const coinPerfTagsEl = document.getElementById("coinPerfTags");
@@ -1286,6 +1295,265 @@ async function saveTelegramConfig() {
             saveBtn.disabled = false;
             saveBtn.textContent = "Save Settings 💾";
         }
+    }
+}
+
+// ── PNL History Canvas Chart ───────────────────────────
+
+let pnlHistoryData = [];
+let selectedPnlTimeframe = "all";
+let currentChartPoints = [];
+
+function initPnlChart() {
+    const tfSelector = document.getElementById("pnlTfSelector");
+    if (tfSelector) {
+        tfSelector.querySelectorAll(".tf-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                tfSelector.querySelectorAll(".tf-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                selectedPnlTimeframe = btn.getAttribute("data-tf") || "all";
+                renderPnlChart();
+            });
+        });
+    }
+
+    window.addEventListener("resize", () => {
+        renderPnlChart();
+    });
+
+    const canvas = document.getElementById("pnlCanvas");
+    const tooltip = document.getElementById("pnlTooltip");
+    if (canvas && tooltip) {
+        canvas.addEventListener("mousemove", (e) => handleChartHover(e, canvas, tooltip));
+        canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+        canvas.addEventListener("touchmove", (e) => {
+            if (e.touches && e.touches.length > 0) handleChartHover(e.touches[0], canvas, tooltip);
+        });
+        canvas.addEventListener("touchend", () => { tooltip.style.display = "none"; });
+    }
+}
+
+function filterPnlDataByTimeframe(data, tf) {
+    if (!data || data.length === 0) return [];
+    if (tf === "all") return data;
+    const now = Date.now();
+    let cutoff = 0;
+    if (tf === "1h") cutoff = now - (3600 * 1000);
+    else if (tf === "24h") cutoff = now - (24 * 3600 * 1000);
+    else if (tf === "7d") cutoff = now - (7 * 24 * 3600 * 1000);
+    
+    const filtered = data.filter(d => (d.ts || 0) >= cutoff);
+    return filtered.length > 0 ? filtered : data;
+}
+
+function renderPnlChart() {
+    const canvas = document.getElementById("pnlCanvas");
+    const emptyOverlay = document.getElementById("pnlChartEmpty");
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const wrapper = canvas.parentElement;
+    const width = wrapper.clientWidth;
+    const height = wrapper.clientHeight;
+
+    if (width <= 0 || height <= 0) return;
+
+    // High DPI display pixel ratio adjustment
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, width, height);
+
+    const filteredData = filterPnlDataByTimeframe(pnlHistoryData, selectedPnlTimeframe);
+
+    if (emptyOverlay) {
+        if (!filteredData || filteredData.length < 1) {
+            emptyOverlay.classList.add("show");
+            return;
+        } else {
+            emptyOverlay.classList.remove("show");
+        }
+    }
+
+    // High & Low calculation
+    let highPnl = -Infinity;
+    let lowPnl = Infinity;
+    filteredData.forEach(d => {
+        const pnl = d.pnl_usd !== undefined ? d.pnl_usd : 0.0;
+        if (pnl > highPnl) highPnl = pnl;
+        if (pnl < lowPnl) lowPnl = pnl;
+    });
+
+    if (highPnl === -Infinity) highPnl = 0.0;
+    if (lowPnl === Infinity) lowPnl = 0.0;
+
+    const highPill = document.getElementById("pnlHighPill");
+    const lowPill = document.getElementById("pnlLowPill");
+    if (highPill) highPill.textContent = `High: ${highPnl >= 0 ? '+' : ''}$${highPnl.toFixed(3)}`;
+    if (lowPill) lowPill.textContent = `Low: ${lowPnl >= 0 ? '+' : ''}$${lowPnl.toFixed(3)}`;
+
+    // Canvas Paddings
+    const paddingLeft = 70;
+    const paddingRight = 20;
+    const paddingTop = 25;
+    const paddingBottom = 30;
+
+    const plotWidth = width - paddingLeft - paddingRight;
+    const plotHeight = height - paddingTop - paddingBottom;
+
+    let maxVal = Math.max(...filteredData.map(d => d.pnl_usd || 0.0), 0.001);
+    let minVal = Math.min(...filteredData.map(d => d.pnl_usd || 0.0), -0.001);
+    if (maxVal === minVal) {
+        maxVal += 0.01;
+        minVal -= 0.01;
+    }
+    const valRange = maxVal - minVal;
+
+    // Grid Lines & Y-Axis Labels
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+    ctx.fillStyle = "#64748b";
+    ctx.font = "11px 'JetBrains Mono', monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    const steps = 4;
+    for (let i = 0; i <= steps; i++) {
+        const y = paddingTop + (plotHeight * i / steps);
+        const val = maxVal - (valRange * i / steps);
+        
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, y);
+        ctx.lineTo(width - paddingRight, y);
+        ctx.stroke();
+
+        const valStr = `${val >= 0 ? '+' : ''}$${val.toFixed(3)}`;
+        ctx.fillText(valStr, paddingLeft - 8, y);
+    }
+
+    // Zero Baseline Line
+    if (minVal <= 0 && maxVal >= 0) {
+        const zeroY = paddingTop + plotHeight * (1 - (0 - minVal) / valRange);
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+        ctx.lineWidth = 1.5;
+        ctx.moveTo(paddingLeft, zeroY);
+        ctx.lineTo(width - paddingRight, zeroY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Plot Points
+    currentChartPoints = [];
+    const count = filteredData.length;
+    
+    filteredData.forEach((d, idx) => {
+        const x = count === 1 ? paddingLeft + plotWidth / 2 : paddingLeft + (plotWidth * idx / (count - 1));
+        const pnl = d.pnl_usd || 0.0;
+        const y = paddingTop + plotHeight * (1 - (pnl - minVal) / valRange);
+        currentChartPoints.push({ x, y, data: d });
+    });
+
+    const lastPnl = filteredData[filteredData.length - 1]?.pnl_usd || 0.0;
+    const isPositive = lastPnl >= 0;
+    const strokeColor = isPositive ? "#10b981" : "#f43f5e";
+    const gradientTop = isPositive ? "rgba(16, 185, 129, 0.3)" : "rgba(244, 63, 94, 0.3)";
+    const gradientBottom = isPositive ? "rgba(16, 185, 129, 0.0)" : "rgba(244, 63, 94, 0.0)";
+
+    // Fill area under curve
+    if (currentChartPoints.length > 0) {
+        const fillGradient = ctx.createLinearGradient(0, paddingTop, 0, paddingTop + plotHeight);
+        fillGradient.addColorStop(0, gradientTop);
+        fillGradient.addColorStop(1, gradientBottom);
+
+        ctx.beginPath();
+        ctx.moveTo(currentChartPoints[0].x, paddingTop + plotHeight);
+        currentChartPoints.forEach(pt => ctx.lineTo(pt.x, pt.y));
+        ctx.lineTo(currentChartPoints[currentChartPoints.length - 1].x, paddingTop + plotHeight);
+        ctx.closePath();
+        ctx.fillStyle = fillGradient;
+        ctx.fill();
+
+        // Stroke line
+        ctx.beginPath();
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+
+        currentChartPoints.forEach((pt, idx) => {
+            if (idx === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+        });
+        ctx.stroke();
+
+        // Glowing last point dot
+        const lastPt = currentChartPoints[currentChartPoints.length - 1];
+        ctx.beginPath();
+        ctx.arc(lastPt.x, lastPt.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = strokeColor;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+    }
+
+    // X-Axis Timestamps
+    ctx.fillStyle = "#64748b";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    if (count > 0) {
+        const xStep = Math.max(1, Math.floor(count / 5));
+        for (let i = 0; i < count; i += xStep) {
+            const pt = currentChartPoints[i];
+            if (!pt) continue;
+            const date = new Date(pt.data.ts || Date.now());
+            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            ctx.fillText(timeStr, pt.x, paddingTop + plotHeight + 6);
+        }
+    }
+}
+
+function handleChartHover(e, canvas, tooltip) {
+    if (!currentChartPoints || currentChartPoints.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = (e.clientX || e.pageX) - rect.left;
+
+    let closest = currentChartPoints[0];
+    let minDistance = Math.abs(mouseX - closest.x);
+
+    for (let i = 1; i < currentChartPoints.length; i++) {
+        const dist = Math.abs(mouseX - currentChartPoints[i].x);
+        if (dist < minDistance) {
+            minDistance = dist;
+            closest = currentChartPoints[i];
+        }
+    }
+
+    if (closest && minDistance < 50) {
+        const d = closest.data;
+        const date = new Date(d.ts || Date.now());
+        const timeStr = date.toLocaleString();
+        const pnl = d.pnl_usd !== undefined ? d.pnl_usd : 0.0;
+        const pnlPct = d.pnl_pct !== undefined ? d.pnl_pct : 0.0;
+        const totalVal = d.val !== undefined ? d.val : 0.0;
+        const sign = pnl >= 0 ? "+" : "";
+
+        tooltip.innerHTML = `
+            <div style="font-weight: 700; color: #94a3b8; margin-bottom: 3px; font-size: 0.72rem;">${timeStr}</div>
+            <div style="color: #ffffff;">Value: <strong>$${totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+            <div style="color: ${pnl >= 0 ? '#34d399' : '#fecdd3'}; font-weight: 700;">
+                PNL: ${sign}$${pnl.toFixed(3)} (${sign}${pnlPct.toFixed(3)}%)
+            </div>
+        `;
+        tooltip.style.display = "block";
+        tooltip.style.left = `${closest.x}px`;
+        tooltip.style.top = `${closest.y - 10}px`;
+    } else {
+        tooltip.style.display = "none";
     }
 }
 

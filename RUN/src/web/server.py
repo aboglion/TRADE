@@ -480,6 +480,34 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             net_pnl_usd = (net_total_value_usd - initial_val) if initial_val is not None else 0.0
             net_pnl_pct = (net_pnl_usd / initial_val * 100.0) if (initial_val and initial_val > 0) else 0.0
 
+            # Record historical PnL point
+            if state:
+                current_time_ms = snapshot.timestamp_ms or int(time.time() * 1000)
+                if not hasattr(state, "pnl_history") or state.pnl_history is None:
+                    state.pnl_history = []
+                
+                should_append = False
+                if not state.pnl_history:
+                    should_append = True
+                else:
+                    last_point = state.pnl_history[-1]
+                    last_ts = last_point.get("ts", 0)
+                    last_val = last_point.get("val", 0.0)
+                    if (current_time_ms - last_ts >= 30000) or abs(last_val - net_total_value_usd) >= 0.05:
+                        should_append = True
+
+                if should_append:
+                    point = {
+                        "ts": current_time_ms,
+                        "val": round(net_total_value_usd, 2),
+                        "pnl_usd": round(net_pnl_usd, 2),
+                        "pnl_pct": round(net_pnl_pct, 2),
+                    }
+                    state.pnl_history.append(point)
+                    if len(state.pnl_history) > 5000:
+                        state.pnl_history = state.pnl_history[-5000:]
+                    state_updated = True
+
             data = {
                 "total_value_usd": round(snapshot.total_value_usd, 2),
                 "net_total_value_usd": round(net_total_value_usd, 2),
@@ -491,6 +519,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 "session_initial_value_usd": round(initial_val, 2) if initial_val is not None else None,
                 "session_fees": state.session_fees if state else {},
                 "session_initial_prices": initial_prices,
+                "pnl_history": state.pnl_history if state else [],
             }
 
             # Auto-initialize baseline if empty
@@ -613,6 +642,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         state.session_initial_value_usd = None
                         state.session_fees.clear()
                         state.session_initial_prices.clear()
+                        if hasattr(state, "pnl_history") and state.pnl_history:
+                            state.pnl_history.clear()
                     self.state_store.save_state(state)
                     logger.info("Persisted dry run balances into bot_state.json")
                 except Exception as ex:
@@ -636,13 +667,30 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 from src.services.portfolio_service import PortfolioService
                 ps = PortfolioService(self.gateway)
                 snapshot = ps.get_portfolio()
-                state.session_initial_value_usd = snapshot.total_value_usd
+                crypto_val = sum(
+                    h.value_usd for sym, h in snapshot.holdings.items()
+                    if sym not in ("USDT", "USD", "BUSD", "USDC")
+                )
+                est_exit_fees = crypto_val * 0.001
+                state.session_initial_value_usd = snapshot.total_value_usd - est_exit_fees
             else:
                 state.session_initial_value_usd = None
 
             state.session_fees.clear()
             state.session_initial_prices.clear()
             state.completed_orders.clear()
+            if hasattr(state, "pnl_history") and state.pnl_history:
+                state.pnl_history.clear()
+
+            # Record baseline initial point after reset
+            if state.session_initial_value_usd is not None:
+                now_ms = int(time.time() * 1000)
+                state.pnl_history.append({
+                    "ts": now_ms,
+                    "val": round(state.session_initial_value_usd, 2),
+                    "pnl_usd": 0.0,
+                    "pnl_pct": 0.0
+                })
 
             self.state_store.save_state(state)
             logger.info("Session stats and PNL reset via API.")
