@@ -225,6 +225,39 @@
                 </div>
             </div>
 
+            <!-- Live Strategy Conditions Pipeline Card (Main Dashboard Widget) -->
+            <div class="card glass full-width" id="dashboardPipelineCard">
+                <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem;">
+                    <div class="card-header-left">
+                        <span class="card-icon">🎯</span>
+                        <span class="card-title">LIVE STRATEGY CONDITIONS PIPELINE (צינור תנאי מסחר בלייב)</span>
+                    </div>
+                    <div class="tree-controls-bar mini-pipeline-controls" style="margin-bottom:0; background: transparent; padding: 0; border: none; box-shadow: none;">
+                        <div class="tree-controls-group">
+                            <span class="tree-control-label" style="font-size: 0.75rem;">נכס:</span>
+                            <div class="tree-pill-selector" id="dashPipelineCoinSelector">
+                                <button class="tree-pill-btn active" data-coin="ALL">🌐 הכל</button>
+                                <button class="tree-pill-btn" data-coin="BTC">₿ BTC</button>
+                                <button class="tree-pill-btn" data-coin="ETH">⟠ ETH</button>
+                                <button class="tree-pill-btn" data-coin="SOL">◎ SOL</button>
+                            </div>
+                        </div>
+
+                        <div class="tree-controls-group">
+                            <span class="tree-control-label" style="font-size: 0.75rem;">סוג:</span>
+                            <div class="tree-pill-selector" id="dashPipelineModeSelector">
+                                <button class="tree-pill-btn active tree-btn-buy" data-mode="BUY">🟢 קנייה</button>
+                                <button class="tree-pill-btn tree-btn-sell" data-mode="SELL">🔴 מכירה</button>
+                                <button class="tree-pill-btn tree-btn-risk" data-mode="RISK">⚡ סיכונים</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="dashPipelineContainer" style="padding: 0.5rem 0;">
+                    <div class="empty-state">Loading live strategy conditions pipeline...</div>
+                </div>
+            </div>
+
             <!-- Active & Pending Orders Table -->
             <div class="card glass full-width">
                 <div class="card-header">

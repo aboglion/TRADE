@@ -141,6 +141,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     safeAddListener("tabStrategyRulesBtn", "click", () => switchConditionsTab("rules"));
 
     initBinaryTreeControls();
+    initDashPipelineControls();
 
     initPnlChart();
     initRegimeChart();
@@ -295,6 +296,7 @@ async function fetchDashboardData() {
         fetchOrders(),
         fetchLogs(),
         fetchUpdaterStatus(),
+        fetchStrategyConditions(),
     ]);
 }
 
@@ -845,7 +847,25 @@ async function copyTextToClipboard(text) {
     }
 
     document.body.removeChild(textArea);
-    return success;
+    if (success) return true;
+
+    // Selection Range API fallback
+    try {
+        const consoleEl = document.getElementById("logConsole");
+        if (consoleEl) {
+            const range = document.createRange();
+            range.selectNodeContents(consoleEl);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            success = document.execCommand("copy");
+            if (success) return true;
+        }
+    } catch (err) {
+        console.error("Selection range copy failed:", err);
+    }
+
+    return false;
 }
 
 async function copyLogsToClipboard() {
@@ -886,7 +906,17 @@ async function copyLogsToClipboard() {
             showToast("📋 All system logs copied to clipboard!", "success");
         }
     } else {
-        showToast("❌ Failed to copy system logs", "error");
+        // Auto-select text so user can copy manually with Ctrl+C
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(logConsole);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            showToast("⚠️ Browser security blocked auto-copy. Text selected! Press Ctrl+C to copy.", "info");
+        } catch (e) {
+            showToast("❌ Failed to copy system logs", "error");
+        }
     }
 }
 
@@ -1574,32 +1604,270 @@ async function fetchStrategyConditions() {
     }
 }
 
-function renderBinaryTree(data) {
-    renderPipelineStepper(data);
+let selectedDashPipelineCoin = "ALL";
+let selectedDashPipelineMode = "BUY";
+
+function initDashPipelineControls() {
+    const coinSelector = document.getElementById("dashPipelineCoinSelector");
+    if (coinSelector) {
+        coinSelector.addEventListener("click", (e) => {
+            const btn = e.target.closest(".tree-pill-btn");
+            if (!btn) return;
+            const coin = btn.getAttribute("data-coin");
+            if (coin) {
+                selectedDashPipelineCoin = coin;
+                coinSelector.querySelectorAll(".tree-pill-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                if (latestConditionsData) renderDashboardPipeline(latestConditionsData);
+            }
+        });
+    }
+
+    const modeSelector = document.getElementById("dashPipelineModeSelector");
+    if (modeSelector) {
+        modeSelector.addEventListener("click", (e) => {
+            const btn = e.target.closest(".tree-pill-btn");
+            if (!btn) return;
+            const mode = btn.getAttribute("data-mode");
+            if (mode) {
+                selectedDashPipelineMode = mode;
+                modeSelector.querySelectorAll(".tree-pill-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                if (latestConditionsData) renderDashboardPipeline(latestConditionsData);
+            }
+        });
+    }
 }
 
-function renderPipelineStepper(data) {
+function renderBinaryTree(data) {
     const container = document.getElementById("binaryTreeContainer");
+    if (!container || !data) return;
+
+    const assets = data.assets || {};
+    const macro = data.macro_regime || {};
+    const coinData = assets[selectedTreeCoin];
+
+    let isBuyMode = selectedTreeMode === "BUY";
+    let isSellMode = selectedTreeMode === "SELL";
+    let isRiskMode = selectedTreeMode === "RISK";
+
+    if (!coinData && !isRiskMode) {
+        container.innerHTML = `<div class="empty-state">⏳ טוען נתוני שוק חיה עבור ${selectedTreeCoin}...</div>`;
+        return;
+    }
+
+    let nodes = [];
+    let treeTitle = "";
+    let treeSub = "";
+
+    if (isBuyMode) {
+        treeTitle = `עץ תנאי כניסה (BUY TREE) — ${selectedTreeCoin}`;
+        treeSub = "בדיקה בינארית מדורגת של תנאי הסף לקנייה ופתיחת פוזיציה בלונג";
+        nodes = coinData ? (coinData.buy_tree_nodes || []) : [];
+    } else if (isSellMode) {
+        treeTitle = `עץ תנאי יציאה ומכירה (SELL TREE) — ${selectedTreeCoin}`;
+        treeSub = "בדיקה בינארית של טריגרים ליציאה, סטופ-לוס וקטיעת הפסד/רווח";
+        nodes = coinData ? (coinData.sell_tree_nodes || []) : [];
+    } else if (isRiskMode) {
+        treeTitle = "עץ ניהול סיכונים ומינוף (RISK GUARD TREE)";
+        treeSub = "הערכת סיכוני מקרו לקביעת רמת הטיפול והמינוף (15% Short / 1.0x / 2.0x)";
+        const isBull = macro.regime === "BULL";
+        const pullback = macro.pullback_pct || 0;
+        const underEma = !!macro.under_ema20_daily;
+
+        nodes = [
+            {
+                id: "risk_node_regime",
+                title: "משטר שוק מקרו (Macro Regime)",
+                subtitle: "בדיקת מחיר סגירה יומי של BTC מול ממוצע 150 ימים",
+                criteria: "BTC Daily Close > SMA150",
+                actual: isBull ? `BULL REGIME (BTC $${(macro.btc_close||0).toLocaleString()} > SMA $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME (BTC $${(macro.btc_close||0).toLocaleString()} < SMA $${(macro.btc_sma150||0).toLocaleString()})`,
+                met: isBull,
+            },
+            {
+                id: "risk_node_pullback",
+                title: "הגנת נסיגה מהשיא (Pullback Guard)",
+                subtitle: "בדיקה אם ביטקוין ירד מעבר ל-8% משיא שוק השוורים",
+                criteria: "Pullback > -8.0% from Peak",
+                actual: `${pullback.toFixed(2)}% (Peak $${(macro.bull_peak||0).toLocaleString()})`,
+                met: pullback >= -8.0,
+            },
+            {
+                id: "risk_node_ema",
+                title: "ממוצע 20 יומי (EMA20 Daily Guard)",
+                subtitle: "בדיקת תמיכה טכנית קצרת טווח בממוצע 20 יום",
+                criteria: "BTC Daily Close >= EMA20 Daily",
+                actual: underEma ? "מתחת ל-EMA20 (Under EMA20)" : "מעל EMA20 (Above EMA20)",
+                met: !underEma,
+            }
+        ];
+    }
+
+    let html = `<div class="binary-tree-flow">`;
+
+    // Render Root Node Card
+    html += `
+        <div class="tree-root-card">
+            <span class="root-badge">🌳 START ROOT NODE</span>
+            <div class="root-title">${treeTitle}</div>
+            <div class="root-subtitle">${treeSub}</div>
+        </div>
+        <div class="tree-branch-container">
+            <div class="tree-branch-line tree-branch-pass"></div>
+            <span class="tree-branch-label label-pass">START ⬇️</span>
+        </div>
+    `;
+
+    let allPassed = true;
+
+    nodes.forEach((node, index) => {
+        const isMet = isRiskMode ? node.met : (isBuyMode ? node.met : !node.triggered);
+        if (!isMet) allPassed = false;
+
+        const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
+        const badgeClass = isMet ? "badge-pass" : "badge-fail";
+        const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
+        const icon = isMet ? "🟢" : "🔴";
+        const stepNum = index + 1;
+        const totalSteps = nodes.length;
+
+        html += `
+            <div class="tree-node ${nodeClass}">
+                <div class="tree-node-header">
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="tree-node-title">${icon} שלב ${stepNum}/${totalSteps}: ${node.title}</span>
+                        ${node.subtitle ? `<span class="tree-node-subtitle" style="font-size: 0.78rem; color: #94a3b8; font-weight: 500;">${node.subtitle}</span>` : ''}
+                    </div>
+                    <span class="tree-node-status-badge ${badgeClass}">${badgeText}</span>
+                </div>
+                <div class="tree-node-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; background: rgba(0,0,0,0.25); padding: 0.65rem 0.85rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-top: 0.35rem;">
+                    <div>
+                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 700;">🎯 תנאי מבוקש (Target Rule)</div>
+                        <div class="tree-node-criteria" style="font-size: 0.85rem; color: #e2e8f0; font-weight: 600; margin-top: 2px;">${node.criteria}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 700;">📊 נתון בלייב (Live Data)</div>
+                        <div class="tree-node-actual" style="font-size: 0.85rem; margin-top: 2px;">${node.actual}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        if (index < nodes.length - 1) {
+            const branchClass = isMet ? "tree-branch-pass" : "tree-branch-fail";
+            const labelClass = isMet ? "label-pass" : "label-fail";
+            const labelText = isMet ? "YES 🟢 (המשך לשלב הבא)" : "NO 🔴 (חסום בשלב זה)";
+            html += `
+                <div class="tree-branch-container">
+                    <div class="tree-branch-line ${branchClass}"></div>
+                    <span class="tree-branch-label ${labelClass}">${labelText}</span>
+                </div>
+            `;
+        }
+    });
+
+    const branchToLeafClass = allPassed ? "tree-branch-pass" : "tree-branch-fail";
+    const branchToLeafLabel = allPassed ? "YES 🟢 (סיום בהצלחה)" : "NO 🔴 (תוצאה סופית)";
+    html += `
+        <div class="tree-branch-container">
+            <div class="tree-branch-line ${branchToLeafClass}"></div>
+            <span class="tree-branch-label ${allPassed ? 'label-pass' : 'label-fail'}">${branchToLeafLabel}</span>
+        </div>
+    `;
+
+    if (isBuyMode) {
+        const isPosActive = coinData && coinData.position && coinData.position.active;
+        if (isPosActive) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">✅ פוזיציה פתוחה ופעילה (ACTIVE POSITION)</div>
+                    <div class="outcome-desc">הבוט מחזיק פוזיציה ב-${selectedTreeCoin}. תנאי הכניסה התקיימו ומנוהלים ע"י סטופ נגרר דינמי.</div>
+                </div>
+            `;
+        } else if (allPassed) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">🚀 אות קנייה פעיל! (BUY SIGNAL TRIGGERED)</div>
+                    <div class="outcome-desc">כל התנאים הבינאריים מתקיימים במלואם! הבוט מורשה לפתוח פוזיציה ב-${selectedTreeCoin}.</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-waiting">
+                    <div class="outcome-title">⏳ ממתין להתקיימות תנאים (WAITING FOR ENTRY)</div>
+                    <div class="outcome-desc">לא כל תנאי הקנייה מתקיימים. פתיחת פוזיציה ב-${selectedTreeCoin} כרגע חסומה להגנה על ההון.</div>
+                </div>
+            `;
+        }
+    } else if (isSellMode) {
+        const sellTriggered = nodes.some(n => n.triggered);
+        if (sellTriggered) {
+            html += `
+                <div class="tree-leaf-outcome outcome-sell-triggered">
+                    <div class="outcome-title">🚨 טריגר מכירה ויציאה הופעל! (EXIT TRIGGERED)</div>
+                    <div class="outcome-desc">טריגר יציאה הופעל ב-${selectedTreeCoin}! הבוט יבצע סגירה/מכירה מיידית בנכס.</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="tree-leaf-outcome outcome-sell-safe">
+                    <div class="outcome-title">🛡️ פוזיציה בטוחה / אין טריגר מכירה (POSITION SAFE)</div>
+                    <div class="outcome-desc">אף תנאי מכירה לא הופעל ב-${selectedTreeCoin}. הנכס נשאר מוחזק בבטחה.</div>
+                </div>
+            `;
+        }
+    } else if (isRiskMode) {
+        const riskActive = !!macro.risk_guard_active;
+        if (macro.regime === "BEAR") {
+            html += `
+                <div class="tree-leaf-outcome outcome-sell-triggered">
+                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 85% USDT + 15% SHORT HEDGE)</div>
+                    <div class="outcome-desc">סגירת כל פוזיציות הלונג + פתיחת 15% שורט על BTC לגידור והפקת רווחים בירידות, לצד 85% מזומן USDT.</div>
+                </div>
+            `;
+        } else if (riskActive) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-waiting">
+                    <div class="outcome-title">⚠️ מנגנון הגנת סיכון פעיל (RISK GUARD ACTIVE — 1.0x)</div>
+                    <div class="outcome-desc">ביטקוין בחוויית תיקון/ירידה. המינוף צומצם ל-1.0x למניעת סיכונים.</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">⚡ מינוף מלא בולארד פעיל (FULL BULL LEVERAGE — 2.0x)</div>
+                    <div class="outcome-desc">שוק עולה חזק ויציב. הבוט פועל במינוף מירבי מורשה 2.0x להשאת תשואה.</div>
+                </div>
+            `;
+        }
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+function renderDashboardPipeline(data) {
+    const container = document.getElementById("dashPipelineContainer");
     if (!container || !data) return;
 
     const assets = data.assets || {};
     const macro = data.macro_regime || {};
 
     let coinsToRender = [];
-    if (selectedTreeCoin === "ALL") {
+    if (selectedDashPipelineCoin === "ALL") {
         coinsToRender = ["BTC", "ETH", "SOL"];
-    } else if (assets[selectedTreeCoin]) {
-        coinsToRender = [selectedTreeCoin];
+    } else if (assets[selectedDashPipelineCoin]) {
+        coinsToRender = [selectedDashPipelineCoin];
     } else {
         coinsToRender = ["BTC", "ETH", "SOL"];
     }
 
     let modesToRender = [];
-    if (selectedTreeMode === "BUY") {
+    if (selectedDashPipelineMode === "BUY") {
         modesToRender = ["BUY"];
-    } else if (selectedTreeMode === "SELL") {
+    } else if (selectedDashPipelineMode === "SELL") {
         modesToRender = ["SELL"];
-    } else if (selectedTreeMode === "RISK") {
+    } else if (selectedDashPipelineMode === "RISK") {
         modesToRender = ["RISK"];
     } else {
         modesToRender = ["BUY", "SELL"];
@@ -1617,7 +1885,7 @@ function renderPipelineStepper(data) {
 
         const riskNodes = [
             {
-                id: "risk_1",
+                id: "dash_risk_1",
                 shortTitle: "1. משטר מקרו",
                 fullTitle: "1. משטר שוק מקרו (Macro Regime)",
                 criteria: "BTC Daily Close > SMA150 ($70,085)",
@@ -1626,7 +1894,7 @@ function renderPipelineStepper(data) {
                 explanation: "מאמת ששוק הקריפטו נמצא במגמת עלייה ראשית. כשהנר היומי של ביטקוין מעל ממוצע 150 יום, מאושר מסחר ממונף בלונגים."
             },
             {
-                id: "risk_2",
+                id: "dash_risk_2",
                 shortTitle: "2. הגנת נסיגה",
                 fullTitle: "2. הגנת נסיגה מהשיא (Pullback Guard)",
                 criteria: "Pullback > -8.0% משיא השוק",
@@ -1635,7 +1903,7 @@ function renderPipelineStepper(data) {
                 explanation: "אם ביטקוין חווה נסיגה קשה של מעל 8% משיא השוק, מופעל מנגנון הגנה דינמי שמוריד את המינוף מ-2.0x ל-1.0x למניעת סיכון."
             },
             {
-                id: "risk_3",
+                id: "dash_risk_3",
                 shortTitle: "3. ממוצע EMA20",
                 fullTitle: "3. ממוצע 20 יומי (EMA20 Daily Guard)",
                 criteria: "BTC Daily Close >= EMA20 Daily",
@@ -1702,17 +1970,15 @@ function renderPipelineStepper(data) {
             `;
 
             if (idx < riskNodes.length - 1) {
-                const connPass = isPass;
-                html += `<div class="pipeline-connector ${connPass ? 'pass' : 'fail'}"></div>`;
+                html += `<div class="pipeline-connector ${isPass ? 'pass' : 'fail'}"></div>`;
             }
         });
 
-        // Connector to outcome
         const allRiskPass = riskNodes.every(n => n.met);
         html += `
                 <div class="pipeline-connector ${allRiskPass ? 'pass' : 'fail'}"></div>
                 <div class="pipeline-node-wrapper">
-                    <div class="pipeline-node-circle ${allRiskPass ? 'pass' : (macro.regime === 'BEAR' ? 'fail' : 'fail')}">${outcomeIcon}</div>
+                    <div class="pipeline-node-circle ${allRiskPass ? 'pass' : 'fail'}">${outcomeIcon}</div>
                     <span class="pipeline-node-label">תוצאת סיכון</span>
                     <span class="pipeline-node-sub ${allRiskPass ? 'pass' : 'fail'}">${lev.toFixed(1)}x</span>
                 </div>
@@ -1736,7 +2002,7 @@ function renderPipelineStepper(data) {
 
             const buyNodes = [
                 {
-                    id: `${coin}_buy_1`,
+                    id: `dash_${coin}_buy_1`,
                     shortTitle: "1. Macro Regime",
                     fullTitle: "1. משטר שוק מקרו (Macro Regime)",
                     criteria: buyNodesRaw[0]?.criteria || "BTC > SMA150",
@@ -1745,7 +2011,7 @@ function renderPipelineStepper(data) {
                     explanation: "בדיקת בסיס: האם השוק הכללי נמצא במשטר עולה (BULL REGIME). ללא אישור מקרו, לא נפתחות פוזיציות חדשות."
                 },
                 {
-                    id: `${coin}_buy_2`,
+                    id: `dash_${coin}_buy_2`,
                     shortTitle: "2. Trend Structure",
                     fullTitle: "2. מבנה ממוצעים (EMA Alignment)",
                     criteria: buyNodesRaw[1]?.criteria || "Regime in [STRONG_BULL, TREND]",
@@ -1754,7 +2020,7 @@ function renderPipelineStepper(data) {
                     explanation: `בודק ש-${coin} נמצא במגמת עלייה טכנית מובהקת בממוצעים הנעים (EMA20 > EMA50 > EMA200).`
                 },
                 {
-                    id: `${coin}_buy_3`,
+                    id: `dash_${coin}_buy_3`,
                     shortTitle: "3. Donchian 30",
                     fullTitle: "3. פריצת דונצ'יאן 30 (Donchian High)",
                     criteria: buyNodesRaw[2]?.criteria || `Close >= $${coinData.donchian30}`,
@@ -1763,7 +2029,7 @@ function renderPipelineStepper(data) {
                     explanation: `טריגר כניסה קלאסי! סגירת נר 4 שעות של ${coin} מעל שיא 30 הנרות האחרונים ($${coinData.donchian30}).`
                 },
                 {
-                    id: `${coin}_buy_4`,
+                    id: `dash_${coin}_buy_4`,
                     shortTitle: "4. ADX Filter",
                     fullTitle: "4. עוצמת מגמה (ADX Filter)",
                     criteria: buyNodesRaw[3]?.criteria || `ADX >= ${coinData.min_adx}`,
@@ -1776,23 +2042,9 @@ function renderPipelineStepper(data) {
             const isPosActive = coinData.position && coinData.position.active;
             const allBuyPass = buyNodes.every(n => n.met);
 
-            let outcomeTitle = "";
-            let outcomePillClass = "";
-            let outcomeIcon = "";
-
-            if (isPosActive) {
-                outcomeTitle = "✅ POS ACTIVE";
-                outcomePillClass = "pass";
-                outcomeIcon = "✅";
-            } else if (allBuyPass) {
-                outcomeTitle = "🚀 BUY SIGNAL";
-                outcomePillClass = "pass";
-                outcomeIcon = "🚀";
-            } else {
-                outcomeTitle = "⏳ WAITING";
-                outcomePillClass = "fail";
-                outcomeIcon = "⏳";
-            }
+            let outcomeTitle = isPosActive ? "✅ POS ACTIVE" : (allBuyPass ? "🚀 BUY SIGNAL" : "⏳ WAITING");
+            let outcomePillClass = isPosActive || allBuyPass ? "pass" : "fail";
+            let outcomeIcon = isPosActive ? "✅" : (allBuyPass ? "🚀" : "⏳");
 
             html += `
                 <div class="pipeline-card">
@@ -1837,7 +2089,6 @@ function renderPipelineStepper(data) {
                 }
             });
 
-            // Connector to outcome
             html += `
                     <div class="pipeline-connector ${allBuyPass ? 'pass' : 'fail'}"></div>
                     <div class="pipeline-node-wrapper">
@@ -1857,7 +2108,7 @@ function renderPipelineStepper(data) {
 
             const sellNodes = [
                 {
-                    id: `${coin}_sell_1`,
+                    id: `dash_${coin}_sell_1`,
                     shortTitle: "1. Bear Exit",
                     fullTitle: "1. יציאת חירום דובים ושורט (Bear Exit & Short)",
                     criteria: sellNodesRaw[0]?.criteria || "BTC < SMA150",
@@ -1866,7 +2117,7 @@ function renderPipelineStepper(data) {
                     explanation: "במשטר דובים (BEAR), הבוט מורה על סגירה מיידית של פוזיציית הלונג ופתיחת 15% שורט להגנה."
                 },
                 {
-                    id: `${coin}_sell_2`,
+                    id: `dash_${coin}_sell_2`,
                     shortTitle: "2. Initial Stop",
                     fullTitle: "2. סטופ סיכון ראשוני (Initial Risk Stop)",
                     criteria: sellNodesRaw[1]?.criteria || `Initial Stop = $${pos.initial_stop || '--'}`,
@@ -1875,7 +2126,7 @@ function renderPipelineStepper(data) {
                     explanation: "מגן מפני הפסד כבד בעסקה חדשה! אם המחיר צונח מתחת למחיר כניסה מינוס ATR, מבוצעת יציאה מבוקרת."
                 },
                 {
-                    id: `${coin}_sell_3`,
+                    id: `dash_${coin}_sell_3`,
                     shortTitle: "3. ATR Trailing",
                     fullTitle: "3. סטופ נגרר דינמי (ATR Trailing Stop)",
                     criteria: sellNodesRaw[2]?.criteria || `Trailing Stop = $${pos.trailing_stop || '--'}`,
@@ -1884,7 +2135,7 @@ function renderPipelineStepper(data) {
                     explanation: "נעילת רווחים אוטומטית! הסטופ עולה יחד עם טיפוס המחיר לשיאים חדשים, וקוטע את הפוזיציה בעת תיקון."
                 },
                 {
-                    id: `${coin}_sell_4`,
+                    id: `dash_${coin}_sell_4`,
                     shortTitle: "4. EMA Exit",
                     fullTitle: "4. שבירת ממוצעים (EMA Breakdown Exit)",
                     criteria: sellNodesRaw[3]?.criteria || "Close < EMA50 / EMA200",
@@ -1914,7 +2165,7 @@ function renderPipelineStepper(data) {
 
             sellNodes.forEach((node, idx) => {
                 const isTriggered = node.triggered;
-                const isPass = !isTriggered; // Pass = No Sell Trigger (Safe)
+                const isPass = !isTriggered;
                 const circleClass = isPass ? "pass" : "fail";
                 const icon = isPass ? "🛡️" : "🚨";
                 const statusText = isPass ? "✓ בטוח" : "🚨 הופעל!";
@@ -1944,7 +2195,6 @@ function renderPipelineStepper(data) {
                 }
             });
 
-            // Connector to outcome
             html += `
                     <div class="pipeline-connector ${!sellTriggered ? 'pass' : 'fail'}"></div>
                     <div class="pipeline-node-wrapper">
@@ -1962,13 +2212,20 @@ function renderPipelineStepper(data) {
     container.innerHTML = html;
 }
 
+function renderPipelineStepper(data) {
+    renderDashboardPipeline(data);
+}
+
 function renderStrategyConditions(data) {
     if (!data) return;
 
-    // Render Binary Tree
+    // 1. Render Binary Tree (Inside modal)
     renderBinaryTree(data);
 
-    // 1. Render Macro Regime Banner
+    // 2. Render Connected Node Pipeline (On main dashboard card)
+    renderDashboardPipeline(data);
+
+    // 3. Render Macro Regime Banner
     const macro = data.macro_regime || {};
     const isBull = macro.regime === "BULL";
     const regimeBadge = document.getElementById("macroBannerRegime");
