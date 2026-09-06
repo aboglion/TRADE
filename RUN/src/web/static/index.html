@@ -523,32 +523,33 @@
                 <button class="modal-close" id="closeConditionsModal" onclick="closeConditionsModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <!-- Tab Selector: Binary Tree vs Live Gauges vs Rules Diagram -->
+                <!-- Tab Selector: Conditions Pipeline vs Live Gauges vs Rules Diagram -->
                 <div class="conditions-tabs">
-                    <button class="cond-tab-btn active" id="tabBinaryTreeBtn" onclick="switchConditionsTab('tree')">🌳 עץ תנאים בינארי (Binary Tree)</button>
+                    <button class="cond-tab-btn active" id="tabBinaryTreeBtn" onclick="switchConditionsTab('tree')">🟢🔴 צינור תנאי מסחר (Conditions Pipeline)</button>
                     <button class="cond-tab-btn" id="tabLiveConditionsBtn" onclick="switchConditionsTab('live')">📊 מדדים בלייב (Live Gauges)</button>
                     <button class="cond-tab-btn" id="tabStrategyRulesBtn" onclick="switchConditionsTab('rules')">🗺️ מדריך תנאים (Rules Guide)</button>
                 </div>
 
-                <!-- Tab 1 Content: Interactive Visual Binary Tree -->
+                <!-- Tab 1 Content: Interactive Visual Pipeline Stepper -->
                 <div class="cond-tab-content active" id="tabBinaryTreeContent">
                     <!-- Tree Control Bar -->
                     <div class="tree-controls-bar">
                         <div class="tree-controls-group">
                             <span class="tree-control-label">נכס למעקב (Asset):</span>
                             <div class="tree-pill-selector" id="treeCoinSelector">
-                                <button class="tree-pill-btn active" data-coin="BTC">₿ BTC</button>
+                                <button class="tree-pill-btn active" data-coin="ALL">🌐 הכל (ALL)</button>
+                                <button class="tree-pill-btn" data-coin="BTC">₿ BTC</button>
                                 <button class="tree-pill-btn" data-coin="ETH">⟠ ETH</button>
                                 <button class="tree-pill-btn" data-coin="SOL">◎ SOL</button>
                             </div>
                         </div>
 
                         <div class="tree-controls-group">
-                            <span class="tree-control-label">סוג עץ (Tree Type):</span>
+                            <span class="tree-control-label">סוג צינור (Pipeline Type):</span>
                             <div class="tree-pill-selector" id="treeModeSelector">
-                                <button class="tree-pill-btn active tree-btn-buy" data-mode="BUY">🟢 עץ תנאי קנייה (BUY)</button>
-                                <button class="tree-pill-btn tree-btn-sell" data-mode="SELL">🔴 עץ תנאי מכירה (SELL)</button>
-                                <button class="tree-pill-btn tree-btn-risk" data-mode="RISK">⚡ עץ סיכונים (RISK GUARD)</button>
+                                <button class="tree-pill-btn active tree-btn-buy" data-mode="BUY">🟢 צינור קנייה (BUY)</button>
+                                <button class="tree-pill-btn tree-btn-sell" data-mode="SELL">🔴 צינור מכירה (SELL)</button>
+                                <button class="tree-pill-btn tree-btn-risk" data-mode="RISK">⚡ צינור סיכונים (RISK)</button>
                             </div>
                         </div>
                     </div>

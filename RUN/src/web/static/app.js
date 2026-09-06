@@ -1425,7 +1425,7 @@ async function saveTelegramConfig() {
 // ── Strategy Conditions Modal & Binary Tree Handlers ───────────
 
 let latestConditionsData = null;
-let selectedTreeCoin = "BTC";
+let selectedTreeCoin = "ALL";
 let selectedTreeMode = "BUY"; // "BUY", "SELL", "RISK"
 
 function initBinaryTreeControls() {
@@ -1458,6 +1458,19 @@ function initBinaryTreeControls() {
             }
         });
     }
+
+    // Touch & Click popover toggle handler for mobile/desktop
+    document.addEventListener("click", (e) => {
+        const wrapper = e.target.closest(".pipeline-node-wrapper");
+        if (wrapper) {
+            document.querySelectorAll(".pipeline-node-wrapper.active").forEach(w => {
+                if (w !== wrapper) w.classList.remove("active");
+            });
+            wrapper.classList.toggle("active");
+        } else {
+            document.querySelectorAll(".pipeline-node-wrapper.active").forEach(w => w.classList.remove("active"));
+        }
+    });
 }
 
 window.openDryRunModal = openDryRunModal;
@@ -1562,213 +1575,388 @@ async function fetchStrategyConditions() {
 }
 
 function renderBinaryTree(data) {
+    renderPipelineStepper(data);
+}
+
+function renderPipelineStepper(data) {
     const container = document.getElementById("binaryTreeContainer");
     if (!container || !data) return;
 
     const assets = data.assets || {};
     const macro = data.macro_regime || {};
-    const coinData = assets[selectedTreeCoin];
 
-    let isBuyMode = selectedTreeMode === "BUY";
-    let isSellMode = selectedTreeMode === "SELL";
-    let isRiskMode = selectedTreeMode === "RISK";
-
-    if (!coinData && !isRiskMode) {
-        container.innerHTML = `<div class="empty-state">⏳ טוען נתוני שוק חיה עבור ${selectedTreeCoin}...</div>`;
-        return;
+    let coinsToRender = [];
+    if (selectedTreeCoin === "ALL") {
+        coinsToRender = ["BTC", "ETH", "SOL"];
+    } else if (assets[selectedTreeCoin]) {
+        coinsToRender = [selectedTreeCoin];
+    } else {
+        coinsToRender = ["BTC", "ETH", "SOL"];
     }
 
-    let nodes = [];
-    let treeTitle = "";
-    let treeSub = "";
+    let modesToRender = [];
+    if (selectedTreeMode === "BUY") {
+        modesToRender = ["BUY"];
+    } else if (selectedTreeMode === "SELL") {
+        modesToRender = ["SELL"];
+    } else if (selectedTreeMode === "RISK") {
+        modesToRender = ["RISK"];
+    } else {
+        modesToRender = ["BUY", "SELL"];
+    }
 
-    if (isBuyMode) {
-        treeTitle = `עץ תנאי כניסה (BUY TREE) — ${selectedTreeCoin}`;
-        treeSub = "בדיקה בינארית מדורגת של תנאי הסף לקנייה ופתיחת פוזיציה בלונג";
-        nodes = coinData ? (coinData.buy_tree_nodes || []) : [];
-    } else if (isSellMode) {
-        treeTitle = `עץ תנאי יציאה ומכירה (SELL TREE) — ${selectedTreeCoin}`;
-        treeSub = "בדיקה בינארית של טריגרים ליציאה, סטופ-לוס וקטיעת הפסד/רווח";
-        nodes = coinData ? (coinData.sell_tree_nodes || []) : [];
-    } else if (isRiskMode) {
-        treeTitle = "עץ ניהול סיכונים ומינוף (RISK GUARD TREE)";
-        treeSub = "הערכת סיכוני מקרו לקביעת רמת הטיפול והמינוף (15% Short / 1.0x / 2.0x)";
+    let html = `<div class="pipeline-stepper-container">`;
+
+    // 1. If RISK mode selected (or in ALL), render Macro Risk Guard Pipeline first
+    if (modesToRender.includes("RISK")) {
         const isBull = macro.regime === "BULL";
         const pullback = macro.pullback_pct || 0;
         const underEma = !!macro.under_ema20_daily;
+        const riskActive = !!macro.risk_guard_active;
+        const lev = macro.effective_leverage || 1.0;
 
-        nodes = [
+        const riskNodes = [
             {
-                id: "risk_node_regime",
-                title: "משטר שוק מקרו (Macro Regime)",
-                subtitle: "בדיקת מחיר סגירה יומי של BTC מול ממוצע 150 ימים",
-                criteria: "BTC Daily Close > SMA150",
-                actual: isBull ? `BULL REGIME (BTC $${(macro.btc_close||0).toLocaleString()} > SMA $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME (BTC $${(macro.btc_close||0).toLocaleString()} < SMA $${(macro.btc_sma150||0).toLocaleString()})`,
+                id: "risk_1",
+                shortTitle: "1. משטר מקרו",
+                fullTitle: "1. משטר שוק מקרו (Macro Regime)",
+                criteria: "BTC Daily Close > SMA150 ($70,085)",
+                actual: isBull ? `BULL REGIME ($${(macro.btc_close||0).toLocaleString()} > $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME ($${(macro.btc_close||0).toLocaleString()} < $${(macro.btc_sma150||0).toLocaleString()})`,
                 met: isBull,
+                explanation: "מאמת ששוק הקריפטו נמצא במגמת עלייה ראשית. כשהנר היומי של ביטקוין מעל ממוצע 150 יום, מאושר מסחר ממונף בלונגים."
             },
             {
-                id: "risk_node_pullback",
-                title: "הגנת נסיגה מהשיא (Pullback Guard)",
-                subtitle: "בדיקה אם ביטקוין ירד מעבר ל-8% משיא שוק השוורים",
-                criteria: "Pullback > -8.0% from Peak",
-                actual: `${pullback.toFixed(2)}% (Peak $${(macro.bull_peak||0).toLocaleString()})`,
+                id: "risk_2",
+                shortTitle: "2. הגנת נסיגה",
+                fullTitle: "2. הגנת נסיגה מהשיא (Pullback Guard)",
+                criteria: "Pullback > -8.0% משיא השוק",
+                actual: `${pullback.toFixed(2)}% (שיא $${(macro.bull_peak||0).toLocaleString()})`,
                 met: pullback >= -8.0,
+                explanation: "אם ביטקוין חווה נסיגה קשה של מעל 8% משיא השוק, מופעל מנגנון הגנה דינמי שמוריד את המינוף מ-2.0x ל-1.0x למניעת סיכון."
             },
             {
-                id: "risk_node_ema",
-                title: "ממוצע 20 יומי (EMA20 Daily Guard)",
-                subtitle: "בדיקת תמיכה טכנית קצרת טווח בממוצע 20 יום",
+                id: "risk_3",
+                shortTitle: "3. ממוצע EMA20",
+                fullTitle: "3. ממוצע 20 יומי (EMA20 Daily Guard)",
                 criteria: "BTC Daily Close >= EMA20 Daily",
-                actual: underEma ? "מתחת ל-EMA20 (Under EMA20)" : "מעל EMA20 (Above EMA20)",
+                actual: underEma ? "מתחת ל-EMA20 (תחת סיכון)" : "מעל EMA20 (מגמה חזקה)",
                 met: !underEma,
+                explanation: "בדיקת תמיכה טכנית קצרת טווח. כשהמחיר מתחת ל-EMA20, המערכת מצמצמת חשיפה ומורידה מינוף ל-1.0x."
             }
         ];
-    }
 
-    let html = `<div class="binary-tree-flow">`;
+        let outcomeText = "";
+        let outcomeClass = "";
+        let outcomeIcon = "";
 
-    // Render Root Node Card
-    html += `
-        <div class="tree-root-card">
-            <span class="root-badge">🌳 START ROOT NODE</span>
-            <div class="root-title">${treeTitle}</div>
-            <div class="root-subtitle">${treeSub}</div>
-        </div>
-        <div class="tree-branch-container">
-            <div class="tree-branch-line tree-branch-pass"></div>
-            <span class="tree-branch-label label-pass">START ⬇️</span>
-        </div>
-    `;
-
-    let allPassed = true;
-
-    nodes.forEach((node, index) => {
-        const isMet = isRiskMode ? node.met : (isBuyMode ? node.met : !node.triggered);
-        if (!isMet) allPassed = false;
-
-        const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
-        const badgeClass = isMet ? "badge-pass" : "badge-fail";
-        const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
-        const icon = isMet ? "🟢" : "🔴";
-        const stepNum = index + 1;
-        const totalSteps = nodes.length;
+        if (macro.regime === "BEAR") {
+            outcomeText = "🐻 BEAR (85% USDT + 15% SHORT)";
+            outcomeClass = "sell-triggered";
+            outcomeIcon = "🐻";
+        } else if (riskActive) {
+            outcomeText = "⚠️ RISK GUARD (1.0x)";
+            outcomeClass = "fail";
+            outcomeIcon = "⚠️";
+        } else {
+            outcomeText = "⚡ BULL LEVERAGE (2.0x)";
+            outcomeClass = "pass";
+            outcomeIcon = "🚀";
+        }
 
         html += `
-            <div class="tree-node ${nodeClass}">
-                <div class="tree-node-header">
-                    <div style="display: flex; flex-direction: column; gap: 2px;">
-                        <span class="tree-node-title">${icon} שלב ${stepNum}/${totalSteps}: ${node.title}</span>
-                        ${node.subtitle ? `<span class="tree-node-subtitle" style="font-size: 0.78rem; color: #94a3b8; font-weight: 500;">${node.subtitle}</span>` : ''}
+            <div class="pipeline-card">
+                <div class="pipeline-card-header">
+                    <div class="pipeline-coin-info">
+                        <span class="pipeline-coin-badge">⚡ MACRO & RISK GUARD</span>
+                        <span class="pipeline-type-tag risk">RISK PIPELINE</span>
                     </div>
-                    <span class="tree-node-status-badge ${badgeClass}">${badgeText}</span>
+                    <span class="pipeline-outcome-pill ${outcomeClass}">${outcomeIcon} ${outcomeText}</span>
                 </div>
-                <div class="tree-node-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; background: rgba(0,0,0,0.25); padding: 0.65rem 0.85rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-top: 0.35rem;">
-                    <div>
-                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 700;">🎯 תנאי מבוקש (Target Rule)</div>
-                        <div class="tree-node-criteria" style="font-size: 0.85rem; color: #e2e8f0; font-weight: 600; margin-top: 2px;">${node.criteria}</div>
+                <div class="pipeline-track">
+        `;
+
+        riskNodes.forEach((node, idx) => {
+            const isPass = node.met;
+            const circleClass = isPass ? "pass" : "fail";
+            const icon = isPass ? "✓" : "✗";
+            const statusText = isPass ? "✓ תקין" : "✗ מופעל";
+
+            html += `
+                <div class="pipeline-node-wrapper" data-node-id="${node.id}">
+                    <div class="pipeline-node-circle ${circleClass}">${icon}</div>
+                    <span class="pipeline-node-label">${node.shortTitle}</span>
+                    <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
+                    
+                    <div class="pipeline-popover">
+                        <div class="popover-header">
+                            <span class="popover-title">${node.fullTitle}</span>
+                            <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ MET' : '✗ UNMET'}</span>
+                        </div>
+                        <div class="popover-grid">
+                            <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
+                            <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
+                        </div>
+                        <div class="popover-explanation">💡 ${node.explanation}</div>
                     </div>
-                    <div>
-                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 700;">📊 נתון בלייב (Live Data)</div>
-                        <div class="tree-node-actual" style="font-size: 0.85rem; margin-top: 2px;">${node.actual}</div>
+                </div>
+            `;
+
+            if (idx < riskNodes.length - 1) {
+                const connPass = isPass;
+                html += `<div class="pipeline-connector ${connPass ? 'pass' : 'fail'}"></div>`;
+            }
+        });
+
+        // Connector to outcome
+        const allRiskPass = riskNodes.every(n => n.met);
+        html += `
+                <div class="pipeline-connector ${allRiskPass ? 'pass' : 'fail'}"></div>
+                <div class="pipeline-node-wrapper">
+                    <div class="pipeline-node-circle ${allRiskPass ? 'pass' : (macro.regime === 'BEAR' ? 'fail' : 'fail')}">${outcomeIcon}</div>
+                    <span class="pipeline-node-label">תוצאת סיכון</span>
+                    <span class="pipeline-node-sub ${allRiskPass ? 'pass' : 'fail'}">${lev.toFixed(1)}x</span>
+                </div>
+            </div>
+        </div>
+        `;
+    }
+
+    // 2. Render Coin Pipelines (BUY / SELL for each selected coin)
+    coinsToRender.forEach(coin => {
+        const coinData = assets[coin];
+        if (!coinData) return;
+
+        const iconMap = { BTC: "₿", ETH: "⟠", SOL: "◎" };
+        const coinIcon = iconMap[coin] || "🪙";
+
+        // BUY PIPELINE
+        if (modesToRender.includes("BUY")) {
+            const buyNodesRaw = coinData.buy_tree_nodes || [];
+            const buyConds = coinData.entry_conditions || {};
+
+            const buyNodes = [
+                {
+                    id: `${coin}_buy_1`,
+                    shortTitle: "1. Macro Regime",
+                    fullTitle: "1. משטר שוק מקרו (Macro Regime)",
+                    criteria: buyNodesRaw[0]?.criteria || "BTC > SMA150",
+                    actual: buyNodesRaw[0]?.actual || "",
+                    met: !!buyNodesRaw[0]?.met,
+                    explanation: "בדיקת בסיס: האם השוק הכללי נמצא במשטר עולה (BULL REGIME). ללא אישור מקרו, לא נפתחות פוזיציות חדשות."
+                },
+                {
+                    id: `${coin}_buy_2`,
+                    shortTitle: "2. Trend Structure",
+                    fullTitle: "2. מבנה ממוצעים (EMA Alignment)",
+                    criteria: buyNodesRaw[1]?.criteria || "Regime in [STRONG_BULL, TREND]",
+                    actual: buyNodesRaw[1]?.actual || "",
+                    met: !!buyNodesRaw[1]?.met,
+                    explanation: `בודק ש-${coin} נמצא במגמת עלייה טכנית מובהקת בממוצעים הנעים (EMA20 > EMA50 > EMA200).`
+                },
+                {
+                    id: `${coin}_buy_3`,
+                    shortTitle: "3. Donchian 30",
+                    fullTitle: "3. פריצת דונצ'יאן 30 (Donchian High)",
+                    criteria: buyNodesRaw[2]?.criteria || `Close >= $${coinData.donchian30}`,
+                    actual: buyNodesRaw[2]?.actual || `$${coinData.close} (${buyConds.donchian_gap_pct >= 0 ? '+' : ''}${buyConds.donchian_gap_pct}%)`,
+                    met: !!buyNodesRaw[2]?.met,
+                    explanation: `טריגר כניסה קלאסי! סגירת נר 4 שעות של ${coin} מעל שיא 30 הנרות האחרונים ($${coinData.donchian30}).`
+                },
+                {
+                    id: `${coin}_buy_4`,
+                    shortTitle: "4. ADX Filter",
+                    fullTitle: "4. עוצמת מגמה (ADX Filter)",
+                    criteria: buyNodesRaw[3]?.criteria || `ADX >= ${coinData.min_adx}`,
+                    actual: buyNodesRaw[3]?.actual || `${coinData.adx}`,
+                    met: !!buyNodesRaw[3]?.met,
+                    explanation: `סינון דשדוש! מדד ADX (${coinData.adx}) חייב להיות מעל ${coinData.min_adx} כדי למנוע כניסות סרק בשוק ללא מומנטום.`
+                }
+            ];
+
+            const isPosActive = coinData.position && coinData.position.active;
+            const allBuyPass = buyNodes.every(n => n.met);
+
+            let outcomeTitle = "";
+            let outcomePillClass = "";
+            let outcomeIcon = "";
+
+            if (isPosActive) {
+                outcomeTitle = "✅ POS ACTIVE";
+                outcomePillClass = "pass";
+                outcomeIcon = "✅";
+            } else if (allBuyPass) {
+                outcomeTitle = "🚀 BUY SIGNAL";
+                outcomePillClass = "pass";
+                outcomeIcon = "🚀";
+            } else {
+                outcomeTitle = "⏳ WAITING";
+                outcomePillClass = "fail";
+                outcomeIcon = "⏳";
+            }
+
+            html += `
+                <div class="pipeline-card">
+                    <div class="pipeline-card-header">
+                        <div class="pipeline-coin-info">
+                            <span class="pipeline-coin-badge">${coinIcon} ${coin}/USDT</span>
+                            <span class="pipeline-type-tag buy">BUY PIPELINE</span>
+                        </div>
+                        <span class="pipeline-outcome-pill ${outcomePillClass}">${outcomeIcon} ${outcomeTitle}</span>
+                    </div>
+                    <div class="pipeline-track">
+            `;
+
+            buyNodes.forEach((node, idx) => {
+                const isPass = node.met;
+                const circleClass = isPass ? "pass" : "fail";
+                const icon = isPass ? "✓" : "✗";
+                const statusText = isPass ? "✓ מתקיים" : "✗ ממתין";
+
+                html += `
+                    <div class="pipeline-node-wrapper" data-node-id="${node.id}">
+                        <div class="pipeline-node-circle ${circleClass}">${icon}</div>
+                        <span class="pipeline-node-label">${node.shortTitle}</span>
+                        <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
+                        
+                        <div class="pipeline-popover">
+                            <div class="popover-header">
+                                <span class="popover-title">${node.fullTitle}</span>
+                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ MET' : '✗ UNMET'}</span>
+                            </div>
+                            <div class="popover-grid">
+                                <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
+                                <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
+                            </div>
+                            <div class="popover-explanation">💡 ${node.explanation}</div>
+                        </div>
+                    </div>
+                `;
+
+                if (idx < buyNodes.length - 1) {
+                    html += `<div class="pipeline-connector ${isPass ? 'pass' : 'fail'}"></div>`;
+                }
+            });
+
+            // Connector to outcome
+            html += `
+                    <div class="pipeline-connector ${allBuyPass ? 'pass' : 'fail'}"></div>
+                    <div class="pipeline-node-wrapper">
+                        <div class="pipeline-node-circle ${allBuyPass || isPosActive ? 'pass' : 'fail'}">${outcomeIcon}</div>
+                        <span class="pipeline-node-label">תוצאת קנייה</span>
+                        <span class="pipeline-node-sub ${allBuyPass || isPosActive ? 'pass' : 'fail'}">${isPosActive ? 'פוזיציה פעילה' : (allBuyPass ? 'אות קנייה' : 'חסום לקנייה')}</span>
                     </div>
                 </div>
             </div>
-        `;
+            `;
+        }
 
-        // Connecting Branch Line to next step
-        if (index < nodes.length - 1) {
-            const branchClass = isMet ? "tree-branch-pass" : "tree-branch-fail";
-            const labelClass = isMet ? "label-pass" : "label-fail";
-            const labelText = isMet ? "YES 🟢 (המשך לשלב הבא)" : "NO 🔴 (חסום בשלב זה)";
+        // SELL PIPELINE
+        if (modesToRender.includes("SELL")) {
+            const sellNodesRaw = coinData.sell_tree_nodes || [];
+            const pos = coinData.position || {};
+
+            const sellNodes = [
+                {
+                    id: `${coin}_sell_1`,
+                    shortTitle: "1. Bear Exit",
+                    fullTitle: "1. יציאת חירום דובים ושורט (Bear Exit & Short)",
+                    criteria: sellNodesRaw[0]?.criteria || "BTC < SMA150",
+                    actual: sellNodesRaw[0]?.actual || "",
+                    triggered: !!sellNodesRaw[0]?.triggered,
+                    explanation: "במשטר דובים (BEAR), הבוט מורה על סגירה מיידית של פוזיציית הלונג ופתיחת 15% שורט להגנה."
+                },
+                {
+                    id: `${coin}_sell_2`,
+                    shortTitle: "2. Initial Stop",
+                    fullTitle: "2. סטופ סיכון ראשוני (Initial Risk Stop)",
+                    criteria: sellNodesRaw[1]?.criteria || `Initial Stop = $${pos.initial_stop || '--'}`,
+                    actual: sellNodesRaw[1]?.actual || `Low $${coinData.low}`,
+                    triggered: !!sellNodesRaw[1]?.triggered,
+                    explanation: "מגן מפני הפסד כבד בעסקה חדשה! אם המחיר צונח מתחת למחיר כניסה מינוס ATR, מבוצעת יציאה מבוקרת."
+                },
+                {
+                    id: `${coin}_sell_3`,
+                    shortTitle: "3. ATR Trailing",
+                    fullTitle: "3. סטופ נגרר דינמי (ATR Trailing Stop)",
+                    criteria: sellNodesRaw[2]?.criteria || `Trailing Stop = $${pos.trailing_stop || '--'}`,
+                    actual: sellNodesRaw[2]?.actual || `Low $${coinData.low}`,
+                    triggered: !!sellNodesRaw[2]?.triggered,
+                    explanation: "נעילת רווחים אוטומטית! הסטופ עולה יחד עם טיפוס המחיר לשיאים חדשים, וקוטע את הפוזיציה בעת תיקון."
+                },
+                {
+                    id: `${coin}_sell_4`,
+                    shortTitle: "4. EMA Exit",
+                    fullTitle: "4. שבירת ממוצעים (EMA Breakdown Exit)",
+                    criteria: sellNodesRaw[3]?.criteria || "Close < EMA50 / EMA200",
+                    actual: sellNodesRaw[3]?.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
+                    triggered: !!sellNodesRaw[3]?.triggered,
+                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 מעידה על סיום מומנטום העלייה ומחייבת מכירה."
+                }
+            ];
+
+            const sellTriggered = sellNodes.some(n => n.triggered);
+
+            let outcomeTitle = sellTriggered ? "🚨 EXIT TRIGGERED" : "🛡️ POSITION SAFE";
+            let outcomePillClass = sellTriggered ? "sell-triggered" : "pass";
+            let outcomeIcon = sellTriggered ? "🚨" : "🛡️";
+
             html += `
-                <div class="tree-branch-container">
-                    <div class="tree-branch-line ${branchClass}"></div>
-                    <span class="tree-branch-label ${labelClass}">${labelText}</span>
+                <div class="pipeline-card">
+                    <div class="pipeline-card-header">
+                        <div class="pipeline-coin-info">
+                            <span class="pipeline-coin-badge">${coinIcon} ${coin}/USDT</span>
+                            <span class="pipeline-type-tag sell">SELL PIPELINE</span>
+                        </div>
+                        <span class="pipeline-outcome-pill ${outcomePillClass}">${outcomeIcon} ${outcomeTitle}</span>
+                    </div>
+                    <div class="pipeline-track">
+            `;
+
+            sellNodes.forEach((node, idx) => {
+                const isTriggered = node.triggered;
+                const isPass = !isTriggered; // Pass = No Sell Trigger (Safe)
+                const circleClass = isPass ? "pass" : "fail";
+                const icon = isPass ? "🛡️" : "🚨";
+                const statusText = isPass ? "✓ בטוח" : "🚨 הופעל!";
+
+                html += `
+                    <div class="pipeline-node-wrapper" data-node-id="${node.id}">
+                        <div class="pipeline-node-circle ${circleClass}">${icon}</div>
+                        <span class="pipeline-node-label">${node.shortTitle}</span>
+                        <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
+                        
+                        <div class="pipeline-popover">
+                            <div class="popover-header">
+                                <span class="popover-title">${node.fullTitle}</span>
+                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ SAFE (לא הופעל)' : '🚨 TRIGGERED (הופעל!)'}</span>
+                            </div>
+                            <div class="popover-grid">
+                                <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
+                                <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
+                            </div>
+                            <div class="popover-explanation">💡 ${node.explanation}</div>
+                        </div>
+                    </div>
+                `;
+
+                if (idx < sellNodes.length - 1) {
+                    html += `<div class="pipeline-connector ${isPass ? 'pass' : 'fail'}"></div>`;
+                }
+            });
+
+            // Connector to outcome
+            html += `
+                    <div class="pipeline-connector ${!sellTriggered ? 'pass' : 'fail'}"></div>
+                    <div class="pipeline-node-wrapper">
+                        <div class="pipeline-node-circle ${!sellTriggered ? 'pass' : 'fail'}">${outcomeIcon}</div>
+                        <span class="pipeline-node-label">תוצאת מכירה</span>
+                        <span class="pipeline-node-sub ${!sellTriggered ? 'pass' : 'fail'}">${!sellTriggered ? 'אין טריגר מכירה' : 'טריגר מכירה פעיל!'}</span>
+                    </div>
                 </div>
+            </div>
             `;
         }
     });
-
-    // Connecting Branch to Leaf Outcome Node
-    const branchToLeafClass = allPassed ? "tree-branch-pass" : "tree-branch-fail";
-    const branchToLeafLabel = allPassed ? "YES 🟢 (סיום בהצלחה)" : "NO 🔴 (תוצאה סופית)";
-    html += `
-        <div class="tree-branch-container">
-            <div class="tree-branch-line ${branchToLeafClass}"></div>
-            <span class="tree-branch-label ${allPassed ? 'label-pass' : 'label-fail'}">${branchToLeafLabel}</span>
-        </div>
-    `;
-
-    // Render Final Leaf Outcome Node
-    if (isBuyMode) {
-        const isPosActive = coinData && coinData.position && coinData.position.active;
-        if (isPosActive) {
-            html += `
-                <div class="tree-leaf-outcome outcome-buy-success">
-                    <div class="outcome-title">✅ פוזיציה פתוחה ופעילה (ACTIVE POSITION)</div>
-                    <div class="outcome-desc">הבוט מחזיק פוזיציה ב-${selectedTreeCoin}. תנאי הכניסה התקיימו ומנוהלים ע"י סטופ נגרר דינמי.</div>
-                </div>
-            `;
-        } else if (allPassed) {
-            html += `
-                <div class="tree-leaf-outcome outcome-buy-success">
-                    <div class="outcome-title">🚀 אות קנייה פעיל! (BUY SIGNAL TRIGGERED)</div>
-                    <div class="outcome-desc">כל התנאים הבינאריים מתקיימים במלואם! הבוט מורשה לפתוח פוזיציה ב-${selectedTreeCoin}.</div>
-                </div>
-            `;
-        } else {
-            html += `
-                <div class="tree-leaf-outcome outcome-buy-waiting">
-                    <div class="outcome-title">⏳ ממתין להתקיימות תנאים (WAITING FOR ENTRY)</div>
-                    <div class="outcome-desc">לא כל תנאי הקנייה מתקיימים. פתיחת פוזיציה ב-${selectedTreeCoin} כרגע חסומה להגנה על ההון.</div>
-                </div>
-            `;
-        }
-    } else if (isSellMode) {
-        const sellTriggered = nodes.some(n => n.triggered);
-
-        if (sellTriggered) {
-            html += `
-                <div class="tree-leaf-outcome outcome-sell-triggered">
-                    <div class="outcome-title">🚨 טריגר מכירה ויציאה הופעל! (EXIT TRIGGERED)</div>
-                    <div class="outcome-desc">טריגר יציאה הופעל ב-${selectedTreeCoin}! הבוט יבצע סגירה/מכירה מיידית בנכס.</div>
-                </div>
-            `;
-        } else {
-            html += `
-                <div class="tree-leaf-outcome outcome-sell-safe">
-                    <div class="outcome-title">🛡️ פוזיציה בטוחה / אין טריגר מכירה (POSITION SAFE)</div>
-                    <div class="outcome-desc">אף תנאי מכירה לא הופעל ב-${selectedTreeCoin}. הנכס נשאר מוחזק בבטחה.</div>
-                </div>
-            `;
-        }
-    } else if (isRiskMode) {
-        const lev = macro.effective_leverage || 1.0;
-        const riskActive = !!macro.risk_guard_active;
-
-        if (macro.regime === "BEAR") {
-            html += `
-                <div class="tree-leaf-outcome outcome-sell-triggered">
-                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 85% USDT + 15% SHORT HEDGE)</div>
-                    <div class="outcome-desc">סגירת כל פוזיציות הלונג + פתיחת 15% שורט על BTC לגידור והפקת רווחים בירידות, לצד 85% מזומן USDT.</div>
-                </div>
-            `;
-        } else if (riskActive) {
-            html += `
-                <div class="tree-leaf-outcome outcome-buy-waiting">
-                    <div class="outcome-title">⚠️ מנגנון הגנת סיכון פעיל (RISK GUARD ACTIVE — 1.0x)</div>
-                    <div class="outcome-desc">ביטקוין בחוויית תיקון/ירידה. המינוף צומצם ל-1.0x למניעת סיכונים.</div>
-                </div>
-            `;
-        } else {
-            html += `
-                <div class="tree-leaf-outcome outcome-buy-success">
-                    <div class="outcome-title">⚡ מינוף מלא בולארד פעיל (FULL BULL LEVERAGE — 2.0x)</div>
-                    <div class="outcome-desc">שוק עולה חזק ויציב. הבוט פועל במינוף מירבי מורשה 2.0x להשאת תשואה.</div>
-                </div>
-            `;
-        }
-    }
 
     html += `</div>`;
     container.innerHTML = html;
