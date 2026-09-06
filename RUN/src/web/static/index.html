@@ -53,23 +53,23 @@
                 </div>
 
                 <div class="toolbar-actions">
-                    <button class="btn btn-outline" id="manualPullBtn" title="Pull latest code from GitHub now (Manual Git Pull)">
+                    <button class="btn btn-outline" id="manualPullBtn" title="Pull latest code from GitHub now (Manual Git Pull)" onclick="triggerManualPull()">
                         <span>⬇️</span> <span class="btn-text">Git Pull</span>
                     </button>
 
-                    <button class="btn btn-outline" id="toggleUpdaterBtn" title="Enable/Pause automatic updates from GitHub">
+                    <button class="btn btn-outline" id="toggleUpdaterBtn" title="Enable/Pause automatic updates from GitHub" onclick="toggleUpdater()">
                         <span>🔄</span> <span class="btn-text">Auto-Pull Active</span>
                     </button>
 
-                    <button class="btn btn-outline" id="resetStatsBtn" title="Reset PNL and fee statistics for a new session">
+                    <button class="btn btn-outline" id="resetStatsBtn" title="Reset PNL and fee statistics for a new session" onclick="openResetPnlModal()">
                         <span>🧹</span> <span class="btn-text">Reset PNL Stats</span>
                     </button>
 
-                    <button class="btn btn-outline" id="dryRunModalBtn" title="Configure simulation holdings (Dry Run Initial Holdings)">
+                    <button class="btn btn-outline" id="dryRunModalBtn" title="Configure simulation holdings (Dry Run Initial Holdings)" onclick="openDryRunModal()">
                         <span>⚙️</span> <span class="btn-text">Dry Run Balances</span>
                     </button>
 
-                    <button class="btn btn-outline" id="telegramModalBtn" title="Configure Telegram notification alerts (Telegram API Alerts)">
+                    <button class="btn btn-outline" id="telegramModalBtn" title="Configure Telegram notification alerts (Telegram API Alerts)" onclick="openTelegramModal()">
                         <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
                     </button>
 
@@ -77,15 +77,15 @@
                         <span>🎯</span> <span class="btn-text">Strategy Conditions</span>
                     </button>
 
-                    <button class="btn btn-outline" id="triggerCycleBtn" title="Run manual trading cycle immediately (Trigger Cycle)">
+                    <button class="btn btn-outline" id="triggerCycleBtn" title="Run manual trading cycle immediately (Trigger Cycle)" onclick="openTriggerCycleConfirmModal()">
                         <span>⚡</span> <span class="btn-text">Run Bot Cycle</span>
                     </button>
 
-                    <button class="btn btn-outline" id="refreshBtn" title="Force immediate data refresh">
+                    <button class="btn btn-outline" id="refreshBtn" title="Force immediate data refresh" onclick="manualRefresh()">
                         <span>🔄</span> <span class="btn-text">Refresh Data</span>
                     </button>
 
-                    <button class="btn btn-danger" id="killSwitchBtn" title="Emergency Stop! Enable/Disable Kill Switch to block new trading orders">
+                    <button class="btn btn-danger" id="killSwitchBtn" title="Emergency Stop! Enable/Disable Kill Switch to block new trading orders" onclick="openKillSwitchModal()">
                         <span>🛡️</span> <span>KILL SWITCH</span>
                     </button>
                 </div>
@@ -650,6 +650,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=13"></script>
+    <script src="app.js?v=14"></script>
 </body>
 </html>

@@ -38,29 +38,17 @@ async function apiFetch(url, options = {}) {
 document.addEventListener("DOMContentLoaded", async () => {
     initClock();
 
-    // Login listeners
-    const submitBtn = document.getElementById("submitLoginBtn");
-    if (submitBtn) submitBtn.addEventListener("click", performLogin);
-    const passInput = document.getElementById("dashboardPasswordInput");
-    if (passInput) passInput.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") performLogin();
-    });
-
-    const isAuthed = await checkAuthStatus();
-    if (isAuthed) {
-        fetchDashboardData();
-        loadTelegramConfig();
-    }
-    setInterval(fetchDashboardData, 5000);
-
-    initPnlChart();
-    initRegimeChart();
-    initHealthChart();
-
     function safeAddListener(id, event, handler) {
         const el = document.getElementById(id);
         if (el) el.addEventListener(event, handler);
     }
+
+    // Login listeners
+    safeAddListener("submitLoginBtn", "click", performLogin);
+    const passInput = document.getElementById("dashboardPasswordInput");
+    if (passInput) passInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") performLogin();
+    });
 
     // Event listeners with instant visual feedback
     safeAddListener("refreshBtn", "click", manualRefresh);
@@ -153,6 +141,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     safeAddListener("tabStrategyRulesBtn", "click", () => switchConditionsTab("rules"));
 
     initBinaryTreeControls();
+
+    initPnlChart();
+    initRegimeChart();
+    initHealthChart();
+
+    const isAuthed = await checkAuthStatus();
+    if (isAuthed) {
+        fetchDashboardData();
+        loadTelegramConfig();
+    }
+    setInterval(fetchDashboardData, 5000);
 });
 
 async function checkAuthStatus() {
@@ -1107,22 +1106,23 @@ async function confirmResetPnlStats() {
 
 // ── Dry Run Holdings Modal Functions ─────────────────────────
 
-async function openDryRunModal() {
+function openDryRunModal() {
     const modal = document.getElementById("dryRunModal");
-    try {
-        const res = await apiFetch("/api/dry_run/balances");
+    if (modal) modal.classList.add("active");
+    apiFetch("/api/dry_run/balances").then(async res => {
         if (res.ok) {
             const data = await res.json();
             const bal = data.balances || {};
-            document.getElementById("dryUsdtInput").value = bal.USDT !== undefined ? bal.USDT : 1000;
-            document.getElementById("dryBtcInput").value = bal.BTC !== undefined ? bal.BTC : 0;
-            document.getElementById("dryEthInput").value = bal.ETH !== undefined ? bal.ETH : 0;
-            document.getElementById("drySolInput").value = bal.SOL !== undefined ? bal.SOL : 0;
+            const usdt = document.getElementById("dryUsdtInput");
+            if (usdt) usdt.value = bal.USDT !== undefined ? bal.USDT : 1000;
+            const btc = document.getElementById("dryBtcInput");
+            if (btc) btc.value = bal.BTC !== undefined ? bal.BTC : 0;
+            const eth = document.getElementById("dryEthInput");
+            if (eth) eth.value = bal.ETH !== undefined ? bal.ETH : 0;
+            const sol = document.getElementById("drySolInput");
+            if (sol) sol.value = bal.SOL !== undefined ? bal.SOL : 0;
         }
-    } catch (e) {
-        console.error("Failed to load dry run balances:", e);
-    }
-    modal.classList.add("active");
+    }).catch(e => console.error("Failed to load dry run balances:", e));
 }
 
 function closeDryRunModal() {
@@ -1158,8 +1158,6 @@ async function confirmSaveDryRunBalances() {
     const btc = parseFloat(document.getElementById("dryBtcInput").value) || 0;
     const eth = parseFloat(document.getElementById("dryEthInput").value) || 0;
     const sol = parseFloat(document.getElementById("drySolInput").value) || 0;
-
-    const balances = { USDT: usdt, BTC: btc, ETH: eth, SOL: sol };
 
     const confirmBtn = document.getElementById("confirmDryRunSaveBtn");
     const saveBtn = document.getElementById("saveDryRunBalances");
@@ -1462,8 +1460,24 @@ function initBinaryTreeControls() {
     }
 }
 
+window.openDryRunModal = openDryRunModal;
+window.closeDryRunModal = closeDryRunModal;
+window.openTelegramModal = openTelegramModal;
+window.closeTelegramModal = closeTelegramModal;
 window.openConditionsModal = openConditionsModal;
 window.closeConditionsModal = closeConditionsModal;
+window.openKillSwitchModal = openKillSwitchModal;
+window.closeKillSwitchModal = closeKillSwitchModal;
+window.openTriggerCycleModal = openTriggerCycleModal;
+window.openTriggerCycleConfirmModal = openTriggerCycleModal;
+window.closeTriggerCycleConfirmModal = closeTriggerCycleConfirmModal;
+window.openResetPnlModal = openResetPnlModal;
+window.closeResetPnlModal = closeResetPnlModal;
+window.openErrorsModal = openErrorsModal;
+window.closeErrorsModal = closeErrorsModal;
+window.manualRefresh = manualRefresh;
+window.toggleUpdater = toggleUpdater;
+window.triggerManualPull = triggerManualPull;
 window.switchConditionsTab = switchConditionsTab;
 
 async function openConditionsModal() {
