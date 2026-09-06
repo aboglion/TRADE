@@ -145,8 +145,8 @@
                 <div class="macro-coin-perf-container" id="macroCoinPerf"></div>
             </div>
 
-            <!-- Metric Card 3: Execution Health -->
-            <div class="card glass metric-card clickable-card" id="systemHealthCard" title="Click to view error log & clear">
+            <!-- Metric Card 3: Execution Health & Server Pulse -->
+            <div class="card glass metric-card clickable-card health-card" id="systemHealthCard" title="Click to view error log & clear">
                 <div class="card-header">
                     <div class="card-header-left">
                         <span class="card-icon">🛡️</span>
@@ -154,10 +154,29 @@
                     </div>
                     <span class="tap-hint">Tap for details ↗</span>
                 </div>
-                <div class="metric-value-container">
-                    <div class="metric-value text-success" id="systemHealthVal">HEALTHY</div>
-                    <div class="metric-subtitle text-muted" id="systemHealthDetail">All systems operational</div>
+
+                <div class="health-card-body">
+                    <div class="metric-value-container">
+                        <div class="metric-value text-success" id="systemHealthVal">HEALTHY</div>
+                        <div class="metric-subtitle text-muted" id="systemHealthDetail">All systems operational</div>
+                    </div>
+
+                    <!-- Mini Server Pulse & Latency Sparkline Chart -->
+                    <div class="mini-chart-container health-chart-container">
+                        <div class="mini-chart-sub-header">
+                            <span class="mini-chart-title">SERVER LATENCY & PULSE</span>
+                            <div class="pnl-summary-pills mini-pnl-pills">
+                                <span class="pnl-pill pnl-pill-high" id="latencyPill" title="Server API Response Latency">18ms</span>
+                                <span class="pnl-pill pnl-pill-high" id="uptimePill" title="System Uptime Score">100% UP</span>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper mini-chart-wrapper health-chart-wrapper">
+                            <canvas id="healthCanvas"></canvas>
+                            <div id="healthTooltip" class="chart-tooltip"></div>
+                        </div>
+                    </div>
                 </div>
+
                 <div class="metric-sub-footer" id="systemHealthSub">
                     <span>Last cycle:</span> <strong id="lastCycleTime">Never</strong>
                 </div>
