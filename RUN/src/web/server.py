@@ -797,20 +797,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop) else False,
                         },
                         {
-                            "id": "node_micro_tp1",
-                            "title": "4. מיקרו TP1 בשיא הנר (Micro Satellite Intraday TP1)",
-                            "subtitle": "פגיעה בשיא הנר (High) ביעד 2.5 ATR למימוש 50%",
-                            "criteria": f"High >= Entry + 2.5 ATR",
-                            "actual": f"High ${c_high:,.2f}" + (f" vs Target ${entry_px + 2.5 * c_atr:,.2f}" if entry_px > 0 else ""),
-                            "triggered": False,
+                            "id": "node_tp1_partial",
+                            "title": "4. TP1 מימוש חלקי (Partial Take-Profit)",
+                            "subtitle": "מימוש 30% מהפוזיציה כשהרווח מגיע ל-4.5 ATR (מושבת כרגע)",
+                            "criteria": f"High >= Entry + 4.5×ATR (TP1 {'ENABLED' if False else 'DISABLED'})",
+                            "actual": f"High ${c_high:,.2f}" + (f" vs Target ${entry_px + 4.5 * atr_at_entry:,.2f}" if (is_active and entry_px > 0 and atr_at_entry > 0) else " (No Active Position)"),
+                            "triggered": (is_active and entry_px > 0 and atr_at_entry > 0 and c_high >= entry_px + 4.5 * atr_at_entry),
                         },
                         {
                             "id": "node_ema_breakdown",
                             "title": "5. שבירת ממוצעים (EMA Exit)",
-                            "subtitle": "סגירה מתחת ל-EMA50 (Trend) או EMA200 (Strong Bull)",
-                            "criteria": "Close < EMA50 / EMA200",
-                            "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
-                            "triggered": (c_close < ema50) if (entry_mode == "TREND") else ((c_close < ema200) if (entry_mode == "STRONG_BULL_TREND") else False),
+                            "subtitle": "סגירה מתחת ל-EMA50 (Trend בלבד — EMA200 לא פעיל ב-Strong Bull)",
+                            "criteria": "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
+                            "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f} / EMA200 ${ema200:,.2f}",
+                            "triggered": (c_close < ema50) if (entry_mode == "TREND") else False,
                         }
                     ]
 

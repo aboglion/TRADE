@@ -2122,6 +2122,15 @@ function renderDashboardPipeline(data) {
                     actual: buyNodesRaw[3]?.actual || `${coinData.adx}`,
                     met: !!buyNodesRaw[3]?.met,
                     explanation: `סינון דשדוש! מדד ADX (${coinData.adx}) חייב להיות מעל ${coinData.min_adx} כדי למנוע כניסות סרק בשוק ללא מומנטום.`
+                },
+                {
+                    id: `dash_${coin}_buy_5`,
+                    shortTitle: "5. Pyramiding",
+                    fullTitle: "5. פירמידינג והגדלת פוזיציה (Pyramiding Additions)",
+                    criteria: buyNodesRaw[4]?.criteria || "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull)",
+                    actual: buyNodesRaw[4]?.actual || "Initial Entry Mode",
+                    met: !!buyNodesRaw[4]?.met,
+                    explanation: `הוספת פוזיציה ב-${coin} בטרנד חזק (STRONG_BULL_TREND). מותר להוסיף עד 2 כניסות נוספות כאשר הרווח הפתוח מעל 0.6 ATR והתיקון מעל 1.5 ATR, מעל EMA20.`
                 }
             ];
 
@@ -2222,12 +2231,21 @@ function renderDashboardPipeline(data) {
                 },
                 {
                     id: `dash_${coin}_sell_4`,
-                    shortTitle: "4. EMA Exit",
-                    fullTitle: "4. שבירת ממוצעים (EMA Breakdown Exit)",
-                    criteria: sellNodesRaw[3]?.criteria || "Close < EMA50 / EMA200",
-                    actual: sellNodesRaw[3]?.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
+                    shortTitle: "4. TP1 Partial",
+                    fullTitle: "4. TP1 מימוש חלקי (Partial Take-Profit)",
+                    criteria: sellNodesRaw[3]?.criteria || "High >= Entry + 4.5×ATR (TP1 DISABLED)",
+                    actual: sellNodesRaw[3]?.actual || "No Active Position",
                     triggered: !!sellNodesRaw[3]?.triggered,
-                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 מעידה על סיום מומנטום העלייה ומחייבת מכירה."
+                    explanation: "מימוש 30% מהפוזיציה כשהרווח מגיע ל-4.5 ATR מהכניסה. כרגע מושבת (tp1_enabled=False) אך מוצג כאן למעקב."
+                },
+                {
+                    id: `dash_${coin}_sell_5`,
+                    shortTitle: "5. EMA Exit",
+                    fullTitle: "5. שבירת ממוצעים (EMA Breakdown Exit)",
+                    criteria: sellNodesRaw[4]?.criteria || "Close < EMA50 / EMA200",
+                    actual: sellNodesRaw[4]?.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
+                    triggered: !!sellNodesRaw[4]?.triggered,
+                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 (Trend) או EMA200 (Strong Bull) מעידה על סיום מומנטום ומחייבת מכירה."
                 }
             ];
 
