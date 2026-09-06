@@ -270,22 +270,25 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             if not self._require_auth():
                 return
 
-        if clean_path == "/api/status":
+        clean_api_path = clean_path.rstrip("/")
+        if clean_api_path == "/api/status":
             self._handle_status()
-        elif clean_path == "/api/portfolio":
+        elif clean_api_path == "/api/portfolio":
             self._handle_portfolio()
-        elif clean_path == "/api/orders":
+        elif clean_api_path == "/api/orders":
             self._handle_orders()
-        elif clean_path == "/api/logs":
+        elif clean_api_path == "/api/logs":
             self._handle_logs()
-        elif clean_path == "/api/dry_run/balances":
+        elif clean_api_path == "/api/dry_run/balances":
             self._handle_get_dry_run_balances()
-        elif clean_path == "/api/updater":
+        elif clean_api_path == "/api/updater":
             self._handle_get_updater_status()
-        elif clean_path == "/api/telegram":
+        elif clean_api_path == "/api/telegram":
             self._handle_get_telegram()
-        elif clean_path == "/api/strategy/conditions":
+        elif clean_api_path == "/api/strategy/conditions":
             self._handle_strategy_conditions()
+        elif clean_path.startswith("/api/"):
+            self._send_json({"error": f"API endpoint '{clean_path}' not found"}, status=404)
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
             if clean_path in ("/", "", "/index", "/index.html"):
@@ -397,9 +400,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def _handle_status(self) -> None:
         state = self.state_store.load_state() if self.state_store else None
         critical_errors = state.critical_errors if state else []
+        metrics = get_market_metrics_cached()
+        last_regime = state.last_regime if (state and state.last_regime) else None
+        if not last_regime or last_regime == "UNKNOWN":
+            btc_m = metrics.get("BTC", {})
+            if "change_sma150" in btc_m:
+                last_regime = "bull" if btc_m["change_sma150"] >= 0 else "bear"
+            else:
+                last_regime = "bull"
+
         data = {
             "run_mode": self.config.run_mode.name if self.config else "UNKNOWN",
-            "last_regime": state.last_regime if state else "UNKNOWN",
+            "last_regime": last_regime,
             "last_run_ts": state.last_run_ts if state else None,
             "last_cycle_success": state.last_cycle_success if state else True,
             "critical_errors_count": len(critical_errors),
@@ -407,7 +419,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "critical_errors": critical_errors[-5:],
             "kill_switch": self.config.risk.kill_switch if self.config else False,
             "assets": list(self.config.strategy.assets.keys()) if self.config else [],
-            "market_metrics": get_market_metrics_cached(),
+            "market_metrics": metrics,
         }
         self._send_json(data)
 

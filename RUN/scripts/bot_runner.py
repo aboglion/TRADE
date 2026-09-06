@@ -161,6 +161,13 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             })
         elif clean_path == "/api/logs":
             self._handle_logs()
+        elif clean_path.startswith("/api/"):
+            self._send_json({
+                "error": "Trading engine is currently stopped/crashed. Emergency Fallback Server active.",
+                "status": "CRASHED",
+                "exit_code": FallbackCrashHandler.exit_code,
+                "crash_time": FallbackCrashHandler.crash_time
+            }, status=503)
         else:
             self._serve_crash_page()
 

@@ -35,6 +35,21 @@ async function apiFetch(url, options = {}) {
     return res;
 }
 
+async function parseJsonResponse(res) {
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        let snippet = (text || "").trim();
+        if (snippet.length > 80) snippet = snippet.substring(0, 80) + "...";
+        throw new Error(`Server returned non-JSON response (Status ${res.status}): ${snippet || "Empty response"}`);
+    }
+    try {
+        return await res.json();
+    } catch (e) {
+        throw new Error(`Invalid JSON response: ${e.message}`);
+    }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
     initClock();
 
@@ -410,7 +425,15 @@ async function fetchStatus() {
         const macroRegimeVal = document.getElementById("macroRegimeVal");
         const macroRegimeSub = document.getElementById("macroRegimeSub");
 
-        const isBull = (data.last_regime || "").toLowerCase() === "bull";
+        const btcMetrics = data.market_metrics && data.market_metrics.BTC ? data.market_metrics.BTC : null;
+        let isBull = false;
+        if (data.last_regime && data.last_regime !== "UNKNOWN") {
+            isBull = data.last_regime.toLowerCase() === "bull";
+        } else if (btcMetrics && typeof btcMetrics.change_sma150 === "number") {
+            isBull = btcMetrics.change_sma150 >= 0;
+        } else {
+            isBull = true; // Safe default for bull regime
+        }
 
         if (isBull) {
             regimeBadge.className = "status-badge regime-badge";
@@ -429,21 +452,25 @@ async function fetchStatus() {
         }
 
         // Record & Update Macro Regime Trend Chart
-        const btcMetrics = data.market_metrics && data.market_metrics.BTC ? data.market_metrics.BTC : null;
-        const btcSmaGap = btcMetrics ? (btcMetrics.change_sma150 || 0.0) : 0.0;
-        
         const regimeGapPill = document.getElementById("regimeGapPill");
         const regimeLevPill = document.getElementById("regimeLevPill");
-        if (regimeGapPill) {
-            const gapSign = btcSmaGap >= 0 ? "+" : "";
-            regimeGapPill.textContent = `${gapSign}${btcSmaGap.toFixed(2)}%`;
-            regimeGapPill.className = btcSmaGap >= 0 ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
-        }
-        if (regimeLevPill) {
+
+        if (btcMetrics && typeof btcMetrics.change_sma150 === "number") {
+            const btcSmaGap = btcMetrics.change_sma150;
+            if (regimeGapPill) {
+                const gapSign = btcSmaGap >= 0 ? "+" : "";
+                regimeGapPill.textContent = `${gapSign}${btcSmaGap.toFixed(2)}%`;
+                regimeGapPill.className = btcSmaGap >= 0 ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
+            }
+            if (regimeLevPill) {
+                regimeLevPill.textContent = isBull ? "2.0x BULL" : "0.0x BEAR";
+                regimeLevPill.className = isBull ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
+            }
+            recordRegimePoint(btcSmaGap, isBull);
+        } else if (regimeLevPill) {
             regimeLevPill.textContent = isBull ? "2.0x BULL" : "0.0x BEAR";
             regimeLevPill.className = isBull ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
         }
-        recordRegimePoint(btcSmaGap, isBull);
 
         // Update Market Performance Table (BTC, ETH, SOL: 4H, 24H, SMA-150)
         const macroCoinPerf = document.getElementById("macroCoinPerf");
@@ -1588,12 +1615,17 @@ async function fetchStrategyConditions() {
     try {
         const res = await apiFetch("/api/strategy/conditions");
         if (!res.ok) {
-            const errHtml = `<div class="empty-state text-danger">Error loading strategy conditions (Status: ${res.status})</div>`;
+            let errorMsg = `Error loading strategy conditions (Status: ${res.status})`;
+            try {
+                const errData = await parseJsonResponse(res);
+                if (errData && errData.error) errorMsg = errData.error;
+            } catch (e) {}
+            const errHtml = `<div class="empty-state text-danger">⚠️ ${errorMsg}</div>`;
             if (grid) grid.innerHTML = errHtml;
             if (treeContainer) treeContainer.innerHTML = errHtml;
             return;
         }
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         latestConditionsData = data;
         renderStrategyConditions(data);
     } catch (err) {
@@ -3006,6 +3038,14 @@ function initRegimeChart() {
 }
 
 function recordRegimePoint(gapVal, isBull) {
+    // Prevent recording temporary zero-dropouts if previous gap was non-zero
+    if (gapVal === 0.0 && regimePointsData.length > 0) {
+        const lastGap = regimePointsData[regimePointsData.length - 1].gap;
+        if (lastGap !== 0.0) {
+            gapVal = lastGap;
+        }
+    }
+
     if (regimePointsData.length === 0) {
         // Populate initial trend baseline curve leading up to current gapVal
         const base = gapVal !== 0 ? gapVal : (isBull ? 12.5 : -5.0);

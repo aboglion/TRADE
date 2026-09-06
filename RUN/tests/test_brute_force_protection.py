@@ -57,3 +57,43 @@ def test_rate_limiter_successful_login_resets_counter():
     assert not locked
     is_locked, _ = limiter.is_locked_out(ip)
     assert not is_locked
+
+
+def test_fallback_crash_handler_api_json_response():
+    from scripts.bot_runner import FallbackCrashHandler
+    from io import BytesIO
+
+    class DummySocket:
+        def makefile(self, *args, **kwargs):
+            return BytesIO(b"GET /api/strategy/conditions HTTP/1.1\r\nHost: localhost\r\n\r\n")
+
+    class MockHandler(FallbackCrashHandler):
+        def __init__(self):
+            self.rfile = BytesIO(b"GET /api/strategy/conditions HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            self.wfile = BytesIO()
+            self.headers = {}
+            self.path = "/api/strategy/conditions"
+            self.command = "GET"
+
+        def send_response(self, code, message=None):
+            self.status_code = code
+
+        def send_header(self, keyword, value):
+            if not hasattr(self, "sent_headers"):
+                self.sent_headers = {}
+            self.sent_headers[keyword] = value
+
+        def end_headers(self):
+            pass
+
+    handler = MockHandler()
+    handler.do_GET()
+
+    assert handler.status_code == 503
+    assert handler.sent_headers.get("Content-Type") == "application/json"
+    output_body = handler.wfile.getvalue().decode("utf-8")
+    import json
+    parsed = json.loads(output_body)
+    assert "error" in parsed
+    assert "crashed" in parsed["error"].lower() or "stopped" in parsed["error"].lower()
+
