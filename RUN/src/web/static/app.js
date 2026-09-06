@@ -1574,17 +1574,25 @@ function renderBinaryTree(data) {
     let isRiskMode = selectedTreeMode === "RISK";
 
     if (!coinData && !isRiskMode) {
-        container.innerHTML = `<div class="empty-state">אין נתונים זמינים עבור ${selectedTreeCoin}</div>`;
+        container.innerHTML = `<div class="empty-state">⏳ טוען נתוני שוק חיה עבור ${selectedTreeCoin}...</div>`;
         return;
     }
 
     let nodes = [];
+    let treeTitle = "";
+    let treeSub = "";
 
     if (isBuyMode) {
+        treeTitle = `עץ תנאי כניסה (BUY TREE) — ${selectedTreeCoin}`;
+        treeSub = "בדיקה בינארית מדורגת של תנאי הסף לקנייה ופתיחת פוזיציה בלונג";
         nodes = coinData ? (coinData.buy_tree_nodes || []) : [];
     } else if (isSellMode) {
+        treeTitle = `עץ תנאי יציאה ומכירה (SELL TREE) — ${selectedTreeCoin}`;
+        treeSub = "בדיקה בינארית של טריגרים ליציאה, סטופ-לוס וקטיעת הפסד/רווח";
         nodes = coinData ? (coinData.sell_tree_nodes || []) : [];
     } else if (isRiskMode) {
+        treeTitle = "עץ ניהול סיכונים ומינוף (RISK GUARD TREE)";
+        treeSub = "הערכת סיכוני מקרו לקביעת רמת הטיפול והמינוף (0.0x / 1.0x / 2.0x)";
         const isBull = macro.regime === "BULL";
         const pullback = macro.pullback_pct || 0;
         const underEma = !!macro.under_ema20_daily;
@@ -1592,21 +1600,24 @@ function renderBinaryTree(data) {
         nodes = [
             {
                 id: "risk_node_regime",
-                title: "1. משטר שוק מקרו (Macro Regime)",
-                criteria: "BTC Daily Close > SMA-150",
+                title: "משטר שוק מקרו (Macro Regime)",
+                subtitle: "בדיקת מחיר סגירה יומי של BTC מול ממוצע 150 ימים",
+                criteria: "BTC Daily Close > SMA150",
                 actual: isBull ? `BULL REGIME (BTC $${(macro.btc_close||0).toLocaleString()} > SMA $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME (BTC $${(macro.btc_close||0).toLocaleString()} < SMA $${(macro.btc_sma150||0).toLocaleString()})`,
                 met: isBull,
             },
             {
                 id: "risk_node_pullback",
-                title: "2. הגנת נסיגה מהשיא (Pullback Guard)",
+                title: "הגנת נסיגה מהשיא (Pullback Guard)",
+                subtitle: "בדיקה אם ביטקוין ירד מעבר ל-8% משיא שוק השוורים",
                 criteria: "Pullback > -8.0% from Peak",
                 actual: `${pullback.toFixed(2)}% (Peak $${(macro.bull_peak||0).toLocaleString()})`,
                 met: pullback >= -8.0,
             },
             {
                 id: "risk_node_ema",
-                title: "3. ממוצע 20 יומי (EMA20 Daily Guard)",
+                title: "ממוצע 20 יומי (EMA20 Daily Guard)",
+                subtitle: "בדיקת תמיכה טכנית קצרת טווח בממוצע 20 יום",
                 criteria: "BTC Daily Close >= EMA20 Daily",
                 actual: underEma ? "מתחת ל-EMA20 (Under EMA20)" : "מעל EMA20 (Above EMA20)",
                 met: !underEma,
@@ -1615,6 +1626,20 @@ function renderBinaryTree(data) {
     }
 
     let html = `<div class="binary-tree-flow">`;
+
+    // Render Root Node Card
+    html += `
+        <div class="tree-root-card">
+            <span class="root-badge">🌳 START ROOT NODE</span>
+            <div class="root-title">${treeTitle}</div>
+            <div class="root-subtitle">${treeSub}</div>
+        </div>
+        <div class="tree-branch-container">
+            <div class="tree-branch-line tree-branch-pass"></div>
+            <span class="tree-branch-label label-pass">START ⬇️</span>
+        </div>
+    `;
+
     let allPassed = true;
 
     nodes.forEach((node, index) => {
@@ -1625,19 +1650,27 @@ function renderBinaryTree(data) {
         const badgeClass = isMet ? "badge-pass" : "badge-fail";
         const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
         const icon = isMet ? "🟢" : "🔴";
+        const stepNum = index + 1;
+        const totalSteps = nodes.length;
 
         html += `
             <div class="tree-node ${nodeClass}">
                 <div class="tree-node-header">
                     <div style="display: flex; flex-direction: column; gap: 2px;">
-                        <span class="tree-node-title">${icon} ${node.title}</span>
-                        ${node.subtitle ? `<span class="tree-node-subtitle" style="font-size: 0.76rem; color: #94a3b8; font-weight: 500;">${node.subtitle}</span>` : ''}
+                        <span class="tree-node-title">${icon} שלב ${stepNum}/${totalSteps}: ${node.title}</span>
+                        ${node.subtitle ? `<span class="tree-node-subtitle" style="font-size: 0.78rem; color: #94a3b8; font-weight: 500;">${node.subtitle}</span>` : ''}
                     </div>
                     <span class="tree-node-status-badge ${badgeClass}">${badgeText}</span>
                 </div>
-                <div class="tree-node-body">
-                    <span class="tree-node-criteria">🎯 תנאי: ${node.criteria}</span>
-                    <span class="tree-node-actual">📊 בפועל: ${node.actual}</span>
+                <div class="tree-node-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; background: rgba(0,0,0,0.25); padding: 0.65rem 0.85rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-top: 0.35rem;">
+                    <div>
+                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 700;">🎯 תנאי מבוקש (Target Rule)</div>
+                        <div class="tree-node-criteria" style="font-size: 0.85rem; color: #e2e8f0; font-weight: 600; margin-top: 2px;">${node.criteria}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 700;">📊 נתון בלייב (Live Data)</div>
+                        <div class="tree-node-actual" style="font-size: 0.85rem; margin-top: 2px;">${node.actual}</div>
+                    </div>
                 </div>
             </div>
         `;
@@ -1646,7 +1679,7 @@ function renderBinaryTree(data) {
         if (index < nodes.length - 1) {
             const branchClass = isMet ? "tree-branch-pass" : "tree-branch-fail";
             const labelClass = isMet ? "label-pass" : "label-fail";
-            const labelText = isMet ? "YES 🟢" : "NO 🔴";
+            const labelText = isMet ? "YES 🟢 (המשך לשלב הבא)" : "NO 🔴 (חסום בשלב זה)";
             html += `
                 <div class="tree-branch-container">
                     <div class="tree-branch-line ${branchClass}"></div>
@@ -1658,7 +1691,7 @@ function renderBinaryTree(data) {
 
     // Connecting Branch to Leaf Outcome Node
     const branchToLeafClass = allPassed ? "tree-branch-pass" : "tree-branch-fail";
-    const branchToLeafLabel = allPassed ? "YES 🟢" : "NO 🔴";
+    const branchToLeafLabel = allPassed ? "YES 🟢 (סיום בהצלחה)" : "NO 🔴 (תוצאה סופית)";
     html += `
         <div class="tree-branch-container">
             <div class="tree-branch-line ${branchToLeafClass}"></div>

@@ -585,6 +585,35 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         self._send_json({"logs": lines})
 
+    @staticmethod
+    def _fetch_ohlcv_safe(exchange: Any, symbol: str, timeframe: str = "4h", limit: int = 120) -> list:
+        try:
+            if exchange and hasattr(exchange, "fetch_ohlcv"):
+                res = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+                if res and len(res) > 0:
+                    return res
+        except Exception as e:
+            logger.debug("CCXT fetch_ohlcv failed for %s (%s): %s", symbol, timeframe, e)
+
+        import urllib.request
+        import json
+        clean_sym = symbol.replace("/", "").replace("-", "")
+        urls = [
+            f"https://api.binance.com/api/v3/klines?symbol={clean_sym}&interval={timeframe}&limit={limit}",
+            f"https://data-api.binance.vision/api/v3/klines?symbol={clean_sym}&interval={timeframe}&limit={limit}",
+            f"https://api1.binance.com/api/v3/klines?symbol={clean_sym}&interval={timeframe}&limit={limit}",
+        ]
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        raw = json.loads(resp.read().decode("utf-8"))
+                        return [[int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5])] for c in raw]
+            except Exception:
+                pass
+        return []
+
     def _handle_strategy_conditions(self) -> None:
         try:
             import time
@@ -614,11 +643,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             if self.gateway and hasattr(self.gateway, "_ccxt"):
                 exchange = self.gateway._ccxt
             else:
-                exchange = ccxt.binance({"timeout": 10000, "enableRateLimit": False})
+                try:
+                    exchange = ccxt.binance({"timeout": 10000, "enableRateLimit": False})
+                except Exception:
+                    exchange = None
 
             # 1. Fetch BTC daily first to establish Macro Regime parameters
             try:
-                btc_daily_ohlcv = exchange.fetch_ohlcv("BTC/USDT", timeframe="1d", limit=200)
+                btc_daily_ohlcv = self._fetch_ohlcv_safe(exchange, "BTC/USDT", timeframe="1d", limit=200)
                 if btc_daily_ohlcv:
                     df_btc_daily = pd.DataFrame(btc_daily_ohlcv, columns=["ts", "Open", "High", "Low", "Close", "Vol"])
                     btc_daily_close = float(df_btc_daily["Close"].iloc[-1])
@@ -640,7 +672,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             for pair in symbols:
                 coin = pair.split("/")[0]
                 try:
-                    ohlcv = exchange.fetch_ohlcv(pair, timeframe="4h", limit=120)
+                    ohlcv = self._fetch_ohlcv_safe(exchange, pair, timeframe="4h", limit=120)
                     if not ohlcv:
                         continue
                     candles = [
