@@ -132,17 +132,35 @@
             </div>
 
             <!-- Metric Card 2: Market Regime -->
-            <div class="card glass metric-card">
+            <div class="card glass metric-card regime-card">
                 <div class="card-header">
                     <div class="card-header-left">
                         <span class="card-icon">📈</span>
                         <span class="card-title">MACRO REGIME (BTC SMA-150)</span>
                     </div>
                 </div>
-                <div class="metric-value-container">
-                    <div class="metric-value text-accent" id="macroRegimeVal">--</div>
-                    <div class="metric-subtitle" id="macroRegimeSub">Spot Protection Active (100% USDT in Bear)</div>
+                <div class="regime-card-body">
+                    <div class="metric-value-container">
+                        <div class="metric-value text-accent" id="macroRegimeVal">--</div>
+                        <div class="metric-subtitle" id="macroRegimeSub">Spot Protection Active (100% USDT in Bear)</div>
+                    </div>
+
+                    <!-- Mini Regime & Trend Sparkline Chart -->
+                    <div class="mini-chart-container regime-chart-container">
+                        <div class="mini-chart-sub-header">
+                            <span class="mini-chart-title">MACRO TREND & SMA GAP</span>
+                            <div class="pnl-summary-pills mini-pnl-pills">
+                                <span class="pnl-pill pnl-pill-high" id="regimeGapPill" title="BTC Distance to SMA-150">+0.00%</span>
+                                <span class="pnl-pill pnl-pill-high" id="regimeLevPill" title="Target Leverage Strategy">2.0x BULL</span>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper mini-chart-wrapper regime-chart-wrapper">
+                            <canvas id="regimeCanvas"></canvas>
+                            <div id="regimeTooltip" class="chart-tooltip"></div>
+                        </div>
+                    </div>
                 </div>
+
                 <div class="macro-coin-perf-container" id="macroCoinPerf"></div>
             </div>
 

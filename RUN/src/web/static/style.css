@@ -408,12 +408,12 @@ body {
     font-size: 1.1rem;
 }
 
-/* Embedded Mini PNL History Chart & Health Sparkline Chart */
-.portfolio-card, .health-card {
+/* Embedded Mini PNL History Chart, Regime Chart & Health Sparkline Chart */
+.portfolio-card, .regime-card, .health-card {
     min-height: 310px;
 }
 
-.portfolio-card-body, .health-card-body {
+.portfolio-card-body, .regime-card-body, .health-card-body {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -1359,11 +1359,11 @@ body {
         gap: 0.85rem;
     }
 
-    .portfolio-card, .health-card {
+    .portfolio-card, .regime-card, .health-card {
         min-height: auto;
     }
 
-    .portfolio-card-body, .health-card-body {
+    .portfolio-card-body, .regime-card-body, .health-card-body {
         flex-direction: row;
         align-items: center;
         justify-content: space-between;
@@ -1372,12 +1372,14 @@ body {
     }
 
     .portfolio-card-body .metric-value-container,
+    .regime-card-body .metric-value-container,
     .health-card-body .metric-value-container {
         flex: 1;
         min-width: 0;
     }
 
     .portfolio-card-body .mini-chart-container,
+    .regime-card-body .mini-chart-container,
     .health-card-body .mini-chart-container {
         flex: 1.15;
         min-width: 0;
@@ -1385,6 +1387,7 @@ body {
     }
 
     .portfolio-card-body .mini-chart-wrapper,
+    .regime-card-body .mini-chart-wrapper,
     .health-card-body .mini-chart-wrapper {
         height: 100px;
     }

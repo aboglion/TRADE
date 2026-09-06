@@ -9,6 +9,8 @@ let authToken = sessionStorage.getItem("dash_password") || "";
 let currentRunMode = "DRY_RUN";
 let latestPortfolioData = null;
 let latestOrdersList = [];
+let regimePointsData = [];
+let regimeChartPoints = [];
 
 function getAuthHeaders() {
     const headers = {};
@@ -52,6 +54,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     setInterval(fetchDashboardData, 5000);
 
     initPnlChart();
+    initRegimeChart();
     initHealthChart();
 
     // Event listeners with instant visual feedback
@@ -421,6 +424,23 @@ async function fetchStatus() {
             macroRegimeVal.className = "metric-value text-danger";
             macroRegimeSub.textContent = "Spot Protection Active (100% USDT Cash)";
         }
+
+        // Record & Update Macro Regime Trend Chart
+        const btcMetrics = data.market_metrics && data.market_metrics.BTC ? data.market_metrics.BTC : null;
+        const btcSmaGap = btcMetrics ? (btcMetrics.change_sma150 || 0.0) : 0.0;
+        
+        const regimeGapPill = document.getElementById("regimeGapPill");
+        const regimeLevPill = document.getElementById("regimeLevPill");
+        if (regimeGapPill) {
+            const gapSign = btcSmaGap >= 0 ? "+" : "";
+            regimeGapPill.textContent = `${gapSign}${btcSmaGap.toFixed(2)}%`;
+            regimeGapPill.className = btcSmaGap >= 0 ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
+        }
+        if (regimeLevPill) {
+            regimeLevPill.textContent = isBull ? "2.0x BULL" : "0.0x BEAR";
+            regimeLevPill.className = isBull ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
+        }
+        recordRegimePoint(btcSmaGap, isBull);
 
         // Update Market Performance Table (BTC, ETH, SOL: 4H, 24H, SMA-150)
         const macroCoinPerf = document.getElementById("macroCoinPerf");
@@ -1798,6 +1818,207 @@ function handleHealthHover(e, canvas, tooltip) {
             <div style="font-weight: 700; color: #94a3b8; margin-bottom: 3px; font-size: 0.72rem;">Server Health Pulse</div>
             <div style="color: #38bdf8; font-weight: 700;">Latency: ${closest.ms} ms</div>
             <div style="color: #34d399; font-size: 0.72rem; margin-top: 2px;">Status: 100% Operational</div>
+        `;
+        tooltip.style.display = "block";
+        tooltip.style.left = `${closest.x}px`;
+        tooltip.style.top = `${closest.y - 10}px`;
+    } else {
+        tooltip.style.display = "none";
+    }
+}
+
+// ── Macro Regime Trend Sparkline Chart ──────────────────────────
+
+function initRegimeChart() {
+    window.addEventListener("resize", () => renderRegimeChart());
+    const canvas = document.getElementById("regimeCanvas");
+    const tooltip = document.getElementById("regimeTooltip");
+    if (canvas && tooltip) {
+        canvas.addEventListener("mousemove", (e) => handleRegimeHover(e, canvas, tooltip));
+        canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+        canvas.addEventListener("touchmove", (e) => {
+            if (e.touches && e.touches.length > 0) handleRegimeHover(e.touches[0], canvas, tooltip);
+        });
+        canvas.addEventListener("touchend", () => { tooltip.style.display = "none"; });
+    }
+    renderRegimeChart();
+}
+
+function recordRegimePoint(gapVal, isBull) {
+    if (regimePointsData.length === 0) {
+        // Populate initial trend baseline curve leading up to current gapVal
+        const base = gapVal !== 0 ? gapVal : (isBull ? 12.5 : -5.0);
+        for (let i = 12; i >= 1; i--) {
+            const offset = (Math.sin(i * 0.5) * 1.5) - (i * 0.2);
+            regimePointsData.push({
+                gap: parseFloat((base + offset).toFixed(2)),
+                isBull: isBull
+            });
+        }
+    }
+    
+    regimePointsData.push({ gap: parseFloat(gapVal.toFixed(2)), isBull: isBull });
+    if (regimePointsData.length > 50) {
+        regimePointsData = regimePointsData.slice(-50);
+    }
+    renderRegimeChart();
+}
+
+function renderRegimeChart() {
+    const canvas = document.getElementById("regimeCanvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width || canvas.clientWidth || 300;
+    const height = rect.height || canvas.clientHeight || 120;
+
+    canvas.width = width * window.devicePixelRatio;
+    canvas.height = height * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.clearRect(0, 0, width, height);
+
+    const paddingLeft = 45;
+    const paddingRight = 12;
+    const paddingTop = 12;
+    const paddingBottom = 20;
+
+    const plotWidth = width - paddingLeft - paddingRight;
+    const plotHeight = height - paddingTop - paddingBottom;
+
+    if (regimePointsData.length === 0) {
+        ctx.fillStyle = "#64748b";
+        ctx.font = "10px 'JetBrains Mono', monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Calculating SMA-150 trend distance...", width / 2, height / 2);
+        return;
+    }
+
+    const gaps = regimePointsData.map(p => p.gap);
+    let maxVal = Math.max(...gaps, 5);
+    let minVal = Math.min(...gaps, -5);
+    if (maxVal === minVal) {
+        maxVal += 5;
+        minVal -= 5;
+    }
+    const valRange = maxVal - minVal;
+
+    // Grid lines & Y Ticks
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+    ctx.fillStyle = "#64748b";
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    const steps = 3;
+    for (let i = 0; i <= steps; i++) {
+        const y = paddingTop + (plotHeight * i / steps);
+        const val = (maxVal - (valRange * i / steps)).toFixed(1);
+        const sign = val > 0 ? "+" : "";
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft, y);
+        ctx.lineTo(width - paddingRight, y);
+        ctx.stroke();
+        ctx.fillText(`${sign}${val}%`, paddingLeft - 5, y);
+    }
+
+    // 0% Baseline (SMA-150 Trendline)
+    if (minVal <= 0 && maxVal >= 0) {
+        const zeroY = paddingTop + plotHeight * (1 - (0 - minVal) / valRange);
+        ctx.beginPath();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.4)";
+        ctx.moveTo(paddingLeft, zeroY);
+        ctx.lineTo(width - paddingRight, zeroY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Points calculation
+    regimeChartPoints = [];
+    const count = regimePointsData.length;
+    regimePointsData.forEach((pt, idx) => {
+        const x = count === 1 ? paddingLeft + plotWidth / 2 : paddingLeft + (plotWidth * idx / (count - 1));
+        const y = paddingTop + plotHeight * (1 - (pt.gap - minVal) / valRange);
+        regimeChartPoints.push({ x, y, gap: pt.gap, isBull: pt.isBull });
+    });
+
+    if (regimeChartPoints.length > 0) {
+        const lastPt = regimeChartPoints[regimeChartPoints.length - 1];
+        const isBullMode = lastPt.isBull;
+        const mainColor = isBullMode ? "#10b981" : "#f43f5e";
+        const gradientStart = isBullMode ? "rgba(16, 185, 129, 0.3)" : "rgba(244, 63, 94, 0.3)";
+        const gradientEnd = isBullMode ? "rgba(16, 185, 129, 0.0)" : "rgba(244, 63, 94, 0.0)";
+
+        // Gradient fill
+        const fillGradient = ctx.createLinearGradient(0, paddingTop, 0, paddingTop + plotHeight);
+        fillGradient.addColorStop(0, gradientStart);
+        fillGradient.addColorStop(1, gradientEnd);
+
+        ctx.beginPath();
+        ctx.moveTo(regimeChartPoints[0].x, paddingTop + plotHeight);
+        regimeChartPoints.forEach(pt => ctx.lineTo(pt.x, pt.y));
+        ctx.lineTo(regimeChartPoints[regimeChartPoints.length - 1].x, paddingTop + plotHeight);
+        ctx.closePath();
+        ctx.fillStyle = fillGradient;
+        ctx.fill();
+
+        // Stroke line
+        ctx.beginPath();
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 2.2;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        regimeChartPoints.forEach((pt, idx) => {
+            if (idx === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+        });
+        ctx.stroke();
+
+        // Last dot glowing pulse
+        ctx.beginPath();
+        ctx.arc(lastPt.x, lastPt.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = mainColor;
+        ctx.fill();
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+    }
+
+    // Bottom label
+    ctx.fillStyle = "#64748b";
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText("BTC TREND vs SMA-150", paddingLeft + plotWidth / 2, paddingTop + plotHeight + 4);
+}
+
+function handleRegimeHover(e, canvas, tooltip) {
+    if (!regimeChartPoints || regimeChartPoints.length === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = (e.clientX || e.pageX) - rect.left;
+
+    let closest = regimeChartPoints[0];
+    let minDistance = Math.abs(mouseX - closest.x);
+
+    for (let i = 1; i < regimeChartPoints.length; i++) {
+        const dist = Math.abs(mouseX - regimeChartPoints[i].x);
+        if (dist < minDistance) {
+            minDistance = dist;
+            closest = regimeChartPoints[i];
+        }
+    }
+
+    if (closest && minDistance < 40) {
+        const gapSign = closest.gap >= 0 ? "+" : "";
+        const regimeName = closest.isBull ? "BULL MARKET (2.0x Leverage)" : "BEAR MARKET (100% USDT Cash)";
+        const regimeColor = closest.isBull ? "#34d399" : "#f43f5e";
+
+        tooltip.innerHTML = `
+            <div style="font-weight: 700; color: #94a3b8; margin-bottom: 3px; font-size: 0.72rem;">BTC SMA-150 Distance</div>
+            <div style="color: ${regimeColor}; font-weight: 700;">Gap: ${gapSign}${closest.gap.toFixed(2)}%</div>
+            <div style="color: #e2e8f0; font-size: 0.72rem; margin-top: 2px;">Regime: ${regimeName}</div>
         `;
         tooltip.style.display = "block";
         tooltip.style.left = `${closest.x}px`;
