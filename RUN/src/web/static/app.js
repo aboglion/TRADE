@@ -7,6 +7,8 @@
 let activeErrorsList = [];
 let authToken = sessionStorage.getItem("dash_password") || "";
 let currentRunMode = "DRY_RUN";
+let latestPortfolioData = null;
+let latestOrdersList = [];
 
 function getAuthHeaders() {
     const headers = {};
@@ -60,7 +62,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("manualPullBtn").addEventListener("click", triggerManualPull);
 
     const resetStatsBtn = document.getElementById("resetStatsBtn");
-    if (resetStatsBtn) resetStatsBtn.addEventListener("click", resetSessionStats);
+    if (resetStatsBtn) resetStatsBtn.addEventListener("click", openResetPnlModal);
+    const miniResetBtn = document.getElementById("pnlResetMiniBtn");
+    if (miniResetBtn) miniResetBtn.addEventListener("click", openResetPnlModal);
+
+    // Reset PnL Modal listeners
+    const closeResetModal = document.getElementById("closeResetPnlModal");
+    if (closeResetModal) closeResetModal.addEventListener("click", closeResetPnlModal);
+    const cancelResetBtn = document.getElementById("cancelResetPnlBtn");
+    if (cancelResetBtn) cancelResetBtn.addEventListener("click", closeResetPnlModal);
+    const confirmResetBtn = document.getElementById("confirmResetPnlBtn");
+    if (confirmResetBtn) confirmResetBtn.addEventListener("click", confirmResetPnlStats);
+    const resetModal = document.getElementById("resetPnlConfirmModal");
+    if (resetModal) resetModal.addEventListener("click", (e) => {
+        if (e.target.id === "resetPnlConfirmModal") closeResetPnlModal();
+    });
 
     // Logs & Orders toolbar listeners
     const copyLogsBtn = document.getElementById("copyLogsBtn");
@@ -509,34 +525,16 @@ async function fetchPortfolio() {
         const res = await apiFetch("/api/portfolio");
         if (!res.ok) return;
         const data = await res.json();
+        latestPortfolioData = data;
 
         // Net Total Portfolio Value (after deducting estimated 0.1% sell fee on open holdings)
         const netValue = data.net_total_value_usd !== undefined ? data.net_total_value_usd : data.total_value_usd;
         document.getElementById("portfolioValue").textContent = `$${netValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-        // Net PNL and Fees (3 decimal places precision per user request)
-        const initialVal = data.session_initial_value_usd;
-        if (initialVal !== null && initialVal !== undefined) {
-            const pnl = data.net_pnl_usd !== undefined ? data.net_pnl_usd : (netValue - initialVal);
-            const pnlPct = data.net_pnl_pct !== undefined ? data.net_pnl_pct : (initialVal > 0 ? (pnl / initialVal) * 100 : 0);
-            const pnlEl = document.getElementById("sessionPnl");
-            if (pnlEl) {
-                pnlEl.textContent = `NET PNL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(3)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(3)}%)`;
-                pnlEl.className = pnl >= 0 ? "tag tag-buy" : "tag tag-sell";
-                pnlEl.title = "Net Liquidation PnL (Deducting entry fees and 0.1% estimated exit fees upon selling)";
-            }
-        }
-        
-        const feesObj = data.session_fees || {};
-        const feeStrings = Object.entries(feesObj).map(([curr, amt]) => `${amt.toFixed(3)} ${curr}`);
-        const feeEl = document.getElementById("sessionFees");
-        if (feeEl) {
-            feeEl.textContent = feeStrings.length > 0 ? `Fees: ${feeStrings.join(', ')}` : "Fees: 0.000";
-        }
-
         // Store and render historical PNL chart
         pnlHistoryData = data.pnl_history || [];
         renderPnlChart();
+        updatePnlAndFeesDisplay(selectedPnlTimeframe);
 
         // Coin performance summary tags removed from metric card 1 (user requested PNL & FEES only)
         const coinPerfTagsEl = document.getElementById("coinPerfTags");
@@ -623,7 +621,9 @@ async function fetchOrders() {
         tableBody.innerHTML = "";
 
         const allOrders = [...(data.pending || []), ...(data.completed || [])].reverse();
+        latestOrdersList = data.completed || [];
         document.getElementById("orderCount").textContent = allOrders.length;
+        updatePnlAndFeesDisplay(selectedPnlTimeframe);
 
         if (allOrders.length === 0) {
             tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">No orders executed yet</td></tr>`;
@@ -959,20 +959,34 @@ async function confirmToggleKillSwitch() {
     }
 }
 
-async function resetSessionStats() {
-    if (!confirm("Are you sure you want to reset PNL, fees, and order history? This will start a new session.")) {
-        return;
-    }
-    
-    const btn = document.getElementById("resetStatsBtn");
-    btn.disabled = true;
-    btn.textContent = "⏳ Resetting...";
+function openResetPnlModal() {
+    const modal = document.getElementById("resetPnlConfirmModal");
+    if (modal) modal.classList.add("active");
+}
+
+function closeResetPnlModal() {
+    const modal = document.getElementById("resetPnlConfirmModal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function confirmResetPnlStats() {
+    closeResetPnlModal();
+    const confirmBtn = document.getElementById("confirmResetPnlBtn");
+    const miniBtn = document.getElementById("pnlResetMiniBtn");
+    const toolbarBtn = document.getElementById("resetStatsBtn");
+
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (miniBtn) miniBtn.disabled = true;
+    if (toolbarBtn) toolbarBtn.disabled = true;
 
     try {
         const res = await apiFetch("/api/reset_stats", { method: "POST" });
         const data = await res.json();
         if (res.ok && data.success) {
             showToast("🧹 Session stats (PNL and fees) reset successfully!", "success");
+            pnlHistoryData = [];
+            latestOrdersList = [];
+            latestPortfolioData = null;
             await fetchDashboardData();
         } else {
             showToast("❌ Error resetting stats: " + (data.error || "Unknown error"), "error");
@@ -980,8 +994,9 @@ async function resetSessionStats() {
     } catch (err) {
         showToast("❌ Failed to reset stats: " + err, "error");
     } finally {
-        btn.disabled = false;
-        btn.textContent = "🧹 Reset PNL Stats";
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (miniBtn) miniBtn.disabled = false;
+        if (toolbarBtn) toolbarBtn.disabled = false;
     }
 }
 
@@ -1313,12 +1328,13 @@ let currentChartPoints = [];
 function initPnlChart() {
     const tfSelector = document.getElementById("pnlTfSelector");
     if (tfSelector) {
-        tfSelector.querySelectorAll(".tf-btn").forEach(btn => {
+        tfSelector.querySelectorAll(".tf-btn:not(.tf-btn-reset)").forEach(btn => {
             btn.addEventListener("click", (e) => {
-                tfSelector.querySelectorAll(".tf-btn").forEach(b => b.classList.remove("active"));
+                tfSelector.querySelectorAll(".tf-btn:not(.tf-btn-reset)").forEach(b => b.classList.remove("active"));
                 btn.classList.add("active");
                 selectedPnlTimeframe = btn.getAttribute("data-tf") || "all";
                 renderPnlChart();
+                updatePnlAndFeesDisplay(selectedPnlTimeframe);
             });
         });
     }
@@ -1350,6 +1366,75 @@ function filterPnlDataByTimeframe(data, tf) {
     
     const filtered = data.filter(d => (d.ts || 0) >= cutoff);
     return filtered.length > 0 ? filtered : data;
+}
+
+function updatePnlAndFeesDisplay(tf = "all") {
+    if (!latestPortfolioData) return;
+
+    const pnlEl = document.getElementById("sessionPnl");
+    const feeEl = document.getElementById("sessionFees");
+    if (!pnlEl && !feeEl) return;
+
+    const netValue = latestPortfolioData.net_total_value_usd !== undefined 
+        ? latestPortfolioData.net_total_value_usd 
+        : latestPortfolioData.total_value_usd;
+    const initialVal = latestPortfolioData.session_initial_value_usd;
+
+    let pnl = 0.0;
+    let pnlPct = 0.0;
+    let feeStrings = [];
+    let tfLabel = (tf || "all").toUpperCase();
+
+    if (tf === "all") {
+        if (initialVal !== null && initialVal !== undefined) {
+            pnl = latestPortfolioData.net_pnl_usd !== undefined ? latestPortfolioData.net_pnl_usd : (netValue - initialVal);
+            pnlPct = latestPortfolioData.net_pnl_pct !== undefined ? latestPortfolioData.net_pnl_pct : (initialVal > 0 ? (pnl / initialVal) * 100 : 0);
+        }
+        const feesObj = latestPortfolioData.session_fees || {};
+        feeStrings = Object.entries(feesObj).map(([curr, amt]) => `${amt.toFixed(3)} ${curr}`);
+    } else {
+        const now = Date.now();
+        let cutoff = 0;
+        if (tf === "1h") cutoff = now - (3600 * 1000);
+        else if (tf === "24h") cutoff = now - (24 * 3600 * 1000);
+        else if (tf === "7d") cutoff = now - (7 * 24 * 3600 * 1000);
+
+        const filteredPnl = (pnlHistoryData || []).filter(d => (d.ts || 0) >= cutoff);
+
+        if (filteredPnl.length > 0) {
+            const startVal = filteredPnl[0].val || netValue;
+            pnl = netValue - startVal;
+            pnlPct = startVal > 0 ? (pnl / startVal) * 100.0 : 0.0;
+        } else {
+            pnl = 0.0;
+            pnlPct = 0.0;
+        }
+
+        const timeframeFees = {};
+        (latestOrdersList || []).forEach(o => {
+            const orderTs = o.completed_at_ms || o.timestamp_ms || o.timestamp || (o.datetime ? new Date(o.datetime).getTime() : 0);
+            if (orderTs >= cutoff) {
+                const feeVal = typeof o.fees === 'number' ? o.fees : 0.0;
+                const feeCurr = (o.fee_currency || "USDT").toUpperCase();
+                if (feeVal > 0) {
+                    timeframeFees[feeCurr] = (timeframeFees[feeCurr] || 0.0) + feeVal;
+                }
+            }
+        });
+        feeStrings = Object.entries(timeframeFees).map(([curr, amt]) => `${amt.toFixed(3)} ${curr}`);
+    }
+
+    if (pnlEl) {
+        const sign = pnl >= 0 ? '+' : '';
+        const pctSign = pnlPct >= 0 ? '+' : '';
+        pnlEl.textContent = `NET PNL (${tfLabel}): ${sign}$${pnl.toFixed(3)} (${pctSign}${pnlPct.toFixed(3)}%)`;
+        pnlEl.className = pnl >= 0 ? "tag tag-buy" : "tag tag-sell";
+        pnlEl.title = `Net Liquidation PnL for timeframe [${tfLabel}]`;
+    }
+
+    if (feeEl) {
+        feeEl.textContent = feeStrings.length > 0 ? `Fees (${tfLabel}): ${feeStrings.join(', ')}` : `Fees (${tfLabel}): 0.000`;
+    }
 }
 
 function renderPnlChart() {

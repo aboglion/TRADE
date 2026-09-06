@@ -98,6 +98,7 @@
                         <button class="tf-btn" data-tf="24h">24H</button>
                         <button class="tf-btn" data-tf="7d">7D</button>
                         <button class="tf-btn active" data-tf="all">ALL</button>
+                        <button class="tf-btn tf-btn-reset" id="pnlResetMiniBtn" title="Reset PnL Graph, Stats & Fees">🧹</button>
                     </div>
                 </div>
                 <div class="portfolio-card-body">
@@ -443,6 +444,28 @@
             <div class="modal-footer">
                 <button class="btn btn-outline" id="cancelKillSwitchBtn">Cancel</button>
                 <button class="btn btn-danger" id="confirmKillSwitchBtn">Confirm & Apply 🛡️</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PnL Reset Safety Confirmation Modal -->
+    <div class="modal-backdrop" id="resetPnlConfirmModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 style="color: var(--accent-warning, #f59e0b);">🧹 Reset PNL History & Stats</h3>
+                <button class="modal-close" id="closeResetPnlModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
+                    Are you sure you want to reset the PnL graph history, recorded profits, and fee statistics?
+                </p>
+                <div style="background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fecdd3; line-height: 1.4;">
+                    ⚠️ <strong>Warning:</strong> Resetting will clear all stored PNL curve data points, session profits, and accumulated transaction fees, starting a fresh performance baseline!
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelResetPnlBtn">Cancel</button>
+                <button class="btn btn-danger" id="confirmResetPnlBtn">Confirm & Reset 🧹</button>
             </div>
         </div>
     </div>

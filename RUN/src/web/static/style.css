@@ -539,6 +539,23 @@ body {
     box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
 }
 
+.tf-btn-reset {
+    margin-left: 2px;
+    padding: 0.15rem 0.45rem;
+    color: var(--accent-warning, #f59e0b);
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.tf-btn-reset:hover {
+    background: rgba(244, 63, 94, 0.25) !important;
+    color: #fecdd3 !important;
+    border-color: rgba(244, 63, 94, 0.5) !important;
+    box-shadow: 0 0 8px rgba(244, 63, 94, 0.3);
+}
+
 .chart-wrapper {
     position: relative;
     width: 100%;
