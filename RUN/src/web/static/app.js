@@ -849,7 +849,10 @@ async function copyTextToClipboard(text) {
 
 async function copyLogsToClipboard() {
     const logConsole = document.getElementById("logConsole");
-    if (!logConsole) return;
+    if (!logConsole) {
+        showToast("⚠️ Log console not found", "error");
+        return;
+    }
 
     const rows = logConsole.querySelectorAll(".log-row");
     let text = "";
@@ -869,14 +872,18 @@ async function copyLogsToClipboard() {
         text = (logConsole.innerText || logConsole.textContent || "").trim();
     }
 
-    if (!text || text === "No logs recorded yet" || text === "Initializing dashboard stream..." || text === "Logs console cleared by user") {
-        showToast("⚠️ No log content to copy", "info");
+    if (!text) {
+        showToast("⚠️ No log content available", "info");
         return;
     }
 
     const copied = await copyTextToClipboard(text);
     if (copied) {
-        showToast("📋 All system logs copied to clipboard!", "success");
+        if (text === "No logs recorded yet" || text === "Initializing dashboard stream..." || text === "Logs console cleared by user") {
+            showToast("📋 Log console notice copied to clipboard!", "info");
+        } else {
+            showToast("📋 All system logs copied to clipboard!", "success");
+        }
     } else {
         showToast("❌ Failed to copy system logs", "error");
     }
@@ -893,33 +900,32 @@ function clearLogsConsole() {
 }
 
 async function copyOrdersToClipboard() {
-    const tableBody = document.getElementById("ordersTableBody");
-    if (!tableBody) return;
-
-    const bodyText = (tableBody.innerText || "").trim();
-    if (!bodyText || bodyText.includes("No order history available") || bodyText.includes("No orders executed yet") || bodyText.includes("Orders display cleared by user")) {
-        showToast("⚠️ No order history to copy", "info");
+    const table = document.querySelector(".data-table");
+    if (!table) {
+        showToast("⚠️ Order table not found", "error");
         return;
     }
-
-    const table = document.querySelector(".data-table");
-    if (!table) return;
 
     const rows = Array.from(table.querySelectorAll("tr"));
-    if (rows.length <= 1) {
-        showToast("⚠️ No order history to copy", "info");
-        return;
-    }
-
     const textLines = rows.map(r => {
         const cells = Array.from(r.querySelectorAll("th, td")).map(c => c.innerText.trim());
         return cells.join("\t");
     });
-    const text = textLines.join("\n");
+    const text = textLines.join("\n").trim();
+
+    if (!text) {
+        showToast("⚠️ No order history content available", "info");
+        return;
+    }
 
     const copied = await copyTextToClipboard(text);
     if (copied) {
-        showToast("📋 Order history copied to clipboard!", "success");
+        const hasExecutedOrders = rows.length > 1 && !text.includes("No order history available") && !text.includes("No orders executed yet") && !text.includes("Orders display cleared by user");
+        if (hasExecutedOrders) {
+            showToast("📋 Order history copied to clipboard!", "success");
+        } else {
+            showToast("📋 Order table headers copied to clipboard! (No orders executed yet)", "info");
+        }
     } else {
         showToast("❌ Failed to copy order history", "error");
     }
