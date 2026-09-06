@@ -134,7 +134,7 @@ def main() -> None:
     )
 
     logger.info("=" * 60)
-    logger.info("Dynamic Regime-Adaptive 2.0x Trading Bot")
+    logger.info("Dynamic Regime-Adaptive 3.5x Trading Bot (Flash-Guarded & Ladder)")
     logger.info("Mode: %s", config.run_mode.name)
     logger.info("=" * 60)
 
@@ -212,6 +212,10 @@ def main() -> None:
         asset_weights=asset_weights,
         sma_regime_period=config.strategy.sma_regime_period,
         bull_leverage=config.strategy.bull_leverage,
+        mid_leverage=config.strategy.mid_leverage,
+        min_leverage=config.strategy.min_leverage,
+        flash_wick_limit=config.strategy.flash_wick_limit,
+        ladder_steps=config.strategy.ladder_steps,
         bear_short_hedge_weight=config.strategy.bear_short_hedge_weight,
     )
     

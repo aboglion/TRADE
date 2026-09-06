@@ -435,20 +435,26 @@ async function fetchStatus() {
             isBull = true; // Safe default for bull regime
         }
 
+        const strat = data.strategy_state || {};
+        const macroState = strat.macro_state || {};
+        const effLev = (typeof macroState.effective_leverage === "number") 
+            ? macroState.effective_leverage 
+            : (typeof strat.effective_leverage === "number" ? strat.effective_leverage : (isBull ? 2.4 : 0.0));
+
         if (isBull) {
             regimeBadge.className = "status-badge regime-badge";
             regimeIcon.textContent = "🐂";
             regimeText.textContent = "BULL REGIME";
             macroRegimeVal.textContent = "BULL MARKET";
             macroRegimeVal.className = "metric-value text-success";
-            macroRegimeSub.textContent = "Crypto Allocations Active (2.0x Bull Strategy)";
+            macroRegimeSub.textContent = `Dynamic Allocations Active (${Number(effLev).toFixed(1)}x Model)`;
         } else {
             regimeBadge.className = "status-badge regime-badge regime-bear";
             regimeIcon.textContent = "🐻";
             regimeText.textContent = "BEAR REGIME";
             macroRegimeVal.textContent = "BEAR MARKET";
             macroRegimeVal.className = "metric-value text-danger";
-            macroRegimeSub.textContent = "Spot Protection Active (100% USDT Cash)";
+            macroRegimeSub.textContent = "Bear Protection Active (15% Short BTC + 85% USDT)";
         }
 
         // Record & Update Macro Regime Trend Chart
@@ -463,12 +469,12 @@ async function fetchStatus() {
                 regimeGapPill.className = btcSmaGap >= 0 ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
             }
             if (regimeLevPill) {
-                regimeLevPill.textContent = isBull ? "2.0x BULL" : "0.0x BEAR";
+                regimeLevPill.textContent = isBull ? `${Number(effLev).toFixed(1)}x BULL` : "0.0x BEAR (15% Short)";
                 regimeLevPill.className = isBull ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
             }
             recordRegimePoint(btcSmaGap, isBull);
         } else if (regimeLevPill) {
-            regimeLevPill.textContent = isBull ? "2.0x BULL" : "0.0x BEAR";
+            regimeLevPill.textContent = isBull ? `${Number(effLev).toFixed(1)}x BULL` : "0.0x BEAR (15% Short)";
             regimeLevPill.className = isBull ? "pnl-pill pnl-pill-high" : "pnl-pill pnl-pill-low";
         }
 
@@ -1705,39 +1711,66 @@ function renderBinaryTree(data) {
         const isBull = macro.regime === "BULL";
         const pullback = macro.pullback_pct || 0;
         const underEma = !!macro.under_ema20_daily;
+        const btcAtr = macro.btc_atr_pct || 0.0;
+        const intradayDip = macro.btc_intraday_dip_pct || 0.0;
+        const flashLimit = macro.flash_wick_limit_pct || -4.0;
+        const flashTriggered = !!macro.flash_circuit_triggered;
+        const barsSinceTrip = macro.bars_since_circuit_trip || 999;
+        const ladderStep = macro.ladder_step || "Completed (Full 3.5x Unlocked)";
+        const ladderCap = macro.ladder_cap || 3.5;
+        const effectiveLev = macro.effective_leverage || (isBull ? 2.4 : 0.0);
+        const totalExposure = macro.total_crypto_weight_pct || (isBull ? 198 : 0);
+        const steppedPullback = !!macro.stepped_pullback_active;
+        const hardRisk = !!macro.risk_guard_active;
 
         const nodes = [
             {
                 id: "risk_node_regime",
-                title: "משטר שוק מקרו (Macro Regime)",
-                subtitle: "בדיקת מחיר סגירה יומי של BTC מול ממוצע 150 ימים",
-                criteria: "BTC Daily Close > SMA150",
+                title: "1. משטר שוק מקרו (Macro 150-SMA Regime)",
+                subtitle: "בדיקת מחיר סגירה יומי של BTC מול ממוצע 150 ימים (תנאי סף שוורי)",
+                criteria: `BTC Daily Close > SMA150 ($${(macro.btc_sma150||0).toLocaleString()})`,
                 actual: isBull ? `BULL REGIME (BTC $${(macro.btc_close||0).toLocaleString()} > SMA $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME (BTC $${(macro.btc_close||0).toLocaleString()} < SMA $${(macro.btc_sma150||0).toLocaleString()})`,
                 met: isBull,
             },
             {
                 id: "risk_node_pullback",
-                title: "הגנת נסיגה מהשיא (Pullback Guard)",
-                subtitle: "בדיקה אם ביטקוין ירד מעבר ל-8% משיא שוק השוורים",
-                criteria: "Pullback > -8.0% from Peak",
-                actual: `${pullback.toFixed(2)}% (Peak $${(macro.bull_peak||0).toLocaleString()})`,
-                met: pullback >= -8.0,
+                title: "2. מגן נסיגה מדורג (Stepped Pullback & EMA20 Guard)",
+                subtitle: "נסיגה משיא השוק: -4% מוריד ל-1.4x, מעל 8%- או מתחת ל-EMA20 חותך ל-1.0x",
+                criteria: "Pullback > -4.0% (מינוף מלא) | -4% עד -8% (1.4x) | < -8% / < EMA20 (1.0x)",
+                actual: `${pullback.toFixed(2)}% משיא $${(macro.bull_peak||0).toLocaleString()} ${underEma ? '| מתחת ל-EMA20 ⚠️' : '| מעל EMA20 ✓'}`,
+                met: !hardRisk && !steppedPullback,
             },
             {
-                id: "risk_node_ema",
-                title: "ממוצע 20 יומי (EMA20 Daily Guard)",
-                subtitle: "בדיקת תמיכה טכנית קצרת טווח בממוצע 20 יום",
-                criteria: "BTC Daily Close >= EMA20 Daily",
-                actual: underEma ? "מתחת ל-EMA20 (Under EMA20)" : "מעל EMA20 (Above EMA20)",
-                met: !underEma,
+                id: "risk_node_atr_tier",
+                title: "3. מדרגת תנודתיות שוורית (ATR Volatility Sizing Tier)",
+                subtitle: "מינוף לפי ATR% יומי: < 2.4% (מינוף 3.5x) | < 3.6% (2.4x) | >= 3.6% (1.4x)",
+                criteria: "ATR < 2.4% -> 3.5x | ATR < 3.6% -> 2.4x | ATR >= 3.6% -> 1.4x",
+                actual: `ATR% = ${btcAtr.toFixed(2)}% → ${macro.active_tier || (btcAtr < 2.4 ? '3.5x Tier' : (btcAtr < 3.6 ? '2.4x Tier' : '1.4x Tier'))}`,
+                met: isBull && !hardRisk,
+            },
+            {
+                id: "risk_node_flash_breaker",
+                title: "4. מפסק ביטחון לנרות פלאש (Intraday Flash Circuit Breaker)",
+                subtitle: "צניחה תוך-יומית מנר הפתיחה מעבר ל-4.0%- חותכת מיידית ל-1.0x למניעת שחיקה",
+                criteria: `Intraday Dip >= ${flashLimit.toFixed(1)}% (נר בטוח)`,
+                actual: `${intradayDip.toFixed(2)}% מהפתיחה ${flashTriggered ? '⚠️ הופעל מפסק ביטחון!' : '✓ תקין ומוגן'}`,
+                met: !flashTriggered,
+            },
+            {
+                id: "risk_node_reentry_ladder",
+                title: "5. סולם כניסה מחדש מדורג (Controlled Re-Entry Ladder)",
+                subtitle: "התאוששות מדורגת לאחר מפסק ביטחון: יום 1 (1.0x) ← יום 2 (1.8x) ← יום 3 (2.5x) ← יום 4+ (3.5x)",
+                criteria: "שלב 1: 1.0x | שלב 2: 1.8x | שלב 3: 2.5x | שלב 4+: 3.5x מלא",
+                actual: `${ladderStep} (תקרה: ${ladderCap.toFixed(1)}x, נרות מאז טריגר: ${barsSinceTrip})`,
+                met: barsSinceTrip > 3,
             }
         ];
 
         html += `
             <div class="tree-root-card">
                 <span class="root-badge">🌳 START ROOT NODE</span>
-                <div class="root-title">עץ ניהול סיכונים ומינוף (RISK GUARD TREE)</div>
-                <div class="root-subtitle">הערכת סיכוני מקרו לקביעת רמת הטיפול והמינוף (15% Short / 1.0x / 2.0x)</div>
+                <div class="root-title">עץ ניהול סיכונים ומינוף דינמי (DYNAMIC RISK & 3.5x LEVERAGE TREE)</div>
+                <div class="root-subtitle">מודל הגנת בזק (Flash Circuit Breaker), סולם חזרה מדורג ומדרגות תנודתיות ATR (3.5x / 2.4x / 1.4x / 1.0x)</div>
             </div>
             <div class="tree-branch-container">
                 <div class="tree-branch-line tree-branch-pass"></div>
@@ -1752,7 +1785,7 @@ function renderBinaryTree(data) {
 
             const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
             const badgeClass = isMet ? "badge-pass" : "badge-fail";
-            const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
+            const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ מופעל / מוגבל (GUARDED)";
             const icon = isMet ? "🟢" : "🔴";
             const stepNum = index + 1;
             const totalSteps = nodes.length;
@@ -1782,7 +1815,7 @@ function renderBinaryTree(data) {
             if (index < nodes.length - 1) {
                 const branchClass = isMet ? "tree-branch-pass" : "tree-branch-fail";
                 const labelClass = isMet ? "label-pass" : "label-fail";
-                const labelText = isMet ? "YES 🟢 (המשך לשלב הבא)" : "NO 🔴 (חסום בשלב זה)";
+                const labelText = isMet ? "YES 🟢 (המשך לשלב הבא)" : "GUARD ⚠️ (מגבלה פעילה)";
                 html += `
                     <div class="tree-branch-container">
                         <div class="tree-branch-line ${branchClass}"></div>
@@ -1793,7 +1826,7 @@ function renderBinaryTree(data) {
         });
 
         const branchToLeafClass = allPassed ? "tree-branch-pass" : "tree-branch-fail";
-        const branchToLeafLabel = allPassed ? "YES 🟢 (סיום בהצלחה)" : "NO 🔴 (תוצאה סופית)";
+        const branchToLeafLabel = allPassed ? "YES 🟢 (מינוף מקסימלי 3.5x)" : "CALCULATED ⚡ (מינוף מותאם סיכון)";
         html += `
             <div class="tree-branch-container">
                 <div class="tree-branch-line ${branchToLeafClass}"></div>
@@ -1801,26 +1834,39 @@ function renderBinaryTree(data) {
             </div>
         `;
 
-        const riskActive = !!macro.risk_guard_active;
         if (macro.regime === "BEAR") {
             html += `
                 <div class="tree-leaf-outcome outcome-sell-triggered">
                     <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 85% USDT + 15% SHORT HEDGE)</div>
-                    <div class="outcome-desc">סגירת כל פוזיציות הלונג + פתיחת 15% שורט על BTC לגידור והפקת רווחים בירידות, לצד 85% מזומן USDT.</div>
+                    <div class="outcome-desc">BTC מתחת ל-SMA150: סגירת כל פוזיציות הלונג + פתיחת 15% שורט על BTC לגידור, לצד 85% מזומן USDT. מינוף אפקטיבי: 0.0x.</div>
                 </div>
             `;
-        } else if (riskActive) {
+        } else if (flashTriggered || hardRisk) {
             html += `
                 <div class="tree-leaf-outcome outcome-buy-waiting">
-                    <div class="outcome-title">⚠️ מנגנון הגנת סיכון פעיל (RISK GUARD ACTIVE — 1.0x)</div>
-                    <div class="outcome-desc">ביטקוין בחוויית תיקון/ירידה. המינוף צומצם ל-1.0x למניעת סיכונים.</div>
+                    <div class="outcome-title">⚠️ מפסק ביטחון / מגן סיכון קשיח פעיל (EFFECTIVE LEVERAGE: 1.0x — 100% EXPOSURE)</div>
+                    <div class="outcome-desc">${flashTriggered ? 'הופעלה הגנת בזק מנר פלאש! המינוף נחתך מיידית ל-1.0x לספיגת הירידה בהון עצמי נקי.' : 'ירידה מעל 8% משיא השוק או מתחת ל-EMA20: המינוף הוקפא על 1.0x להגנה מלאה על ההון.'}</div>
+                </div>
+            `;
+        } else if (steppedPullback) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-waiting">
+                    <div class="outcome-title">🛡️ מגן נסיגה מדורג פעיל (DEFENSIVE LEVERAGE: 1.4x — 128% EXPOSURE)</div>
+                    <div class="outcome-desc">נסיגה מתונה (4%- עד 8%-) משיא השוק. המינוף צומצם ל-1.4x באופן יזום טרם שבירת מבנה.</div>
+                </div>
+            `;
+        } else if (effectiveLev >= 3.0) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">🚀 מינוף שוורי מירבי פעיל (MAX BULL LEVERAGE: ${effectiveLev.toFixed(1)}x — ${totalExposure}% EXPOSURE)</div>
+                    <div class="outcome-desc">תנודתיות נמוכה (ATR ${btcAtr.toFixed(2)}%) ושוק שוורי יציב מעל ממוצעים. הבוט פועל במינוף מירבי של ${effectiveLev.toFixed(1)}x עם מפסקי ביטחון דרוכים.</div>
                 </div>
             `;
         } else {
             html += `
                 <div class="tree-leaf-outcome outcome-buy-success">
-                    <div class="outcome-title">⚡ מינוף מלא בולארד פעיל (FULL BULL LEVERAGE — 2.0x)</div>
-                    <div class="outcome-desc">שוק עולה חזק ויציב. הבוט פועל במינוף מירבי מורשה 2.0x להשאת תשואה.</div>
+                    <div class="outcome-title">⚡ מינוף שוורי מאוזן פעיל (BALANCED BULL LEVERAGE: ${effectiveLev.toFixed(1)}x — ${totalExposure}% EXPOSURE)</div>
+                    <div class="outcome-desc">${macro.active_tier || `שוק שוורי תקין. מינוף דינמי של ${effectiveLev.toFixed(1)}x המעניק חשיפת תיק קריפטו של ${totalExposure}%.`}</div>
                 </div>
             `;
         }
@@ -1998,36 +2044,63 @@ function renderDashboardPipeline(data) {
         const isBull = macro.regime === "BULL";
         const pullback = macro.pullback_pct || 0;
         const underEma = !!macro.under_ema20_daily;
-        const riskActive = !!macro.risk_guard_active;
-        const lev = macro.effective_leverage || 1.0;
+        const btcAtr = macro.btc_atr_pct || 0.0;
+        const intradayDip = macro.btc_intraday_dip_pct || 0.0;
+        const flashLimit = macro.flash_wick_limit_pct || -4.0;
+        const flashTriggered = !!macro.flash_circuit_triggered;
+        const barsSinceTrip = macro.bars_since_circuit_trip || 999;
+        const ladderStep = macro.ladder_step || "Completed";
+        const ladderCap = macro.ladder_cap || 3.5;
+        const effectiveLev = macro.effective_leverage || (isBull ? 2.4 : 0.0);
+        const totalExposure = macro.total_crypto_weight_pct || (isBull ? 198 : 0);
+        const steppedPullback = !!macro.stepped_pullback_active;
+        const hardRisk = !!macro.risk_guard_active;
 
         const riskNodes = [
             {
                 id: "dash_risk_1",
                 shortTitle: "1. משטר מקרו",
-                fullTitle: "1. משטר שוק מקרו (Macro Regime)",
+                fullTitle: "1. משטר שוק מקרו (Macro 150-SMA)",
                 criteria: `BTC Daily Close > SMA150 ($${(macro.btc_sma150||0).toLocaleString()})`,
                 actual: isBull ? `BULL REGIME ($${(macro.btc_close||0).toLocaleString()} > $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME ($${(macro.btc_close||0).toLocaleString()} < $${(macro.btc_sma150||0).toLocaleString()})`,
                 met: isBull,
-                explanation: "מאמת ששוק הקריפטו נמצא במגמת עלייה ראשית. כשהנר היומי של ביטקוין מעל ממוצע 150 יום, מאושר מסחר ממונף בלונגים."
+                explanation: "מאמת מגמת עלייה ראשית בביטקוין מעל ממוצע 150 ימים לאישור לונג ממונף."
             },
             {
                 id: "dash_risk_2",
-                shortTitle: "2. הגנת נסיגה",
-                fullTitle: "2. הגנת נסיגה מהשיא (Pullback Guard)",
-                criteria: "Pullback > -8.0% משיא השוק",
-                actual: `${pullback.toFixed(2)}% (שיא $${(macro.bull_peak||0).toLocaleString()})`,
-                met: pullback >= -8.0,
-                explanation: "אם ביטקוין חווה נסיגה קשה של מעל 8% משיא השוק, מופעל מנגנון הגנה דינמי שמוריד את המינוף מ-2.0x ל-1.0x למניעת סיכון."
+                shortTitle: "2. מגן נסיגה",
+                fullTitle: "2. מגן נסיגה מדורג (Stepped Pullback & EMA20)",
+                criteria: "Pullback > -4.0% (מלא) | -4% עד -8% (1.4x) | < -8% / < EMA20 (1.0x)",
+                actual: `${pullback.toFixed(2)}% משיא $${(macro.bull_peak||0).toLocaleString()} ${underEma ? '| < EMA20' : '| > EMA20'}`,
+                met: !hardRisk && !steppedPullback,
+                explanation: "הורדה יזומה ל-1.4x בנסיגה של 4%-8%, וחיתוך מלא ל-1.0x בנסיגה מעל 8% או שבירת EMA20."
             },
             {
                 id: "dash_risk_3",
-                shortTitle: "3. ממוצע EMA20",
-                fullTitle: "3. ממוצע 20 יומי (EMA20 Daily Guard)",
-                criteria: "BTC Daily Close >= EMA20 Daily",
-                actual: underEma ? "מתחת ל-EMA20 (תחת סיכון)" : "מעל EMA20 (מגמה חזקה)",
-                met: !underEma,
-                explanation: "בדיקת תמיכה טכנית קצרת טווח. כשהמחיר מתחת ל-EMA20, המערכת מצמצמת חשיפה ומורידה מינוף ל-1.0x."
+                shortTitle: "3. מדרגת תנודתיות",
+                fullTitle: "3. מדרג תנודתיות שוורית (ATR Volatility Tier)",
+                criteria: "ATR < 2.4% (3.5x) | < 3.6% (2.4x) | >= 3.6% (1.4x)",
+                actual: `ATR% = ${btcAtr.toFixed(2)}% → ${macro.active_tier || `${effectiveLev.toFixed(1)}x Tier`}`,
+                met: isBull && !hardRisk,
+                explanation: "קביעת גודל המינוף לפי תנודתיות השוק כדי למקסם רווח ברגיעה (עד 3.5x) ולצמצם סיכון בסערה."
+            },
+            {
+                id: "dash_risk_4",
+                shortTitle: "4. מפסק פלאש",
+                fullTitle: "4. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
+                criteria: `Intraday Dip >= ${flashLimit.toFixed(1)}%`,
+                actual: `${intradayDip.toFixed(2)}% ${flashTriggered ? '⚠️ הופעל!' : '✓ תקין'}`,
+                met: !flashTriggered,
+                explanation: "מפסק ביטחון אוטומטי החותך את המינוף ל-1.0x אם נר יומי צונח מעל 4%- מהפתיחה, לספיגת עודף הירידה ללא שחיקה."
+            },
+            {
+                id: "dash_risk_5",
+                shortTitle: "5. סולם חזרה",
+                fullTitle: "5. סולם כניסה מחדש מדורג (Re-Entry Ladder)",
+                criteria: "התאוששות 3 ימים: 1.0x → 1.8x → 2.5x → 3.5x",
+                actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
+                met: barsSinceTrip > 3,
+                explanation: "מניעת מלכודות שוורים: חזרה הדרגתית ומבוקרת למינוף מלא ב-3 שלבים לאחר הפעלת מפסק ביטחון."
             }
         ];
 
@@ -2036,25 +2109,33 @@ function renderDashboardPipeline(data) {
         let outcomeIcon = "";
 
         if (macro.regime === "BEAR") {
-            outcomeText = "🐻 BEAR (85% USDT + 15% SHORT)";
+            outcomeText = "🐻 BEAR (15% SHORT HEDGE)";
             outcomeClass = "sell-triggered";
             outcomeIcon = "🐻";
-        } else if (riskActive) {
-            outcomeText = "⚠️ RISK GUARD (1.0x)";
+        } else if (flashTriggered || hardRisk) {
+            outcomeText = `⚠️ RISK GUARD (${effectiveLev.toFixed(1)}x | 100%)`;
             outcomeClass = "fail";
             outcomeIcon = "⚠️";
-        } else {
-            outcomeText = "⚡ BULL LEVERAGE (2.0x)";
+        } else if (steppedPullback) {
+            outcomeText = `🛡️ STEPPED GUARD (${effectiveLev.toFixed(1)}x | 128%)`;
+            outcomeClass = "fail";
+            outcomeIcon = "🛡️";
+        } else if (effectiveLev >= 3.0) {
+            outcomeText = `🚀 MAX BULL (${effectiveLev.toFixed(1)}x | ${totalExposure}%)`;
             outcomeClass = "pass";
             outcomeIcon = "🚀";
+        } else {
+            outcomeText = `⚡ BULL LEVERAGE (${effectiveLev.toFixed(1)}x | ${totalExposure}%)`;
+            outcomeClass = "pass";
+            outcomeIcon = "⚡";
         }
 
         html += `
             <div class="pipeline-card">
                 <div class="pipeline-card-header">
                     <div class="pipeline-coin-info">
-                        <span class="pipeline-coin-badge">⚡ MACRO & RISK GUARD</span>
-                        <span class="pipeline-type-tag risk">RISK PIPELINE</span>
+                        <span class="pipeline-coin-badge">⚡ DYNAMIC RISK & LEVERAGE PIPELINE</span>
+                        <span class="pipeline-type-tag risk">3.5x MODEL</span>
                     </div>
                     <span class="pipeline-outcome-pill ${outcomeClass}">${outcomeIcon} ${outcomeText}</span>
                 </div>
@@ -2065,7 +2146,7 @@ function renderDashboardPipeline(data) {
             const isPass = node.met;
             const circleClass = isPass ? "pass" : "fail";
             const icon = isPass ? "✓" : "✗";
-            const statusText = isPass ? "✓ תקין" : "✗ מופעל";
+            const statusText = isPass ? "✓ תקין" : "✗ מוגבל";
 
             html += `
                 <div class="pipeline-node-wrapper" data-node-id="${node.id}">
@@ -2076,7 +2157,7 @@ function renderDashboardPipeline(data) {
                     <div class="pipeline-popover">
                         <div class="popover-header">
                             <span class="popover-title">${node.fullTitle}</span>
-                            <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ MET' : '✗ UNMET'}</span>
+                            <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ MET' : '✗ GUARDED'}</span>
                         </div>
                         <div class="popover-grid">
                             <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
@@ -2097,8 +2178,8 @@ function renderDashboardPipeline(data) {
                 <div class="pipeline-connector ${allRiskPass ? 'pass' : 'fail'}"></div>
                 <div class="pipeline-node-wrapper">
                     <div class="pipeline-node-circle ${allRiskPass ? 'pass' : 'fail'}">${outcomeIcon}</div>
-                    <span class="pipeline-node-label">תוצאת סיכון</span>
-                    <span class="pipeline-node-sub ${allRiskPass ? 'pass' : 'fail'}">${lev.toFixed(1)}x</span>
+                    <span class="pipeline-node-label">מינוף אפקטיבי</span>
+                    <span class="pipeline-node-sub ${allRiskPass ? 'pass' : 'fail'}">${effectiveLev.toFixed(1)}x (${totalExposure}%)</span>
                 </div>
             </div>
         </div>
@@ -2118,50 +2199,66 @@ function renderDashboardPipeline(data) {
             const buyNodesRaw = coinData.buy_tree_nodes || [];
             const buyConds = coinData.entry_conditions || {};
 
+            const nRegime = buyNodesRaw.find(n => n.id === "node_macro_regime") || buyNodesRaw[0] || {};
+            const nLev = buyNodesRaw.find(n => n.id === "node_leverage_tier") || {};
+            const nEma = buyNodesRaw.find(n => n.id === "node_ema_alignment") || buyNodesRaw[1] || {};
+            const nDonchian = buyNodesRaw.find(n => n.id === "node_donchian_breakout") || buyNodesRaw[2] || {};
+            const nAdx = buyNodesRaw.find(n => n.id === "node_adx_filter") || buyNodesRaw[3] || {};
+            const nPyramid = buyNodesRaw.find(n => n.id === "node_pyramiding") || buyNodesRaw[4] || {};
+
             const buyNodes = [
                 {
                     id: `dash_${coin}_buy_1`,
                     shortTitle: "1. Macro Regime",
-                    fullTitle: "1. משטר שוק מקרו (Macro Regime)",
-                    criteria: buyNodesRaw[0]?.criteria || "BTC > SMA150",
-                    actual: buyNodesRaw[0]?.actual || "",
-                    met: !!buyNodesRaw[0]?.met,
+                    fullTitle: nRegime.title || "1. משטר שוק מקרו (Macro Regime)",
+                    criteria: nRegime.criteria || "BTC > SMA150",
+                    actual: nRegime.actual || "",
+                    met: !!nRegime.met,
                     explanation: "בדיקת בסיס: האם השוק הכללי נמצא במשטר עולה (BULL REGIME). ללא אישור מקרו, לא נפתחות פוזיציות חדשות."
                 },
                 {
                     id: `dash_${coin}_buy_2`,
-                    shortTitle: "2. Trend Structure",
-                    fullTitle: "2. מבנה ממוצעים (EMA Alignment)",
-                    criteria: buyNodesRaw[1]?.criteria || "Regime in [STRONG_BULL, TREND]",
-                    actual: buyNodesRaw[1]?.actual || "",
-                    met: !!buyNodesRaw[1]?.met,
-                    explanation: `בודק ש-${coin} נמצא במגמת עלייה טכנית מובהקת בממוצעים הנעים (EMA20 > EMA50 > EMA200).`
+                    shortTitle: "2. Leverage Tier",
+                    fullTitle: nLev.title || "2. מדרגת מינוף שוורית (Dynamic Leverage)",
+                    criteria: nLev.criteria || `Dynamic Leverage: ${macro.effective_leverage || 2.4}x`,
+                    actual: nLev.actual || (macro.active_tier || "Active Tier"),
+                    met: !!nLev.met,
+                    explanation: "מינוף מותאם תנודתיות (3.5x ברגיעה, 2.4x באיזון, 1.4x בזהירות) וסולם כניסה מחדש מבוקר."
                 },
                 {
                     id: `dash_${coin}_buy_3`,
-                    shortTitle: "3. Donchian 30",
-                    fullTitle: "3. פריצת דונצ'יאן 30 (Donchian High)",
-                    criteria: buyNodesRaw[2]?.criteria || `Close >= $${coinData.donchian30}`,
-                    actual: buyNodesRaw[2]?.actual || `$${coinData.close} (${buyConds.donchian_gap_pct >= 0 ? '+' : ''}${buyConds.donchian_gap_pct}%)`,
-                    met: !!buyNodesRaw[2]?.met,
-                    explanation: `טריגר כניסה קלאסי! סגירת נר 4 שעות של ${coin} מעל שיא 30 הנרות האחרונים ($${coinData.donchian30}).`
+                    shortTitle: "3. Trend Structure",
+                    fullTitle: nEma.title || "3. מבנה ממוצעים (EMA Alignment)",
+                    criteria: nEma.criteria || "Regime in [STRONG_BULL, TREND]",
+                    actual: nEma.actual || "",
+                    met: !!nEma.met,
+                    explanation: `בודק ש-${coin} נמצא במגמת עלייה טכנית מובהקת בממוצעים הנעים (EMA20 > EMA50 > EMA200).`
                 },
                 {
                     id: `dash_${coin}_buy_4`,
-                    shortTitle: "4. ADX Filter",
-                    fullTitle: "4. עוצמת מגמה (ADX Filter)",
-                    criteria: buyNodesRaw[3]?.criteria || `ADX >= ${coinData.min_adx}`,
-                    actual: buyNodesRaw[3]?.actual || `${coinData.adx}`,
-                    met: !!buyNodesRaw[3]?.met,
-                    explanation: `סינון דשדוש! מדד ADX (${coinData.adx}) חייב להיות מעל ${coinData.min_adx} כדי למנוע כניסות סרק בשוק ללא מומנטום.`
+                    shortTitle: "4. Donchian 30",
+                    fullTitle: nDonchian.title || "4. פריצת דונצ'יאן 30 (Donchian High)",
+                    criteria: nDonchian.criteria || `Close >= $${coinData.donchian30}`,
+                    actual: nDonchian.actual || `$${coinData.close} (${buyConds.donchian_gap_pct >= 0 ? '+' : ''}${buyConds.donchian_gap_pct}%)`,
+                    met: !!nDonchian.met,
+                    explanation: `טריגר כניסה קלאסי! סגירת נר 4 שעות של ${coin} מעל שיא 30 הנרות האחרונים ($${coinData.donchian30}).`
                 },
                 {
                     id: `dash_${coin}_buy_5`,
-                    shortTitle: "5. Pyramiding",
-                    fullTitle: "5. פירמידינג והגדלת פוזיציה (Pyramiding Additions)",
-                    criteria: buyNodesRaw[4]?.criteria || "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull)",
-                    actual: buyNodesRaw[4]?.actual || "Initial Entry Mode",
-                    met: !!buyNodesRaw[4]?.met,
+                    shortTitle: "5. ADX Filter",
+                    fullTitle: nAdx.title || "5. עוצמת מגמה (ADX Filter)",
+                    criteria: nAdx.criteria || `ADX >= ${coinData.min_adx}`,
+                    actual: nAdx.actual || `${coinData.adx}`,
+                    met: !!nAdx.met,
+                    explanation: `סינון דשדוש! מדד ADX (${coinData.adx}) חייב להיות מעל ${coinData.min_adx} כדי למנוע כניסות סרק בשוק ללא מומנטום.`
+                },
+                {
+                    id: `dash_${coin}_buy_6`,
+                    shortTitle: "6. Pyramiding",
+                    fullTitle: nPyramid.title || "6. פירמידינג והגדלת פוזיציה (Pyramiding Additions)",
+                    criteria: nPyramid.criteria || "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull)",
+                    actual: nPyramid.actual || "Initial Entry Mode",
+                    met: !!nPyramid.met,
                     explanation: `הוספת פוזיציה ב-${coin} בטרנד חזק (STRONG_BULL_TREND). מותר להוסיף עד 2 כניסות נוספות כאשר הרווח הפתוח מעל 0.6 ATR והתיקון מעל 1.5 ATR, מעל EMA20.`
                 }
             ];
@@ -2233,51 +2330,67 @@ function renderDashboardPipeline(data) {
             const sellNodesRaw = coinData.sell_tree_nodes || [];
             const pos = coinData.position || {};
 
+            const nBear = sellNodesRaw.find(n => n.id === "node_bear_emergency") || sellNodesRaw[0] || {};
+            const nFlash = sellNodesRaw.find(n => n.id === "node_flash_circuit_breaker") || {};
+            const nStep = sellNodesRaw.find(n => n.id === "node_stepped_pullback") || {};
+            const nInit = sellNodesRaw.find(n => n.id === "node_initial_risk_stop") || sellNodesRaw[1] || {};
+            const nTrail = sellNodesRaw.find(n => n.id === "node_atr_trailing_stop") || sellNodesRaw[2] || {};
+            const nEma = sellNodesRaw.find(n => n.id === "node_ema_breakdown") || sellNodesRaw[4] || {};
+
             const sellNodes = [
                 {
                     id: `dash_${coin}_sell_1`,
                     shortTitle: "1. Bear Exit",
-                    fullTitle: "1. יציאת חירום דובים ושורט (Bear Exit & Short)",
-                    criteria: sellNodesRaw[0]?.criteria || "BTC < SMA150",
-                    actual: sellNodesRaw[0]?.actual || "",
-                    triggered: !!sellNodesRaw[0]?.triggered,
+                    fullTitle: nBear.title || "1. יציאת חירום דובים ושורט (Bear Exit & Short)",
+                    criteria: nBear.criteria || "BTC < SMA150",
+                    actual: nBear.actual || "",
+                    triggered: !!nBear.triggered,
                     explanation: "במשטר דובים (BEAR), הבוט מורה על סגירה מיידית של פוזיציית הלונג ופתיחת 15% שורט להגנה."
                 },
                 {
                     id: `dash_${coin}_sell_2`,
-                    shortTitle: "2. Initial Stop",
-                    fullTitle: "2. סטופ סיכון ראשוני (Initial Risk Stop)",
-                    criteria: sellNodesRaw[1]?.criteria || `Initial Stop = $${pos.initial_stop || '--'}`,
-                    actual: sellNodesRaw[1]?.actual || `Low $${coinData.low}`,
-                    triggered: !!sellNodesRaw[1]?.triggered,
-                    explanation: "מגן מפני הפסד כבד בעסקה חדשה! אם המחיר צונח מתחת למחיר כניסה מינוס ATR, מבוצעת יציאה מבוקרת."
+                    shortTitle: "2. Flash Breaker",
+                    fullTitle: nFlash.title || "2. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
+                    criteria: nFlash.criteria || "Intraday Dip < -4.0%",
+                    actual: nFlash.actual || "Safe",
+                    triggered: !!nFlash.triggered,
+                    explanation: "צניחה מהירה תוך-יומית חותכת מיד את המינוף ל-1.0x ומספקת הגנת ספיגה מיידית."
                 },
                 {
                     id: `dash_${coin}_sell_3`,
-                    shortTitle: "3. ATR Trailing",
-                    fullTitle: "3. סטופ נגרר דינמי (ATR Trailing Stop)",
-                    criteria: sellNodesRaw[2]?.criteria || `Trailing Stop = $${pos.trailing_stop || '--'}`,
-                    actual: sellNodesRaw[2]?.actual || `Low $${coinData.low}`,
-                    triggered: !!sellNodesRaw[2]?.triggered,
-                    explanation: "נעילת רווחים אוטומטית! הסטופ עולה יחד עם טיפוס המחיר לשיאים חדשים, וקוטע את הפוזיציה בעת תיקון."
+                    shortTitle: "3. Pullback Guard",
+                    fullTitle: nStep.title || "3. מגן נסיגה מדורג (Stepped Pullback Guard)",
+                    criteria: nStep.criteria || "Pullback < -4.0% / < -8.0%",
+                    actual: nStep.actual || "Safe",
+                    triggered: !!nStep.triggered,
+                    explanation: "נסיגה משיא השוק מורידה את המינוף באופן מדורג ל-1.4x או 1.0x טרם שבירת מגמה."
                 },
                 {
                     id: `dash_${coin}_sell_4`,
-                    shortTitle: "4. TP1 Partial",
-                    fullTitle: "4. TP1 מימוש חלקי (Partial Take-Profit)",
-                    criteria: sellNodesRaw[3]?.criteria || "High >= Entry + 4.5×ATR (TP1 DISABLED)",
-                    actual: sellNodesRaw[3]?.actual || "No Active Position",
-                    triggered: !!sellNodesRaw[3]?.triggered,
-                    explanation: "מימוש 30% מהפוזיציה כשהרווח מגיע ל-4.5 ATR מהכניסה. כרגע מושבת (tp1_enabled=False) אך מוצג כאן למעקב."
+                    shortTitle: "4. Initial Stop",
+                    fullTitle: nInit.title || "4. סטופ סיכון ראשוני (Initial Risk Stop)",
+                    criteria: nInit.criteria || `Initial Stop = $${pos.initial_stop || '--'}`,
+                    actual: nInit.actual || `Low $${coinData.low}`,
+                    triggered: !!nInit.triggered,
+                    explanation: "מגן מפני הפסד כבד בעסקה חדשה! אם המחיר צונח מתחת למחיר כניסה מינוס ATR, מבוצעת יציאה מבוקרת."
                 },
                 {
                     id: `dash_${coin}_sell_5`,
-                    shortTitle: "5. EMA Exit",
-                    fullTitle: "5. שבירת ממוצעים (EMA Breakdown Exit)",
-                    criteria: sellNodesRaw[4]?.criteria || "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
-                    actual: sellNodesRaw[4]?.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
-                    triggered: !!sellNodesRaw[4]?.triggered,
-                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 כשה-Mode הוא TREND. יציאת EMA200 ב-Strong Bull מושבתת (ema_exit_strong=False)."
+                    shortTitle: "5. ATR Trailing",
+                    fullTitle: nTrail.title || "5. סטופ נגרר דינמי (ATR Trailing Stop)",
+                    criteria: nTrail.criteria || `Trailing Stop = $${pos.trailing_stop || '--'}`,
+                    actual: nTrail.actual || `Low $${coinData.low}`,
+                    triggered: !!nTrail.triggered,
+                    explanation: "נעילת רווחים אוטומטית! הסטופ עולה יחד עם טיפוס המחיר לשיאים חדשים, וקוטע את הפוזיציה בעת תיקון."
+                },
+                {
+                    id: `dash_${coin}_sell_6`,
+                    shortTitle: "6. EMA Exit",
+                    fullTitle: nEma.title || "6. שבירת ממוצעים (EMA Breakdown Exit)",
+                    criteria: nEma.criteria || "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
+                    actual: nEma.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
+                    triggered: !!nEma.triggered,
+                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 כשה-Mode הוא TREND. יציאת EMA200 ב-Strong Bull מושבתת."
                 }
             ];
 
@@ -3213,7 +3326,7 @@ function handleRegimeHover(e, canvas, tooltip) {
 
     if (closest && minDistance < 40) {
         const gapSign = closest.gap >= 0 ? "+" : "";
-        const regimeName = closest.isBull ? "BULL MARKET (2.0x Leverage)" : "BEAR MARKET (100% USDT Cash)";
+        const regimeName = closest.isBull ? "BULL MARKET (Dynamic Leverage up to 3.5x)" : "BEAR MARKET (15% Short BTC + 85% USDT)";
         const regimeColor = closest.isBull ? "#34d399" : "#f43f5e";
 
         tooltip.innerHTML = `

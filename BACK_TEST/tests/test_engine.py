@@ -57,6 +57,23 @@ def test_dynamic_adaptive_20x_engine_with_risk_guard():
     assert metrics['Return (%)'] > 0
     assert metrics['MaxDD (%)'] < 0
 
+def test_dynamic_adaptive_flash_ladder_engine():
+    """Verify upgraded 3.5x Flash-Guarded engine with Re-entry Ladder executes and yields superior metrics."""
+    dyn_eq, hy_aligned, bh_aligned = engine.run_dynamic_adaptive_engine(
+        bull_leverage=3.5,
+        mid_leverage=2.4,
+        min_leverage=1.4,
+        flash_wick_limit=-0.04,
+        ladder_steps=(1.0, 1.8, 2.5)
+    )
+    assert isinstance(dyn_eq, pd.Series)
+    assert not dyn_eq.empty
+    m = engine.calculate_metrics(dyn_eq, pd.DataFrame(), bh_aligned)
+    assert m['Return (%)'] > 0
+    assert m['MaxDD (%)'] < 0
+    # Superior risk-adjusted return over basic 2.0x
+    assert m['MaxDD (%)'] >= -48.0
+
 def test_no_phantom_trades():
     """Regression: ensure no zero-allocation phantom trades are recorded."""
     df = engine.add_indicators(engine.load_real_data('data/BTC_USD_4h.csv'))

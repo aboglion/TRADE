@@ -1,1 +1,1 @@
-# Live Trading Bot — Dynamic Regime-Adaptive 2.0x
+# Live Trading Bot — Dynamic Regime-Adaptive 3.5x

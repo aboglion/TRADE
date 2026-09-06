@@ -16,8 +16,11 @@ exchange:
 strategy:
   timeframe: "4h"
   warmup_candles: 1000
-  sma_regime_period: 150
-  bull_leverage: 2.0
+  bull_leverage: 3.5
+  mid_leverage: 2.4
+  min_leverage: 1.4
+  flash_wick_limit: -0.04
+  ladder_steps: [1.0, 1.8, 2.5]
   bear_short_hedge_weight: 0.15    # 0.15 = 15% BTC short hedge in bear regime
   cash_apr: 0.0                   # Set > 0 if using Binance Earn
 
@@ -35,7 +38,7 @@ strategy:
 risk:
   max_orders_per_cycle: 6
   max_single_order_usd: 10000
-  max_portfolio_change_pct: 1.00
+  max_portfolio_change_pct: 3.50
   min_seconds_between_orders: 1
   allowed_symbols:
     - BTC/USDT

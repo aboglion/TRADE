@@ -637,7 +637,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             state = self.state_store.load_state() if self.state_store else None
             strat_state = state.strategy_state if state else {}
             positions_state = strat_state.get("positions", {}) if isinstance(strat_state, dict) else {}
-            bull_peak = float(strat_state.get("bull_peak", 0.0) if isinstance(strat_state, dict) else 0.0)
+            macro_state = strat_state.get("macro_state", {}) if isinstance(strat_state, dict) else {}
+            bull_peak = float(macro_state.get("bull_peak") or strat_state.get("bull_peak", 0.0) or 0.0)
+            bars_since_circuit_trip = int(macro_state.get("bars_since_circuit_trip") or strat_state.get("bars_since_circuit_trip", 999))
 
             min_adx_map = {"BTC": 20.0, "ETH": 22.0, "SOL": 24.0}
             weight_map = {"BTC": 0.40, "ETH": 0.30, "SOL": 0.30}
@@ -649,6 +651,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             btc_daily_close = 0.0
             btc_sma150 = 0.0
             btc_ema20_daily = 0.0
+            btc_atr_pct = 0.035
+            btc_intraday_dip_pct = 0.0
 
             import ccxt
             exchange = None
@@ -670,6 +674,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         btc_sma150 = float(df_btc_daily["Close"].rolling(150).mean().iloc[-1])
                     if len(df_btc_daily) >= 20:
                         btc_ema20_daily = float(df_btc_daily["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+                    if len(df_btc_daily) >= 14:
+                        tr1 = df_btc_daily["High"] - df_btc_daily["Low"]
+                        tr2 = (df_btc_daily["High"] - df_btc_daily["Close"].shift(1)).abs()
+                        tr3 = (df_btc_daily["Low"] - df_btc_daily["Close"].shift(1)).abs()
+                        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                        atr14 = tr.rolling(14).mean()
+                        btc_atr_pct = float((atr14 / df_btc_daily["Close"]).iloc[-1])
+
+                    c_open = float(df_btc_daily["Open"].iloc[-1])
+                    c_low = float(df_btc_daily["Low"].iloc[-1])
+                    if c_open > 0:
+                        btc_intraday_dip_pct = round(((c_low - c_open) / c_open) * 100.0, 2)
             except Exception as ex_btc:
                 logger.warning("Failed fetching BTC daily candles for macro regime: %s", ex_btc)
 
@@ -677,8 +693,59 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             peak = max(bull_peak, btc_daily_close)
             pullback_pct = round(((btc_daily_close - peak) / peak) * 100.0, 2) if peak > 0 else 0.0
             under_ema = (btc_daily_close < btc_ema20_daily) if btc_ema20_daily > 0 else False
-            risk_guard = (pullback_pct < -8.0 or under_ema)
-            leverage = 1.0 if (risk_guard or macro_regime == "BEAR") else 2.0
+
+            # Dynamic Flash-Guarded 3.5x Model & Re-Entry Ladder Evaluation
+            flash_wick_limit_pct = -4.0
+            flash_triggered = (btc_intraday_dip_pct < flash_wick_limit_pct)
+
+            if macro_regime == "BEAR":
+                leverage = 0.0
+                active_tier = "BEAR HEDGE (15% Short BTC + 85% USDT)"
+                stepped_pullback_active = False
+                hard_risk_active = False
+                ladder_step = "N/A"
+                ladder_cap = 0.0
+            else:
+                hard_risk_active = (pullback_pct < -8.0 or under_ema)
+                stepped_pullback_active = (-8.0 <= pullback_pct < -4.0)
+
+                # Base leverage selection
+                if hard_risk_active:
+                    selected_lev = 1.0
+                    active_tier = f"Hard Risk Guard (1.0x, pullback={pullback_pct:.1f}%, under_ema={under_ema})"
+                elif stepped_pullback_active:
+                    selected_lev = 1.4
+                    active_tier = f"Stepped Pullback Guard (1.4x, pullback={pullback_pct:.1f}%)"
+                elif btc_atr_pct < 0.024:
+                    selected_lev = 3.5
+                    active_tier = f"Low Volatility Tier (3.5x, ATR={btc_atr_pct*100:.2f}%)"
+                elif btc_atr_pct < 0.036:
+                    selected_lev = 2.4
+                    active_tier = f"Mid Volatility Tier (2.4x, ATR={btc_atr_pct*100:.2f}%)"
+                else:
+                    selected_lev = 1.4
+                    active_tier = f"High Volatility Tier (1.4x, ATR={btc_atr_pct*100:.2f}%)"
+
+                # Re-entry ladder capping
+                ladder_steps = [1.0, 1.8, 2.5]
+                if 1 <= bars_since_circuit_trip <= len(ladder_steps):
+                    ladder_step = f"Step {bars_since_circuit_trip}/3"
+                    ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
+                    if selected_lev > ladder_cap:
+                        selected_lev = ladder_cap
+                        active_tier += f" | Re-Entry Ladder ({ladder_cap:.1f}x Cap)"
+                else:
+                    ladder_step = "Completed (Full 3.5x Unlocked)"
+                    ladder_cap = 3.5
+
+                # Flash circuit breaker override
+                if selected_lev > 1.0 and flash_triggered:
+                    selected_lev = 1.0
+                    active_tier = f"Flash Breaker Triggered (1.0x Cut, dip={btc_intraday_dip_pct:.1f}%)"
+
+                leverage = selected_lev
+
+            total_crypto_exposure = round((0.70 * leverage + 0.30) * 100.0, 0) if macro_regime == "BULL" else 0.0
 
             # 2. Iterate each symbol and compute decision tree & indicator meters
             for pair in symbols:
@@ -750,8 +817,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "met": macro_regime == "BULL",
                         },
                         {
+                            "id": "node_leverage_tier",
+                            "title": "2. מדרגת מינוף שוורית (Dynamic Leverage Tier)",
+                            "subtitle": "קביעת מינוף דינמי (3.5x / 2.4x / 1.4x) לפי ATR% וסולם התאוששות",
+                            "criteria": f"Dynamic Leverage: {leverage:.1f}x (חשיפה {total_crypto_exposure:.0f}%)",
+                            "actual": active_tier,
+                            "met": leverage > 1.0,
+                        },
+                        {
                             "id": "node_ema_alignment",
-                            "title": "2. מבנה ממוצעים (EMA Trend)",
+                            "title": "3. מבנה ממוצעים (EMA Trend)",
                             "subtitle": "מגמת עלייה בנכס (Strong Bull / Trend)",
                             "criteria": "Regime in [STRONG_BULL, TREND]",
                             "actual": asset_regime,
@@ -759,7 +834,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_donchian_breakout",
-                            "title": "3. פריצת דונצ'יאן 30 / כניסה חוזרת EMA20",
+                            "title": "4. פריצת דונצ'יאן 30 / כניסה חוזרת EMA20",
                             "subtitle": "סגירת 4H מעל שיא 30 נרות או תיקון ממוצע",
                             "criteria": f"Close >= Donchian30 (${donchian30:,.2f}) OR EMA20 Re-entry",
                             "actual": f"${c_close:,.2f} ({gap_pct:+.2f}%)",
@@ -767,7 +842,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_adx_filter",
-                            "title": "4. עוצמת מגמה (ADX Filter)",
+                            "title": "5. עוצמת מגמה (ADX Filter)",
                             "subtitle": "מדד ADX מעל סף המינימום לעוצמה",
                             "criteria": f"ADX >= {min_adx}",
                             "actual": f"{c_adx:.1f}",
@@ -775,7 +850,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_pyramiding",
-                            "title": "5. פירמידינג והגדלת פוזיציה (Pyramiding Additions)",
+                            "title": "6. פירמידינג והגדלת פוזיציה (Pyramiding Additions)",
                             "subtitle": "הוספת 50%+ / 30%+ בטרנד חזק מעל EMA20",
                             "criteria": "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull)",
                             "actual": "Active Position Pyramiding Ready" if is_active else "Initial Entry Mode",
@@ -793,8 +868,24 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "triggered": macro_regime == "BEAR",
                         },
                         {
+                            "id": "node_flash_circuit_breaker",
+                            "title": "2. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
+                            "subtitle": "צניחה תוך-יומית מנר הפתיחה מעבר ל-4.0%- חותכת מיד ל-1.0x",
+                            "criteria": f"Intraday Dip < {flash_wick_limit_pct:.1f}% -> Cut to 1.0x",
+                            "actual": f"Intraday Dip: {btc_intraday_dip_pct:+.2f}% ({'TRIGGERED' if flash_triggered else 'SAFE'})",
+                            "triggered": flash_triggered,
+                        },
+                        {
+                            "id": "node_stepped_pullback",
+                            "title": "3. מגן נסיגה משיא השוק (Stepped Pullback Guard)",
+                            "subtitle": "נסיגה של 4%-8% חותכת ל-1.4x, מעל 8% או מתחת EMA20 חותכת ל-1.0x",
+                            "criteria": "Pullback < -4.0% (Cut to 1.4x) / < -8.0% or < EMA20 (Cut to 1.0x)",
+                            "actual": f"Pullback: {pullback_pct:+.2f}%, Under EMA20: {under_ema}",
+                            "triggered": (stepped_pullback_active or hard_risk_active),
+                        },
+                        {
                             "id": "node_initial_risk_stop",
-                            "title": "2. סטופ סיכון ראשוני (Initial Risk Stop)",
+                            "title": "4. סטופ סיכון ראשוני (Initial Risk Stop)",
                             "subtitle": "ירידה מתחת לסיכון הראשוני המורשה בכניסה",
                             "criteria": f"Low <= Initial Stop (${initial_stop:,.2f})" if initial_stop else f"Initial Stop = ${c_close - init_risk_atr * c_atr:,.2f}",
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${initial_stop:,.2f}" if initial_stop else ""),
@@ -802,23 +893,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_atr_trailing_stop",
-                            "title": "3. סטופ נגרר דינמי (ATR Trailing Stop)",
+                            "title": "5. סטופ נגרר דינמי (ATR Trailing Stop)",
                             "subtitle": "נפילה משיא הפוזיציה מעבר למרחק ATR מורשה",
                             "criteria": f"Low <= Trailing Stop (${trailing_stop:,.2f})" if trailing_stop else f"Trailing Stop = ${c_high - tb * c_atr:,.2f}",
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${trailing_stop:,.2f}" if trailing_stop else ""),
                             "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop) else False,
                         },
                         {
-                            "id": "node_tp1_partial",
-                            "title": "4. TP1 מימוש חלקי (Partial Take-Profit)",
-                            "subtitle": "מימוש 30% מהפוזיציה כשהרווח מגיע ל-4.5 ATR (מושבת כרגע)",
-                            "criteria": f"High >= Entry + 4.5×ATR (TP1 {'ENABLED' if False else 'DISABLED'})",
-                            "actual": f"High ${c_high:,.2f}" + (f" vs Target ${entry_px + 4.5 * atr_at_entry:,.2f}" if (is_active and entry_px > 0 and atr_at_entry > 0) else " (No Active Position)"),
-                            "triggered": (is_active and entry_px > 0 and atr_at_entry > 0 and c_high >= entry_px + 4.5 * atr_at_entry),
-                        },
-                        {
                             "id": "node_ema_breakdown",
-                            "title": "5. שבירת ממוצעים (EMA Exit)",
+                            "title": "6. שבירת ממוצעים (EMA Exit)",
                             "subtitle": "סגירה מתחת ל-EMA50 (Trend בלבד — EMA200 לא פעיל ב-Strong Bull)",
                             "criteria": "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
                             "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f} / EMA200 ${ema200:,.2f}",
@@ -874,8 +957,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "bull_peak": round(peak, 2),
                     "pullback_pct": pullback_pct,
                     "under_ema20_daily": under_ema,
-                    "risk_guard_active": risk_guard,
-                    "effective_leverage": leverage,
+                    "risk_guard_active": hard_risk_active,
+                    "stepped_pullback_active": stepped_pullback_active,
+                    "effective_leverage": round(leverage, 1),
+                    "btc_atr_pct": round(btc_atr_pct * 100.0, 2),
+                    "btc_intraday_dip_pct": btc_intraday_dip_pct,
+                    "flash_wick_limit_pct": flash_wick_limit_pct,
+                    "flash_circuit_triggered": flash_triggered,
+                    "bars_since_circuit_trip": bars_since_circuit_trip,
+                    "ladder_step": ladder_step,
+                    "ladder_cap": round(ladder_cap, 1),
+                    "active_tier": active_tier,
+                    "total_crypto_weight_pct": total_crypto_exposure,
                 },
                 "assets": assets_data,
             }

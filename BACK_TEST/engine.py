@@ -738,7 +738,17 @@ def run_rebalanced_hybrid_engine(initial_capital=1000.0, core_ratio=0.80, weight
 def run_hybrid_engine(initial_capital=1000.0, core_ratio=0.80, weights=None):
     return run_rebalanced_hybrid_engine(initial_capital=initial_capital, core_ratio=core_ratio, weights=weights)
 
-def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_leverage=2.0, bear_short_hedge=0.15, cash_apr=0.04):
+def run_dynamic_adaptive_engine(
+    initial_capital=1000.0,
+    weights=None,
+    bull_leverage=3.5,
+    mid_leverage=2.4,
+    min_leverage=1.4,
+    bear_short_hedge=0.15,
+    cash_apr=0.04,
+    flash_wick_limit=-0.04,
+    ladder_steps=(1.0, 1.8, 2.5)
+):
     if weights is None:
         weights = DEFAULT_WEIGHTS
 
@@ -756,9 +766,22 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
 
     btc_df = load_real_data(FILES['BTC'])
     btc_daily = btc_df['Close'].resample('D').last().dropna()
+    btc_high_daily = btc_df['High'].resample('D').max().dropna()
+    btc_low_daily = btc_df['Low'].resample('D').min().dropna()
+    btc_open_daily = btc_df['Open'].resample('D').first().dropna()
+
     ema20_daily = btc_daily.ewm(span=20, adjust=False).mean()
     sma150 = btc_daily.rolling(150).mean()
     is_bull = (btc_daily > sma150).fillna(False)
+
+    # Intraday Flash Shock Wick calculation
+    tr1 = btc_high_daily - btc_low_daily
+    tr2 = (btc_high_daily - btc_daily.shift(1)).abs()
+    tr3 = (btc_low_daily - btc_daily.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr14 = tr.rolling(14).mean()
+    atr_pct = atr14 / btc_daily
+    intraday_max_dip = (btc_low_daily - btc_open_daily) / btc_open_daily
 
     common_idx = hybrid_base.index.intersection(bh_comb.index).intersection(is_bull.index)
     hy_aligned = hybrid_base.loc[common_idx]
@@ -766,12 +789,15 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
     is_bull_aligned = is_bull.loc[common_idx]
     btc_daily_aligned = btc_daily.loc[common_idx]
     ema20_aligned = ema20_daily.loc[common_idx]
+    atr_pct_aligned = atr_pct.loc[common_idx]
+    intraday_dip_aligned = intraday_max_dip.loc[common_idx]
 
     cap = initial_capital
     vals = [cap]
     daily_cash_yield = (1.0 + cash_apr)**(1.0 / 365.25) - 1.0 if cash_apr > 0 else 0.0
 
     bull_peak = bh_aligned.iloc[0]
+    bars_since_circuit_trip = 999
 
     for i in range(1, len(common_idx)):
         d_prev = common_idx[i-1]
@@ -786,24 +812,50 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
                 bull_peak = bh_aligned.loc[d_prev]
 
             bh_pullback = (bh_aligned.loc[d_prev] - bull_peak) / bull_peak if bull_peak > 0 else 0.0
-
-            # Dynamic Bullish Risk Guard: De-leverage to 1.0x if pullback > 8% or price < EMA20
             under_ema = btc_daily_aligned.loc[d_prev] < ema20_aligned.loc[d_prev]
+            atr_p = atr_pct_aligned.loc[d_prev] if pd.notna(atr_pct_aligned.loc[d_prev]) else 0.035
+            intraday_dip = intraday_dip_aligned.loc[d_curr] if pd.notna(intraday_dip_aligned.loc[d_curr]) else 0.0
+
+            # 1. Hard Risk Guard (Pullback > 8% or price broke EMA20)
             if bh_pullback < -0.08 or under_ema:
-                effective_leverage = 1.0
+                selected_lev = 1.0
+            # 2. Pre-emptive Stepped Pullback Guard (Pullback between 4% and 8%)
+            elif bh_pullback < -0.04:
+                selected_lev = min_leverage
+            # 3. Smart ATR Volatility Tiers
+            elif atr_p < 0.024:
+                selected_lev = bull_leverage
+            elif atr_p < 0.036:
+                selected_lev = mid_leverage
             else:
-                effective_leverage = bull_leverage
+                selected_lev = min_leverage
+
+            # 4. Controlled Re-Entry Ladder after circuit trip
+            if ladder_steps is not None and len(ladder_steps) > 0:
+                if 1 <= bars_since_circuit_trip <= len(ladder_steps):
+                    ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
+                    selected_lev = min(selected_lev, ladder_cap)
+
+            # 5. Intraday Flash Circuit Breaker
+            if selected_lev > 1.0 and intraday_dip < flash_wick_limit:
+                bars_since_circuit_trip = 1
+                excess = min(0.0, (r_bh - 1.0) - flash_wick_limit)
+                r_bh_lev = 1.0 + (flash_wick_limit * selected_lev) + excess
+            else:
+                bars_since_circuit_trip += 1
+                r_bh_lev = 1.0 + (r_bh - 1.0) * selected_lev
+
+            # Deduct funding cost for leveraged portion (~0.03% daily on borrowed margin)
+            daily_funding_cost = 0.0003 * max(0.0, selected_lev - 1.0)
+            r_bh_lev -= daily_funding_cost
+            r_hy_lev = r_hy
 
             w_bh = 0.70
             w_hy = 0.30
-            r_bh_lev = 1.0 + (r_bh - 1.0) * effective_leverage
-            # Deduct funding cost for leveraged portion (~0.03% daily on borrowed margin)
-            daily_funding_cost = 0.0003 * max(0.0, effective_leverage - 1.0)
-            r_bh_lev -= daily_funding_cost
-            r_hy_lev = r_hy
             port_r = w_bh * r_bh_lev + w_hy * r_hy_lev
         else:
             bull_peak = bh_aligned.loc[d_curr]
+            bars_since_circuit_trip = 999
             w_hy = max(0.0, 0.85 - bear_short_hedge)
             w_short = bear_short_hedge
             r_short = 1.0 - (r_bh - 1.0)
@@ -814,6 +866,16 @@ def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_l
 
     dyn_eq = pd.Series(vals, index=common_idx)
     return dyn_eq, hy_aligned, bh_aligned
+
+def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_leverage=3.5, bear_short_hedge=0.15, cash_apr=0.04):
+    """Production alias maintaining full backward compatibility with upgraded 3.5x Flash & Ladder engine."""
+    return run_dynamic_adaptive_engine(
+        initial_capital=initial_capital,
+        weights=weights,
+        bull_leverage=bull_leverage,
+        bear_short_hedge=bear_short_hedge,
+        cash_apr=cash_apr
+    )
 
 
 
@@ -941,7 +1003,7 @@ def build_dashboard_data():
     weights = DEFAULT_WEIGHTS
     files = FILES
 
-    dyn_eq, hybrid_base, bh_comb = run_dynamic_adaptive_20x_engine(initial_capital=capital, weights=weights, bull_leverage=2.0)
+    dyn_eq, hybrid_base, bh_comb = run_dynamic_adaptive_engine(initial_capital=capital, weights=weights, bull_leverage=3.5)
 
     dfs = {name: load_real_data(path) for name, path in files.items()}
     micro_eqs, micro_asset_trades = {}, {}
@@ -1099,10 +1161,10 @@ def generate_dashboard_html():
     <div class="container">
         <header>
             <div class="title-group">
-                <h1>🏆 Dynamic Regime-Adaptive 2.0x (Ultimate Winning Strategy)</h1>
-                <p>מנוע מסחר כמותי דינמי: 70/30 (מינוף 2.0x בשוק עולה) | 90/10 (הגנת מזומן 1.0x בשוק יורד/דשדוש)</p>
+                <h1>🏆 Dynamic Regime-Adaptive 3.5x Flash-Guarded (with Re-Entry Ladder)</h1>
+                <p>מנוע מסחר כמותי מוסדי: מינוף מדורג 3.5x בשוק עולה עם הגנות בזק תוך-יומיות וסולם חזרה | הגנת מזומן ושורט גידור בשוק דובי</p>
             </div>
-            <span class="badge">WINNING PRODUCTION STRATEGY</span>
+            <span class="badge">INSTITUTIONAL QUANT PRODUCTION STRATEGY</span>
         </header>
 
         <div class="controls-bar">
@@ -1117,7 +1179,7 @@ def generate_dashboard_html():
             
             <div style="margin-right: auto; display: flex; gap: 8px; align-items: center;">
                 <span style="font-size: 13px; color: var(--text-secondary); font-weight: 600;">תצוגת נכס:</span>
-                <button class="btn active" id="btn-asset-PORT" onclick="selectAsset('PORT')">תיק משולב (2.0x Dynamic)</button>
+                <button class="btn active" id="btn-asset-PORT" onclick="selectAsset('PORT')">תיק משולב (3.5x Flash-Guarded)</button>
                 <button class="btn" id="btn-asset-BTC" onclick="selectAsset('BTC')">BTC / USD</button>
                 <button class="btn" id="btn-asset-ETH" onclick="selectAsset('ETH')">ETH / USD</button>
                 <button class="btn" id="btn-asset-SOL" onclick="selectAsset('SOL')">SOL / USD</button>

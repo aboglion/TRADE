@@ -91,6 +91,10 @@ def run_sim(duration_days: int, start_btc: float, start_eth: float, start_usdt: 
         asset_weights=asset_weights,
         sma_regime_period=config.strategy.sma_regime_period,
         bull_leverage=config.strategy.bull_leverage,
+        mid_leverage=config.strategy.mid_leverage,
+        min_leverage=config.strategy.min_leverage,
+        flash_wick_limit=config.strategy.flash_wick_limit,
+        ladder_steps=config.strategy.ladder_steps,
         bear_short_hedge_weight=config.strategy.bear_short_hedge_weight,
     )
     micro_strategy = MicroSatelliteStrategy(asset_weights=asset_weights)

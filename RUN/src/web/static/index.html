@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quant 2.0x Engine — Live Trading Dashboard</title>
+    <title>Quant 3.5x Engine — Live Trading Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
                         <span>⚡</span>
                     </div>
                     <div class="brand-text">
-                        <h1>QUANT 2.0x ENGINE</h1>
+                        <h1>QUANT 3.5x ENGINE</h1>
                         <span class="sub-logo">Dynamic Regime-Adaptive Trading System</span>
                     </div>
                 </div>
@@ -159,7 +159,7 @@
                             <span class="mini-chart-title">MACRO TREND & SMA GAP</span>
                             <div class="pnl-summary-pills mini-pnl-pills">
                                 <span class="pnl-pill pnl-pill-high" id="regimeGapPill" title="BTC Distance to SMA-150">+0.00%</span>
-                                <span class="pnl-pill pnl-pill-high" id="regimeLevPill" title="Target Leverage Strategy">2.0x BULL</span>
+                                <span class="pnl-pill pnl-pill-high" id="regimeLevPill" title="Target Leverage Strategy">3.5x BULL</span>
                             </div>
                         </div>
                         <div class="chart-wrapper mini-chart-wrapper regime-chart-wrapper">
@@ -595,7 +595,7 @@
                         </div>
                         <div class="macro-banner-right">
                             <span class="macro-banner-pill" id="macroBannerRiskGuard">Risk Guard: INACTIVE</span>
-                            <span class="macro-banner-pill pill-lev" id="macroBannerLev">Leverage: 2.0x</span>
+                            <span class="macro-banner-pill pill-lev" id="macroBannerLev">Leverage: 3.5x</span>
                         </div>
                     </div>
 
@@ -677,10 +677,15 @@
                         <div class="rule-card full-width-rule">
                             <div class="rule-card-header">
                                 <span class="rule-icon">⚡</span>
-                                <h4>מנגנון ניהול סיכונים ומינוף (Dynamic Bullish Risk Guard & Leverage 2.0x)</h4>
+                                <h4>מנגנון ניהול סיכונים, מינוף מדורג (עד 3.5x) וסולם חזרה (Flash & Ladder Guard)</h4>
                             </div>
                             <div class="rule-body-text">
-                                כשהשוק ב-Bull Regime, המערכת פועלת במינוף מורשה של <strong>2.0x</strong>. במידה וביטקוין יורד מתחת ל-EMA20 יומית או מתקן מעל <strong>8%</strong> משיא השוק, מופעל <strong>Risk Guard</strong> המוריד מיידית את המינוף ל-<strong>1.0x</strong> בלבד להגנת ההון. בשוק דובי (BEAR), מופעל <strong>15% Short Hedge על BTC</strong>.
+                                כשהשוק ב-Bull Regime, המערכת פועלת במינוף מורשה דינמי של עד <strong>3.5x</strong> בהתאם לתנודתיות ATR יומית: 
+                                <strong>3.5x</strong> בשוק שקט (ATR &lt; 2.8%), <strong>2.8x</strong> בתנודתיות רגילה (2.8%–4.2%), ו-<strong>1.6x</strong> בתנודתיות גבוהה (ATR &gt; 4.2%).
+                                <br><br>
+                                <strong>הגנות בזק ונסיגה:</strong> נסיגה משיא מעל <strong>4.2%</strong> מורידה מינוף ל-<strong>2.0x</strong>. נסיגה מעל <strong>8%</strong> או ירידה מתחת ל-EMA20 יומית מפעילה <strong>Hard Risk Guard (1.0x)</strong>. ירידת בזק תוך-יומית מעל <strong>4.0%-</strong> מפעילה <strong>מפסק ביטחון מיידי (Flash Circuit Breaker)</strong>.
+                                <br><br>
+                                <strong>סולם חזרה מדורג (Re-Entry Ladder):</strong> ביציאה ממצב חירום, המערכת חוזרת לשוק בהדרגה על פני 3 נרות (נר 1: 1.5x, נר 2: 2.2x, נר 3: שחרור מלא) למניעת מלכודות שוורים (Bull Traps). בשוק דובי (BEAR), מופעל <strong>15% Short Hedge על BTC</strong>.
                             </div>
                         </div>
                     </div>
@@ -692,6 +697,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=15"></script>
+    <script src="app.js?v=17"></script>
 </body>
 </html>

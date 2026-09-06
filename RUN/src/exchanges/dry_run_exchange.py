@@ -223,14 +223,16 @@ class DryRunExchange:
         # Basic margin/balance check
         quote = intent.symbol.split("/")[1] if "/" in intent.symbol else "USDT"
         is_futures = True  # Strategy operates in futures mode
-        leverage = 2.0
+        leverage = 3.5
         margin_req = cost / leverage if is_futures else cost
+        total_collateral = self._calculate_total_collateral()
+        available_margin = max(self._get_free(quote), total_collateral)
 
-        if intent.side == OrderSide.BUY and margin_req > (self._get_free(quote) + 1e-4):
+        if intent.side == OrderSide.BUY and margin_req > (available_margin + 1e-4):
              return OrderResult(
                  client_order_id=intent.client_order_id,
                  status=OrderStatus.FAILED,
-                 error_message=f"Insufficient balance: need {margin_req:.2f} {quote} margin (cost={cost:.2f})",
+                 error_message=f"Insufficient balance: need {margin_req:.2f} {quote} margin (available={available_margin:.2f}, cost={cost:.2f})",
              )
 
         # Handle Futures execution
@@ -363,6 +365,21 @@ class DryRunExchange:
             self._balances[currency] = {"free": 0.0, "used": 0.0, "total": 0.0}
         self._balances[currency]["free"] += delta
         self._balances[currency]["total"] += delta
+
+    def _calculate_total_collateral(self) -> float:
+        total = 0.0
+        for curr, b in self._balances.items():
+            tot = float(b.get("total", b.get("free", 0.0)))
+            if curr in ("USDT", "BUSD", "USDC", "USD"):
+                total += tot
+            else:
+                sym = f"{curr}/USDT"
+                px = self._last_prices.get(sym, 0.0)
+                if px <= 0:
+                    px = self.fetch_ticker_price(sym)
+                total += tot * px
+        unrealized = sum(float(p.get("unrealizedPnl", 0.0)) for p in self.fetch_positions())
+        return max(0.0, total + unrealized)
 
     @staticmethod
     def _parse_symbol(symbol: str):

@@ -62,6 +62,10 @@ _BASE_CFG = dict(
     base_alloc=0.0,
     strong_alloc=1.5,
     max_add_entries=2,
+    pyramid_profit_r=0.6,
+    pyramid_pullback_atr=1.5,
+    add1_frac=0.50,
+    add2_frac=0.30,
 )
 
 _CFG_BTC = dict(
@@ -107,7 +111,11 @@ class RegimeAdaptiveStrategy(IStrategy):
         self,
         asset_weights: Optional[Dict[str, float]] = None,
         sma_regime_period: int = 150,
-        bull_leverage: float = 2.0,
+        bull_leverage: float = 3.5,
+        mid_leverage: float = 2.4,
+        min_leverage: float = 1.4,
+        flash_wick_limit: float = -0.04,
+        ladder_steps: Optional[List[float]] = None,
         bear_short_hedge_weight: float = 0.15,
         asset_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         core_ratio: float = 0.80,
@@ -115,6 +123,10 @@ class RegimeAdaptiveStrategy(IStrategy):
         self._weights = asset_weights or DEFAULT_WEIGHTS
         self._sma_period = sma_regime_period
         self._bull_leverage = bull_leverage
+        self._mid_leverage = mid_leverage
+        self._min_leverage = min_leverage
+        self._flash_wick_limit = flash_wick_limit
+        self._ladder_steps = ladder_steps if ladder_steps is not None else [1.0, 1.8, 2.5]
         self._bear_short_hedge = bear_short_hedge_weight
         self._asset_configs = asset_configs or ASSET_CONFIGS
         self._trail_overrides = TRAIL_OVERRIDES
@@ -124,12 +136,16 @@ class RegimeAdaptiveStrategy(IStrategy):
         # {"BTC": {"active": bool, "entry_px": float, "atr_at_entry": float, "high_water": float, "mode": str}}
         self._positions: Dict[str, Dict[str, Any]] = {}
         self._bull_peak: float = 0.0
+        self._bars_since_circuit_trip: int = 999
+        self._effective_leverage: float = 1.0
 
     def export_state(self) -> Dict[str, Any]:
         """Export state for persistence in BotState.strategy_state."""
         return {
             "positions": self._positions,
             "bull_peak": self._bull_peak,
+            "bars_since_circuit_trip": self._bars_since_circuit_trip,
+            "effective_leverage": self._effective_leverage,
         }
 
     def import_state(self, state_dict: Dict[str, Any]) -> None:
@@ -142,6 +158,8 @@ class RegimeAdaptiveStrategy(IStrategy):
             logger.info("Imported active position tracking state: %s", list(positions.keys()))
             
         self._bull_peak = state_dict.get("bull_peak", 0.0)
+        self._bars_since_circuit_trip = state_dict.get("bars_since_circuit_trip", 999)
+        self._effective_leverage = state_dict.get("effective_leverage", 1.0)
 
     def compute_signals(
         self,
@@ -179,6 +197,10 @@ class RegimeAdaptiveStrategy(IStrategy):
             metadata={
                 "sma_period": self._sma_period,
                 "bull_leverage": self._bull_leverage,
+                "mid_leverage": self._mid_leverage,
+                "min_leverage": self._min_leverage,
+                "effective_leverage": self._effective_leverage,
+                "bars_since_circuit_trip": self._bars_since_circuit_trip,
                 "active_positions": {k: v for k, v in self._positions.items() if v.get("active")},
             },
         )
@@ -251,6 +273,9 @@ class RegimeAdaptiveStrategy(IStrategy):
         if regime == Regime.BEAR:
             # Bear mode: Short hedge + Cash protection
             logger.info("Bear regime active: resetting all long positions to inactive")
+            self._bull_peak = 0.0
+            self._bars_since_circuit_trip = 999
+            self._effective_leverage = 0.0
             for base in list(self._positions.keys()):
                 self._positions[base]["active"] = False
 
@@ -285,35 +310,87 @@ class RegimeAdaptiveStrategy(IStrategy):
             return target_weights, signals
 
         # ── BULL REGIME ───────────────────────────────────────
-        # Check Bullish Risk Guard (engine.py lines 790-795)
+        # Indicators for Bullish Risk Guard & Leverage Sizing (engine.py lines 790-850)
         btc_key = self._find_btc_key(candles_by_asset)
         df_btc = candles_to_dataframe(candles_by_asset[btc_key])
         btc_daily = df_btc["Close"].resample("D").last().dropna()
+        btc_high = df_btc["High"].resample("D").max().dropna()
+        btc_low = df_btc["Low"].resample("D").min().dropna()
+        btc_open = df_btc["Open"].resample("D").first().dropna()
+
         ema20_daily = btc_daily.ewm(span=20, adjust=False).mean()
 
+        # Daily ATR% for volatility-scaled leverage
+        tr1 = btc_high - btc_low
+        tr2 = (btc_high - btc_daily.shift(1)).abs()
+        tr3 = (btc_low - btc_daily.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr14 = tr.rolling(window=14).mean()
+        atr_pct = atr14 / btc_daily
+
+        # Intraday drop from open (flash dip)
+        intraday_max_dip = (btc_low - btc_open) / btc_open
+
         latest_btc = btc_daily.iloc[-1]
-        latest_ema20 = ema20_daily.iloc[-1]
+        latest_ema20 = ema20_daily.dropna().iloc[-1] if not ema20_daily.dropna().empty else latest_btc
+        latest_atr_pct = atr_pct.dropna().iloc[-1] if not atr_pct.dropna().empty else 0.035
+        latest_dip = intraday_max_dip.dropna().iloc[-1] if not intraday_max_dip.dropna().empty else 0.0
         
         # Update persistent bull peak
         if regime == Regime.BULL and latest_btc > self._bull_peak:
             self._bull_peak = latest_btc
             
-        peak_btc = self._bull_peak if self._bull_peak > 0 else btc_daily.max()
+        peak_btc = self._bull_peak if self._bull_peak > 0 else latest_btc
         btc_pullback = (latest_btc - peak_btc) / peak_btc if peak_btc > 0 else 0.0
         under_ema = latest_btc < latest_ema20
 
-        risk_guard_active = btc_pullback < -0.08 or under_ema
-        effective_leverage = 1.0 if risk_guard_active else self._bull_leverage
-
-        if risk_guard_active:
-            logger.info(
-                "Bullish Risk Guard ACTIVE (pullback=%.2f%%, under_ema=%s) → Effective Leverage=1.0x",
-                btc_pullback * 100, under_ema,
-            )
+        # 1. Hard Risk Guard (Pullback > 8% or price broke EMA20)
+        if btc_pullback < -0.08 or under_ema:
+            selected_lev = 1.0
+            lev_reason = f"Hard Risk Guard (pullback={btc_pullback*100:.1f}%, under_ema={under_ema})"
+        # 2. Pre-emptive Stepped Pullback Guard (Pullback between 4% and 8%)
+        elif btc_pullback < -0.04:
+            selected_lev = self._min_leverage
+            lev_reason = f"Stepped Pullback Guard (pullback={btc_pullback*100:.1f}%)"
+        # 3. Smart ATR Volatility Tiers
+        elif latest_atr_pct < 0.024:
+            selected_lev = self._bull_leverage
+            lev_reason = f"Low Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
+        elif latest_atr_pct < 0.036:
+            selected_lev = self._mid_leverage
+            lev_reason = f"Mid Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
         else:
-            logger.info("Full Bull Leverage active: %.1fx", effective_leverage)
+            selected_lev = self._min_leverage
+            lev_reason = f"High Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
 
-        total_crypto_weight = 0.70 * (effective_leverage / 2.0) * self._bull_leverage + 0.30
+        # 4. Controlled Re-Entry Ladder after circuit trip
+        if self._ladder_steps and len(self._ladder_steps) > 0:
+            if 1 <= self._bars_since_circuit_trip <= len(self._ladder_steps):
+                ladder_cap = self._ladder_steps[self._bars_since_circuit_trip - 1]
+                if selected_lev > ladder_cap:
+                    selected_lev = ladder_cap
+                    lev_reason += f" | Re-Entry Ladder step {self._bars_since_circuit_trip} (cap={ladder_cap:.1f}x)"
+
+        # 5. Intraday Flash Circuit Breaker
+        if selected_lev > 1.0 and latest_dip < self._flash_wick_limit:
+            self._bars_since_circuit_trip = 1
+            selected_lev = 1.0
+            logger.warning(
+                "FLASH CIRCUIT BREAKER TRIGGERED: intraday dip=%.2f%% < limit=%.2f%% → Cut to 1.0x",
+                latest_dip * 100, self._flash_wick_limit * 100,
+            )
+            lev_reason = f"Flash Circuit Breaker (intraday dip={latest_dip*100:.1f}%)"
+        else:
+            self._bars_since_circuit_trip += 1
+
+        effective_leverage = selected_lev
+        self._effective_leverage = effective_leverage
+        logger.info(
+            "Regime leverage evaluation: effective=%.1fx (%s)",
+            effective_leverage, lev_reason,
+        )
+
+        total_crypto_weight = 0.70 * effective_leverage + 0.30
 
         assigned_crypto_weight = 0.0
 
@@ -392,12 +469,14 @@ class RegimeAdaptiveStrategy(IStrategy):
                                 symbol, len(entries), c_close, pullback
                             )
 
-                # Pyramiding weight multiplier: 1.0 for initial entry, 1.5 for add 1, 1.8 for add 2
+                # Pyramiding weight multiplier using config add1_frac and add2_frac
+                add1_frac = cfg.get("add1_frac", 0.50)
+                add2_frac = cfg.get("add2_frac", 0.30)
                 pyramid_mult = 1.0
                 if len(entries) == 2:
-                    pyramid_mult = 1.5
+                    pyramid_mult = 1.0 + add1_frac
                 elif len(entries) >= 3:
-                    pyramid_mult = 1.8
+                    pyramid_mult = 1.0 + add1_frac + add2_frac
 
                 # Compute dynamic trailing stop
                 tb = trail_override[0] if entry_mode == "STRONG_BULL_TREND" else trail_override[1]

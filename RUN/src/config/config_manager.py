@@ -51,7 +51,11 @@ class StrategyConfig:
     assets: Dict[str, AssetConfig] = field(default_factory=dict)
     warmup_candles: int = 1200
     sma_regime_period: int = 150
-    bull_leverage: float = 2.0
+    bull_leverage: float = 3.5
+    mid_leverage: float = 2.4
+    min_leverage: float = 1.4
+    flash_wick_limit: float = -0.04
+    ladder_steps: List[float] = field(default_factory=lambda: [1.0, 1.8, 2.5])
     bear_short_hedge_weight: float = 0.0   # 0 for spot-only (hold USDT)
     cash_apr: float = 0.0
     core_ratio: float = 0.80               # Macro/Micro allocation split
@@ -218,7 +222,11 @@ class ConfigManager:
             assets=assets,
             warmup_candles=s_raw.get("warmup_candles", 1200),
             sma_regime_period=s_raw.get("sma_regime_period", 150),
-            bull_leverage=s_raw.get("bull_leverage", 2.0),
+            bull_leverage=s_raw.get("bull_leverage", 3.5),
+            mid_leverage=s_raw.get("mid_leverage", 2.4),
+            min_leverage=s_raw.get("min_leverage", 1.4),
+            flash_wick_limit=s_raw.get("flash_wick_limit", -0.04),
+            ladder_steps=s_raw.get("ladder_steps", [1.0, 1.8, 2.5]),
             bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.0),
             cash_apr=s_raw.get("cash_apr", 0.0),
             core_ratio=s_raw.get("core_ratio", 0.80),
@@ -414,8 +422,8 @@ class ConfigManager:
 
         if config.risk.max_single_order_usd <= 0:
             raise ConfigError("max_single_order_usd must be positive.")
-        if config.risk.max_portfolio_change_pct <= 0 or config.risk.max_portfolio_change_pct > 1.0:
-            raise ConfigError("max_portfolio_change_pct must be in (0, 1.0].")
+        if config.risk.max_portfolio_change_pct <= 0 or config.risk.max_portfolio_change_pct > 5.0:
+            raise ConfigError("max_portfolio_change_pct must be in (0, 5.0].")
 
         # Warmup candles check for 4h SMA-150 regime detection
         required_candles = config.strategy.sma_regime_period * 6

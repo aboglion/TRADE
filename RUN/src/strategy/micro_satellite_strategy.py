@@ -25,10 +25,12 @@ DEFAULT_MICRO_CFG = {
     "rsi_surge_min": 56.0,
     "vol_surge_mult": 1.6,
     "donchian_micro_bars": 24,
+    "min_edge_to_fee_ratio": 6.0,
     "init_stop_atr": 1.8,
     "trail_atr": 3.2,
     "tp1_atr": 3.5,
     "tp1_fraction": 0.50,
+    "be_trigger_atr": 1.5,
     "max_hold_bars": 42,
     "base_alloc": 0.85,
     "strong_alloc": 0.95,
@@ -60,23 +62,21 @@ class MicroSatelliteStrategy:
         positions = state_dict.get("positions")
         if isinstance(positions, dict):
             self._positions = positions
-            logger.info("Imported Micro position state: %s", list(positions.keys()))
+            logger.info("Imported micro position tracking state: %s", list(positions.keys()))
 
     def compute_signals(
         self,
         candles_by_asset: Dict[str, List[Candle]],
         portfolio: PortfolioSnapshot,
-    ) -> Any:
-        """Compute target weights and signals for the Micro layer."""
+    ) -> StrategyDecision:
+        """
+        Compute micro-satellite trading signals from candle data.
+        """
         target_weights: Dict[str, float] = {}
         signals: List[StrategySignal] = []
 
         for symbol, candles in candles_by_asset.items():
             if not candles:
-                continue
-
-            # Ensure we only track assets we care about
-            if symbol not in self._weights:
                 continue
 
             base = symbol.split("/")[0] if "/" in symbol else symbol
@@ -86,6 +86,7 @@ class MicroSatelliteStrategy:
                     "active": False,
                     "entry_px": 0.0,
                     "extreme_px": 0.0,
+                    "stop_px": 0.0,
                     "entry_bar": 0,
                     "tp1_done": False,
                     "mode": "MICRO_NEUTRAL",
@@ -114,6 +115,7 @@ class MicroSatelliteStrategy:
                     pos_state["active"] = True
                     pos_state["entry_px"] = c_close
                     pos_state["extreme_px"] = c_close
+                    pos_state["stop_px"] = c_close - self._cfg["init_stop_atr"] * c_atr
                     pos_state["entry_bar"] = current_bar
                     pos_state["tp1_done"] = False
                     pos_state["mode"] = regime
@@ -130,35 +132,32 @@ class MicroSatelliteStrategy:
                 else:
                     target_weights[symbol] = 0.0
             else:
-                # Manage active position
+                # Manage active position matching BACK_TEST/engine.py run_micro_backtest
                 bars_held = current_bar - pos_state["entry_bar"]
                 prev_extreme = pos_state["extreme_px"]
                 entry_px = pos_state["entry_px"]
                 alloc = pos_state["alloc"]
+                stop_px = pos_state.get("stop_px", entry_px - self._cfg["init_stop_atr"] * c_atr)
 
-                pos_state["extreme_px"] = max(prev_extreme, c_high)
                 open_profit_atr = (c_close - entry_px) / max(c_atr, 1e-6)
-                high_profit_atr = (c_high - entry_px) / max(c_atr, 1e-6)
-                
                 raw_trail = prev_extreme - self._cfg["trail_atr"] * c_atr
-                stop_px = max(entry_px - self._cfg["init_stop_atr"] * c_atr, raw_trail)
-                
-                # Check TP1
-                tp1_signal = False
-                if not pos_state["tp1_done"] and high_profit_atr >= self._cfg["tp1_atr"]:
-                    pos_state["tp1_done"] = True
-                    alloc *= (1.0 - self._cfg["tp1_fraction"])
-                    pos_state["alloc"] = alloc
-                    tp1_signal = True
 
-                # Check Exit Conditions
+                # Breakeven trigger: when profit >= be_trigger_atr (1.5 ATR), raise stop to max(stop_px, entry_px * 1.003, raw_trail)
+                be_trigger_atr = self._cfg.get("be_trigger_atr", 1.5)
+                if open_profit_atr >= be_trigger_atr:
+                    stop_px = max(stop_px, entry_px * 1.003, raw_trail)
+                else:
+                    stop_px = max(stop_px, raw_trail)
+                pos_state["stop_px"] = stop_px
+
+                # Check Exit Conditions FIRST (matching BACK_TEST lines 612-623)
                 exit_reason = None
-                if c_close <= stop_px:
-                    exit_reason = f"Micro Stop Hit (Hold {bars_held}b, PnL {open_profit_atr:.1f} ATR)"
+                if latest.Low <= stop_px:
+                    exit_reason = f"Micro ATR Trail / Breakeven Stop Hit (Low {latest.Low:.2f} <= Stop {stop_px:.2f}, Hold {bars_held}b)"
+                elif c_close < latest.EMA50 and open_profit_atr < 0.2:
+                    exit_reason = f"Micro EMA50 Breakdown (Close {c_close:.2f} < EMA50 {latest.EMA50:.2f}, PnL {open_profit_atr:.2f} ATR)"
                 elif bars_held >= self._cfg["max_hold_bars"]:
-                    exit_reason = f"Micro Time Stop (Hold {bars_held}b)"
-                elif latest.EMA9 < latest.EMA21 and open_profit_atr > 0:
-                    exit_reason = f"Micro Momentum Loss (EMA9 < EMA21, Hold {bars_held}b)"
+                    exit_reason = f"Micro Time Stop (Hold {bars_held}b >= {self._cfg['max_hold_bars']}b)"
 
                 if exit_reason:
                     pos_state["active"] = False
@@ -171,7 +170,16 @@ class MicroSatelliteStrategy:
                         reason=exit_reason,
                     ))
                 else:
-                    # Maintain (or reduce via TP1)
+                    # ONLY update extreme_px and evaluate TP1 if NOT exited this bar (matching BACK_TEST line 625)
+                    pos_state["extreme_px"] = max(prev_extreme, c_high)
+                    tp1_signal = False
+                    high_profit_atr = (c_high - entry_px) / max(c_atr, 1e-6)
+                    if not pos_state.get("tp1_done") and high_profit_atr >= self._cfg["tp1_atr"]:
+                        pos_state["tp1_done"] = True
+                        alloc *= (1.0 - self._cfg["tp1_fraction"])
+                        pos_state["alloc"] = alloc
+                        tp1_signal = True
+
                     target_weights[symbol] = alloc * self._weights.get(symbol, 0.0)
                     if tp1_signal:
                         signals.append(StrategySignal(
@@ -179,7 +187,7 @@ class MicroSatelliteStrategy:
                             action=PositionAction.REDUCE,
                             asset_regime=pos_state["mode"],
                             target_weight=target_weights[symbol],
-                            reason=f"Micro TP1 Hit (+{open_profit_atr:.1f} ATR)",
+                            reason=f"Micro TP1 Hit (+{high_profit_atr:.1f} ATR)",
                         ))
 
         # Residual USDT weight for Micro Layer
