@@ -93,6 +93,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (clearOrdersBtn) clearOrdersBtn.addEventListener("click", clearOrdersTable);
 
     // Trigger Cycle Confirm Modal listeners
+    const triggerBtn = document.getElementById("triggerCycleBtn");
+    if (triggerBtn) triggerBtn.addEventListener("click", openTriggerCycleConfirmModal);
     document.getElementById("closeTriggerCycleConfirmModal").addEventListener("click", closeTriggerCycleConfirmModal);
     document.getElementById("cancelTriggerCycleConfirmBtn").addEventListener("click", closeTriggerCycleConfirmModal);
     document.getElementById("confirmTriggerCycleBtn").addEventListener("click", confirmTriggerCycle);
