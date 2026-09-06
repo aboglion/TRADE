@@ -167,7 +167,7 @@ class BotOrchestrator:
                     new_candles_by_pair[pair] = new_candles
 
             if not has_new_candles and not force:
-                logger.info("No new closed candles — cycle idle")
+                logger.debug("No new closed candles — cycle idle")
                 self._save_state(success=True)
                 return True
 

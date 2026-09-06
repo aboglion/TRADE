@@ -504,18 +504,63 @@ body {
 .alloc-symbol-badge {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
     font-weight: 700;
     color: #ffffff;
     font-size: 0.95rem;
     flex-shrink: 0;
+    flex-wrap: wrap;
 }
 
 .coin-icon {
     font-size: 1.1rem;
 }
 
+.coin-symbol-name {
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
+
+.perf-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    font-family: var(--font-sans);
+    line-height: 1;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.perf-up {
+    background: rgba(16, 185, 129, 0.16);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+}
+
+.perf-down {
+    background: rgba(244, 63, 94, 0.16);
+    color: #fecdd3;
+    border: 1px solid rgba(244, 63, 94, 0.35);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.15);
+}
+
+.coin-perf-tags {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
 .alloc-center {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
     font-family: var(--font-mono);
     font-size: 0.86rem;
     color: var(--text-muted);
@@ -523,6 +568,27 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.alloc-balance {
+    color: #e2e8f0;
+    font-weight: 500;
+}
+
+.alloc-price-sub {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0.15rem 0.45rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.alloc-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
 }
 
 .alloc-weight {
@@ -1112,30 +1178,36 @@ body {
 
 @media (max-width: 640px) {
     .alloc-info {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        grid-template-areas:
-            "badge weight"
-            "detail detail";
-        gap: 0.35rem;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.45rem;
         width: 100%;
     }
 
     .alloc-symbol-badge {
-        grid-area: badge;
-    }
-
-    .alloc-weight {
-        grid-area: weight;
-        text-align: right;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
     }
 
     .alloc-center {
-        grid-area: detail;
-        text-align: left;
-        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        font-size: 0.81rem;
         white-space: normal;
-        word-break: break-all;
+    }
+
+    .alloc-right {
+        margin-left: auto;
+    }
+
+    .perf-pill {
+        font-size: 0.74rem;
+        padding: 0.18rem 0.45rem;
     }
 }
 

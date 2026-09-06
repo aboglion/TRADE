@@ -183,6 +183,7 @@ class BotState:
     strategy_state: Dict[str, Any] = field(default_factory=dict)
     session_initial_value_usd: Optional[float] = None
     session_fees: Dict[str, float] = field(default_factory=dict)
+    session_initial_prices: Dict[str, float] = field(default_factory=dict)
     version: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
@@ -198,6 +199,7 @@ class BotState:
             "strategy_state": self.strategy_state,
             "session_initial_value_usd": self.session_initial_value_usd,
             "session_fees": self.session_fees,
+            "session_initial_prices": self.session_initial_prices,
         }
 
     @classmethod
@@ -214,4 +216,5 @@ class BotState:
             strategy_state=data.get("strategy_state", {}),
             session_initial_value_usd=data.get("session_initial_value_usd"),
             session_fees=data.get("session_fees", {}),
+            session_initial_prices=data.get("session_initial_prices", {}),
         )

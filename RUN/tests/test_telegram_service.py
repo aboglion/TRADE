@@ -92,7 +92,7 @@ class TestTelegramService(unittest.TestCase):
         }
         success, msg = svc.send_test_notification(last_trade=last_trade, run_mode="DRY_RUN")
         self.assertTrue(success)
-        self.assertIn("העסקה האחרונה", msg)
+        self.assertIn("last trade", msg)
 
     @patch("urllib.request.urlopen")
     def test_send_test_notification_without_trades(self, mock_urlopen):
@@ -103,7 +103,7 @@ class TestTelegramService(unittest.TestCase):
         svc = TelegramService(bot_token="12345:dummy_token", chat_id="987654", enabled=False)
         success, msg = svc.send_test_notification(last_trade=None, run_mode="DRY_RUN")
         self.assertTrue(success)
-        self.assertIn("באנגלית", msg)
+        self.assertIn("successfully", msg)
 
     def test_config_manager_persistence(self):
         yaml_content = """

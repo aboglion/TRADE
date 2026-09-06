@@ -21,6 +21,7 @@ class TestSaveLoadRoundtrip:
         state.last_regime = "bull"
         state.pending_orders = [{"id": "test1", "status": "submitted"}]
         state.last_run_ts = 1700000000000
+        state.session_initial_prices = {"BTC": 60000.0, "ETH": 3000.0}
 
         store.save_state(state)
         loaded = store.load_state()
@@ -29,6 +30,7 @@ class TestSaveLoadRoundtrip:
         assert loaded.last_regime == "bull"
         assert len(loaded.pending_orders) == 1
         assert loaded.last_run_ts == 1700000000000
+        assert loaded.session_initial_prices == {"BTC": 60000.0, "ETH": 3000.0}
 
     def test_fresh_state_on_no_file(self, tmp_path):
         path = str(tmp_path / "nonexistent.json")

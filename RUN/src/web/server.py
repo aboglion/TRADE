@@ -259,7 +259,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(
                 {
                     "success": False,
-                    "error": f"חשבון ננעל זמנית עקב ניסיונות ניחוש סיסמה רבים! נסה שוב בעוד {remaining} שניות (Too many failed attempts. Locked out for {remaining}s).",
+                    "error": f"Account temporarily locked due to too many failed login attempts! Try again in {remaining} seconds.",
                     "locked_out": True,
                     "retry_after_seconds": remaining,
                 },
@@ -291,14 +291,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     self._send_json(
                         {
                             "success": False,
-                            "error": f"נחסמת! בוצעו {rate_limiter.max_attempts} ניסיונות ניחוש סיסמה שגויים. הגישה ננעלה ל-{rem_sec} שניות.",
+                            "error": f"Account locked! {rate_limiter.max_attempts} failed login attempts recorded. Access locked for {rem_sec} seconds.",
                             "locked_out": True,
                             "retry_after_seconds": rem_sec,
                         },
                         status=429,
                     )
                 else:
-                    self._send_json({"success": False, "error": "סיסמה שגויה (Invalid password)"}, status=401)
+                    self._send_json({"success": False, "error": "Invalid password"}, status=401)
         except Exception as e:
             self._send_json({"success": False, "error": str(e)}, status=400)
 
@@ -330,9 +330,41 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             ps = PortfolioService(self.gateway)
             snapshot = ps.get_portfolio()
 
+            state = self.state_store.load_state() if self.state_store else None
+            initial_val = state.session_initial_value_usd if state else None
+            initial_prices = dict(state.session_initial_prices) if (state and state.session_initial_prices) else {}
+            state_updated = False
+
             holdings_list = []
             for symbol, h in snapshot.holdings.items():
                 weight = (h.value_usd / snapshot.total_value_usd * 100) if snapshot.total_value_usd > 0 else 0.0
+                
+                # Determine current unit price of asset
+                current_price = 0.0
+                if symbol in ("USDT", "USD", "BUSD", "USDC"):
+                    current_price = 1.0
+                elif h.total != 0:
+                    current_price = abs(h.value_usd / h.total)
+                else:
+                    try:
+                        pair = f"{symbol}/USDT"
+                        current_price = self.gateway.fetch_ticker_price(pair)
+                    except Exception:
+                        current_price = 0.0
+
+                # Auto-record initial price baseline for period return calculation
+                init_price = initial_prices.get(symbol)
+                if (init_price is None or init_price <= 0) and current_price > 0:
+                    initial_prices[symbol] = current_price
+                    init_price = current_price
+                    state_updated = True
+
+                change_pct = 0.0
+                if symbol in ("USDT", "USD", "BUSD", "USDC"):
+                    change_pct = 0.0
+                elif init_price and init_price > 0 and current_price > 0:
+                    change_pct = ((current_price - init_price) / init_price) * 100.0
+
                 holdings_list.append({
                     "symbol": symbol,
                     "free": h.free,
@@ -340,24 +372,29 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "total": h.total,
                     "value_usd": h.value_usd,
                     "weight_pct": round(weight, 2),
+                    "current_price": round(current_price, 4 if current_price < 10 else 2),
+                    "initial_price": round(init_price, 4 if init_price < 10 else 2) if init_price else None,
+                    "change_pct": round(change_pct, 2),
                 })
-
-            state = self.state_store.load_state() if self.state_store else None
-            initial_val = state.session_initial_value_usd if state else None
 
             data = {
                 "total_value_usd": round(snapshot.total_value_usd, 2),
                 "holdings": holdings_list,
                 "timestamp_ms": snapshot.timestamp_ms,
                 "session_initial_value_usd": round(initial_val, 2) if initial_val is not None else None,
-                "session_fees": state.session_fees if state else {}
+                "session_fees": state.session_fees if state else {},
+                "session_initial_prices": initial_prices,
             }
 
             # Auto-initialize baseline if empty
-            if state and initial_val is None:
-                state.session_initial_value_usd = snapshot.total_value_usd
-                self.state_store.save_state(state)
-                data["session_initial_value_usd"] = round(snapshot.total_value_usd, 2)
+            if state:
+                if initial_val is None:
+                    state.session_initial_value_usd = snapshot.total_value_usd
+                    state_updated = True
+                    data["session_initial_value_usd"] = round(snapshot.total_value_usd, 2)
+                if state_updated:
+                    state.session_initial_prices = initial_prices
+                    self.state_store.save_state(state)
 
             self._send_json(data)
         except Exception as e:
@@ -379,7 +416,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def _handle_logs(self) -> None:
         log_path = self.log_file_path or (self.config.logging.file if self.config else "logs/bot.log")
         lines = []
-        ignored_patterns = ("Loaded state:", "Portfolio snapshot:", "No state file found at")
+        ignored_patterns = (
+            "Loaded state:",
+            "Portfolio snapshot:",
+            "No state file found at",
+            "No new closed candles",
+        )
         if os.path.exists(log_path):
             try:
                 with open(log_path, "r", encoding="utf-8", errors="replace") as f:
@@ -388,7 +430,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         line.strip() for line in all_lines
                         if line.strip() and not any(pat in line for pat in ignored_patterns)
                     ]
-                    lines = filtered[-100:]  # Last 100 meaningful lines
+                    lines = filtered[-1000:]  # Last 1000 meaningful lines
             except Exception as e:
                 lines = [f"Error reading log file: {e}"]
         else:
@@ -463,6 +505,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         state.pending_orders.clear()
                         state.session_initial_value_usd = None
                         state.session_fees.clear()
+                        state.session_initial_prices.clear()
                     self.state_store.save_state(state)
                     logger.info("Persisted dry run balances into bot_state.json")
                 except Exception as ex:
@@ -491,6 +534,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 state.session_initial_value_usd = None
 
             state.session_fees.clear()
+            state.session_initial_prices.clear()
             state.completed_orders.clear()
 
             self.state_store.save_state(state)
@@ -607,7 +651,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             logger.info("Manual Git Pull executed via API: %s (Output: %s)", "Success" if res.returncode == 0 else "Failed", output_msg)
 
             if res.returncode == 0:
-                msg = "קוד מעודכן נמשך בהצלחה מ-GitHub!" if updated else "הקוד כבר מעודכן לגרסה העדכנית ביותר (Already up to date)."
+                msg = "Updated code pulled successfully from GitHub!" if updated else "Code is already up to date."
                 self._send_json({
                     "success": True,
                     "updated": updated,
@@ -706,7 +750,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             logger.info("Telegram configuration updated via API (Enabled: %s, Chat ID: %s)", enabled, chat_id)
             self._send_json({
                 "success": True,
-                "message": "הגדרות טלגרם שנשמרו בהצלחה בקובץ הקונפיגורציה!",
+                "message": "Telegram settings saved successfully in configuration file!",
                 "enabled": enabled,
                 "is_configured": svc.is_configured(),
             })
@@ -746,7 +790,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             else:
                 svc = self._get_telegram_service()
                 if not svc or not svc.is_configured():
-                    self._send_json({"success": False, "error": "טלגרם אינו מוגדר. נא להזין Bot Token ו-Chat ID."}, status=400)
+                    self._send_json({"success": False, "error": "Telegram is not configured. Please enter Bot Token and Chat ID."}, status=400)
                     return
                 success, msg = svc.send_test_notification(last_trade=last_trade, run_mode=run_mode_str)
 

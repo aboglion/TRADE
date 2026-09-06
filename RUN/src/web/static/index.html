@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="he" dir="ltr">
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -28,17 +28,17 @@
                 </div>
 
                 <div class="header-badges">
-                    <div class="status-badge mode-badge" id="modeBadge" title="מצב עבודה: DRY_RUN (סימולציה בלייב), TESTNET או LIVE">
+                    <div class="status-badge mode-badge" id="modeBadge" title="Execution Mode: DRY_RUN (live simulation), TESTNET or LIVE">
                         <span class="dot pulse"></span>
                         <span id="modeText">DRY_RUN</span>
                     </div>
 
-                    <div class="status-badge regime-badge" id="regimeBadge" title="משטר שוק נוכחי: BULL (שוק עולה) / BEAR (שוק יורד) לפי BTC vs SMA-150">
+                    <div class="status-badge regime-badge" id="regimeBadge" title="Current Market Regime: BULL (uptrend) / BEAR (downtrend) based on BTC vs SMA-150">
                         <span id="regimeIcon">🐂</span>
                         <span id="regimeText">BULL REGIME</span>
                     </div>
 
-                    <div class="status-badge updater-badge" id="updaterBadge" title="סטטוס מעקב עדכונים מ-GitHub (Git Auto-Updater)">
+                    <div class="status-badge updater-badge" id="updaterBadge" title="GitHub Auto-Update Monitor Status (Git Auto-Updater)">
                         <span class="dot pulse" id="updaterDot"></span>
                         <span id="updaterText">AUTO-PULL: ACTIVE</span>
                     </div>
@@ -47,37 +47,37 @@
 
             <!-- Quick Action Toolbar (Mobile & Desktop Friendly) -->
             <div class="toolbar">
-                <div class="clock-display" id="utcClock" title="שעון UTC מסונכרן בזמן אמת">
+                <div class="clock-display" id="utcClock" title="Real-time synchronized UTC Clock">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>00:00:00 UTC</span>
                 </div>
 
                 <div class="toolbar-actions">
-                    <button class="btn btn-outline" id="manualPullBtn" title="משיכת עדכוני קוד ידנית מ-GitHub עכשיו (Manual Git Pull)">
+                    <button class="btn btn-outline" id="manualPullBtn" title="Pull latest code from GitHub now (Manual Git Pull)">
                         <span>⬇️</span> <span class="btn-text">Git Pull</span>
                     </button>
 
-                    <button class="btn btn-outline" id="toggleUpdaterBtn" title="הפעל/הקפא עדכונים אוטומטיים מ-GitHub">
+                    <button class="btn btn-outline" id="toggleUpdaterBtn" title="Enable/Pause automatic updates from GitHub">
                         <span>🔄</span> <span class="btn-text">Auto-Pull Active</span>
                     </button>
 
-                    <button class="btn btn-outline" id="resetStatsBtn" title="איפוס נתוני רווח והפסד ועמלות לסשן חדש">
+                    <button class="btn btn-outline" id="resetStatsBtn" title="Reset PNL and fee statistics for a new session">
                         <span>🧹</span> <span class="btn-text">Reset PNL Stats</span>
                     </button>
 
-                    <button class="btn btn-outline" id="dryRunModalBtn" title="הגדרת אחזקות סימולציה (Dry Run Initial Holdings)">
+                    <button class="btn btn-outline" id="dryRunModalBtn" title="Configure simulation holdings (Dry Run Initial Holdings)">
                         <span>⚙️</span> <span class="btn-text">Dry Run Balances</span>
                     </button>
 
-                    <button class="btn btn-outline" id="telegramModalBtn" title="הגדרת התראות Telegram (Telegram API Alerts)">
+                    <button class="btn btn-outline" id="telegramModalBtn" title="Configure Telegram notification alerts (Telegram API Alerts)">
                         <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
                     </button>
 
-                    <button class="btn btn-icon" id="refreshBtn" title="רענן נתונים כעת (Force Immediate Refresh)">
+                    <button class="btn btn-icon" id="refreshBtn" title="Force immediate data refresh">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     </button>
 
-                    <button class="btn btn-danger" id="killSwitchBtn" title="עצירת חירום! הפעלה/ביטול של Kill Switch לחסימת פקודות חדשות במסחר">
+                    <button class="btn btn-danger" id="killSwitchBtn" title="Emergency Stop! Enable/Disable Kill Switch to block new trading orders">
                         <span>🛡️</span> <span>KILL SWITCH</span>
                     </button>
                 </div>
@@ -101,6 +101,7 @@
                 <div class="tags-container">
                     <span id="sessionPnl" class="tag tag-pnl">PNL: +$0.00 (+0.00%)</span>
                     <span id="sessionFees" class="tag tag-fee">Fees: 0.00</span>
+                    <div id="coinPerfTags" class="coin-perf-tags"></div>
                 </div>
             </div>
 
@@ -119,7 +120,7 @@
             </div>
 
             <!-- Metric Card 3: Execution Health -->
-            <div class="card glass metric-card clickable-card" id="systemHealthCard" title="לחץ לצפייה בהיסטוריית שגיאות ואיפוס (Click to view error log & clear)">
+            <div class="card glass metric-card clickable-card" id="systemHealthCard" title="Click to view error log & clear">
                 <div class="card-header">
                     <div class="card-header-left">
                         <span class="card-icon">🛡️</span>
@@ -143,7 +144,7 @@
                         <span class="card-icon">📊</span>
                         <span class="card-title">PORTFOLIO ALLOCATION SPLIT</span>
                     </div>
-                    <button class="btn btn-sm btn-action" id="triggerCycleBtn" title="הפעלת מחזור מסחר מיידי עכשיו (Trigger Instant Trading Cycle)">
+                    <button class="btn btn-sm btn-action" id="triggerCycleBtn" title="Trigger instant trading cycle now">
                         <span>▶</span> <span>Run Instant Cycle</span>
                     </button>
                 </div>
@@ -160,8 +161,8 @@
                         <span class="card-title">RECENT ORDERS & FILLS</span>
                     </div>
                     <div class="card-header-right" style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <button class="btn btn-sm btn-outline" id="copyOrdersBtn" title="העתק את היסטוריית העסקאות ללוח">📋 העתק עסקאות</button>
-                        <button class="btn btn-sm btn-outline" id="clearOrdersBtn" title="נקה את תצוגת העסקאות">🧹 נקה עסקאות</button>
+                        <button class="btn btn-sm btn-outline" id="copyOrdersBtn" title="Copy order history to clipboard">📋 Copy Orders</button>
+                        <button class="btn btn-sm btn-outline" id="clearOrdersBtn" title="Clear orders display">🧹 Clear Orders</button>
                         <span class="badge-count" id="orderCount">0 / 100+</span>
                     </div>
                 </div>
@@ -194,9 +195,9 @@
                         <span class="card-title">REAL-TIME SYSTEM LOGS</span>
                     </div>
                     <div class="card-header-right" style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <button class="btn btn-sm btn-outline" id="copyLogsBtn" title="העתק את כל הלוגים ללוח">📋 העתק לוגים</button>
-                        <button class="btn btn-sm btn-outline" id="clearLogsBtn" title="נקה את תצוגת הלוגים">🧹 נקה לוגים</button>
-                        <span class="badge-count" id="logCount">0 / 100</span>
+                        <button class="btn btn-sm btn-outline" id="copyLogsBtn" title="Copy all system logs to clipboard">📋 Copy Logs</button>
+                        <button class="btn btn-sm btn-outline" id="clearLogsBtn" title="Clear logs console display">🧹 Clear Logs</button>
+                        <span class="badge-count" id="logCount">0 / 1000</span>
                         <div class="pulse-indicator">
                             <span class="dot pulse"></span>
                             <span>LIVE STREAM</span>
@@ -214,11 +215,11 @@
     <div class="modal-backdrop" id="dryRunModal">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h3>⚙️ הגדרת אחזקות DRY RUN</h3>
+                <h3>⚙️ DRY RUN Holdings Configuration</h3>
                 <button class="modal-close" id="closeDryRunModal">&times;</button>
             </div>
             <div class="modal-body">
-                <p class="modal-desc">הכנס את כמויות המטבעות שיש לך כיום ב-Binance כדי שהסימולציה תרוץ עליהם בדיוק:</p>
+                <p class="modal-desc">Enter initial asset amounts to simulate live trading on exact balances:</p>
                 <div class="form-grid">
                     <div class="form-group">
                         <label for="dryUsdtInput">USDT Balance:</label>
@@ -251,8 +252,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" id="cancelDryRunSave">ביטול</button>
-                <button class="btn btn-action" id="saveDryRunBalances">עדכן אחזקות 💾</button>
+                <button class="btn btn-outline" id="cancelDryRunSave">Cancel</button>
+                <button class="btn btn-action" id="saveDryRunBalances">Update Holdings 💾</button>
             </div>
         </div>
     </div>
@@ -261,15 +262,15 @@
     <div class="modal-backdrop" id="telegramModal">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h3>✈️ הגדרת התראות Telegram API</h3>
+                <h3>✈️ Telegram Alerts Configuration</h3>
                 <button class="modal-close" id="closeTelegramModal">&times;</button>
             </div>
             <div class="modal-body">
-                <p class="modal-desc">הגדר את פרטי ה-Bot Token וה-Chat ID לקבלת התראה מיידית לטלגרם על כל עסקה שמתבצעת במערכת:</p>
+                <p class="modal-desc">Configure Bot Token and Chat ID to receive instant alerts for executed trades:</p>
                 <div class="form-grid" style="grid-template-columns: 1fr; gap: 0.85rem;">
                     <div class="form-group" style="background: rgba(255, 255, 255, 0.04); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
                         <label for="telegramEnabledToggle" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 0;">
-                            <span style="font-weight: 600; color: var(--text-main, #f8fafc);">הפעל התראות טלגרם בלייב:</span>
+                            <span style="font-weight: 600; color: var(--text-main, #f8fafc);">Enable Live Telegram Alerts:</span>
                             <input type="checkbox" id="telegramEnabledToggle" style="width: 22px; height: 22px; accent-color: #3b82f6; cursor: pointer;">
                         </label>
                     </div>
@@ -279,37 +280,37 @@
                         <div class="input-wrapper" style="position: relative;">
                             <span class="input-icon">🔑</span>
                             <input type="password" id="telegramTokenInput" class="form-input" placeholder="123456789:ABCdefGhI..." autocomplete="off">
-                            <button type="button" id="toggleTokenVisibilityBtn" title="הצג/הסתר טוקן" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted, #94a3b8); cursor: pointer; padding: 4px; font-size: 1.1rem; z-index: 5;">👁️</button>
+                            <button type="button" id="toggleTokenVisibilityBtn" title="Show/Hide Token" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted, #94a3b8); cursor: pointer; padding: 4px; font-size: 1.1rem; z-index: 5;">👁️</button>
                         </div>
-                        <span class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">ניתן ליצור בוט ולקבל טוקן בטלגרם דרך <strong>@BotFather</strong>.</span>
+                        <span class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">Create a bot and get a token via <strong>@BotFather</strong>.</span>
                     </div>
 
                     <div class="form-group">
                         <label for="telegramChatIdInput">Telegram Chat ID / Channel ID:</label>
                         <div class="input-wrapper">
                             <span class="input-icon">💬</span>
-                            <input type="text" id="telegramChatIdInput" class="form-input" placeholder="123456789 או -100123456789" autocomplete="off">
+                            <input type="text" id="telegramChatIdInput" class="form-input" placeholder="123456789 or -100123456789" autocomplete="off">
                         </div>
-                        <span class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">ניתן לגלות את ה-Chat ID שלך בטלגרם דרך <strong>@userinfobot</strong>.</span>
+                        <span class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">Find your Chat ID via <strong>@userinfobot</strong>.</span>
                     </div>
 
                     <div class="form-group">
-                        <label for="telegramDashboardUrlInput">קישור לדאשבורד (Dashboard Public URL):</label>
+                        <label for="telegramDashboardUrlInput">Dashboard Public URL:</label>
                         <div class="input-wrapper">
                             <span class="input-icon">🌐</span>
                             <input type="text" id="telegramDashboardUrlInput" class="form-input" placeholder="http://my-server-ip:8080" autocomplete="off">
                         </div>
-                        <span class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">קישור זה יופיע בהודעות בטלגרם לפתיחה מהירה של השרת והדאשבורד.</span>
+                        <span class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">This URL will be included in Telegram alerts for quick access to the dashboard.</span>
                     </div>
                 </div>
 
                 <div id="telegramStatusBox" style="margin-top: 1rem; padding: 0.75rem; border-radius: 8px; font-size: 0.85rem; display: none;"></div>
             </div>
             <div class="modal-footer" style="justify-content: space-between; gap: 8px; flex-wrap: wrap;">
-                <button class="btn btn-outline" id="testTelegramBtn" title="שלח הודעת ניסיון בטלגרם למעקב תקינות">🧪 בדיקת חיבור (שלח הודעה)</button>
+                <button class="btn btn-outline" id="testTelegramBtn" title="Send a test message to verify connection">🧪 Test Connection (Send Test Message)</button>
                 <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-outline" id="cancelTelegramSave">ביטול</button>
-                    <button class="btn btn-action" id="saveTelegramConfigBtn">שמור הגדרות 💾</button>
+                    <button class="btn btn-outline" id="cancelTelegramSave">Cancel</button>
+                    <button class="btn btn-action" id="saveTelegramConfigBtn">Save Settings 💾</button>
                 </div>
             </div>
         </div>
@@ -319,20 +320,20 @@
     <div class="modal-backdrop" id="dryRunConfirmModal">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h3 style="color: var(--accent-warning, #f59e0b);">⚙️ אישור עדכון אחזקות DRY RUN</h3>
+                <h3 style="color: var(--accent-warning, #f59e0b);">⚙️ Confirm DRY RUN Holdings Update</h3>
                 <button class="modal-close" id="closeDryRunConfirmModal">&times;</button>
             </div>
             <div class="modal-body">
                 <p class="modal-desc" id="dryRunConfirmModalDesc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
-                    האם אתה בטוח שברצונך לעדכן את אחזקות ה-DRY RUN במערכת?
+                    Are you sure you want to update the system DRY RUN holdings?
                 </p>
                 <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fef08a; line-height: 1.4;">
-                    ⚠️ <strong>שים לב:</strong> עדכון אחזקות ה-DRY RUN יאפס וידרוס את נתוני הפורטפוליו והיסטוריית הפקודות בסשן הנוכחי.
+                    ⚠️ <strong>Warning:</strong> Updating DRY RUN holdings will reset current session portfolio stats and order history.
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" id="cancelDryRunConfirmBtn">ביטול</button>
-                <button class="btn btn-action" id="confirmDryRunSaveBtn">אישור וביצוע ⚙️</button>
+                <button class="btn btn-outline" id="cancelDryRunConfirmBtn">Cancel</button>
+                <button class="btn btn-action" id="confirmDryRunSaveBtn">Confirm & Apply ⚙️</button>
             </div>
         </div>
     </div>
@@ -341,20 +342,20 @@
     <div class="modal-backdrop" id="triggerCycleConfirmModal">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h3 id="triggerCycleModalTitle" style="color: var(--accent-color, #3b82f6);">▶ אישור הפעלת מחזור מסחר</h3>
+                <h3 id="triggerCycleModalTitle" style="color: var(--accent-color, #3b82f6);">▶ Confirm Trading Cycle Trigger</h3>
                 <button class="modal-close" id="closeTriggerCycleConfirmModal">&times;</button>
             </div>
             <div class="modal-body">
                 <p class="modal-desc" id="triggerCycleModalDesc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
-                    האם אתה בטוח שברצונך להפעיל מחזור מסחר מיידי כעת?
+                    Are you sure you want to trigger an immediate trading cycle now?
                 </p>
                 <div id="triggerCycleWarningBox" style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #93c5fd; line-height: 1.4;">
-                    ℹ️ <strong>הפעלת מחזור:</strong> המערכת תבצע ניתוח אינדיקטורים ואיזון מחדש של הפורטפוליו.
+                    ℹ️ <strong>Cycle Trigger:</strong> The system will perform indicator analysis and rebalance the portfolio.
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" id="cancelTriggerCycleConfirmBtn">ביטול</button>
-                <button class="btn btn-action" id="confirmTriggerCycleBtn">אישור והפעלה ▶</button>
+                <button class="btn btn-outline" id="cancelTriggerCycleConfirmBtn">Cancel</button>
+                <button class="btn btn-action" id="confirmTriggerCycleBtn">Confirm & Execute ▶</button>
             </div>
         </div>
     </div>
@@ -367,14 +368,14 @@
                 <button class="modal-close" id="closeErrorsModal">&times;</button>
             </div>
             <div class="modal-body">
-                <p class="modal-desc">היסטוריית שגיאות מערכת שנרשמו בריצות האחרונות:</p>
+                <p class="modal-desc">System errors recorded during recent execution runs:</p>
                 <ul class="error-list" id="modalErrorList">
-                    <li class="empty-errors">אין שגיאות רשומות — המערכת פועלת באופן תקין לחלוטין ✓</li>
+                    <li class="empty-errors">No errors recorded — System is operating normally ✓</li>
                 </ul>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" id="closeErrorsModalFooter">סגור</button>
-                <button class="btn btn-danger" id="clearErrorsBtn">🧹 נקה שגיאות (Clear Errors)</button>
+                <button class="btn btn-outline" id="closeErrorsModalFooter">Close</button>
+                <button class="btn btn-danger" id="clearErrorsBtn">🧹 Clear Errors</button>
             </div>
         </div>
     </div>
@@ -383,20 +384,20 @@
     <div class="modal-backdrop" id="killSwitchModal">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h3 style="color: var(--accent-danger);">🛡️ אישור פעולת Kill Switch</h3>
+                <h3 style="color: var(--accent-danger);">🛡️ Confirm Kill Switch Action</h3>
                 <button class="modal-close" id="closeKillSwitchModal">&times;</button>
             </div>
             <div class="modal-body">
                 <p class="modal-desc" id="killSwitchModalDesc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
-                    האם אתה בטוח שברצונך לשנות את מצב ה-Kill Switch?
+                    Are you sure you want to change the Kill Switch state?
                 </p>
                 <div style="background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fecdd3; line-height: 1.4;">
-                    ⚠️ <strong>שים לב:</strong> הפעלת ה-Kill Switch תחסום באופן מיידי את כל פקודות המסחר החדשות במערכת ותקפיא את הפעילות עד לביטול היזום.
+                    ⚠️ <strong>Warning:</strong> Activating the Kill Switch will immediately block all new trading orders and freeze activity until manually deactivated.
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" id="cancelKillSwitchBtn">ביטול</button>
-                <button class="btn btn-danger" id="confirmKillSwitchBtn">אישור וביצוע 🛡️</button>
+                <button class="btn btn-outline" id="cancelKillSwitchBtn">Cancel</button>
+                <button class="btn btn-danger" id="confirmKillSwitchBtn">Confirm & Apply 🛡️</button>
             </div>
         </div>
     </div>
@@ -405,17 +406,17 @@
     <div class="modal-backdrop" id="loginModal">
         <div class="modal-content glass modal-auth">
             <div class="modal-header center">
-                <h3>🔒 דשבורד מוגן בסיסמה</h3>
+                <h3>🔒 Password Protected Dashboard</h3>
             </div>
             <div class="modal-body center-body">
-                <p class="modal-desc">הכנס את סיסמת הגישה שהוגדרה בקובץ <code>.env</code> (DASHBOARD_PASSWORD):</p>
+                <p class="modal-desc">Enter the dashboard access password configured in <code>.env</code> (DASHBOARD_PASSWORD):</p>
                 <div class="form-group full-width">
-                    <input type="password" id="dashboardPasswordInput" class="form-input pass-input" placeholder="הכנס סיסמה...">
+                    <input type="password" id="dashboardPasswordInput" class="form-input pass-input" placeholder="Enter password...">
                 </div>
                 <div id="loginErrorMsg" class="text-danger error-box"></div>
             </div>
             <div class="modal-footer center">
-                <button class="btn btn-action btn-block" id="submitLoginBtn">התחבר למערכת 🔑</button>
+                <button class="btn btn-action btn-block" id="submitLoginBtn">Login to Dashboard 🔑</button>
             </div>
         </div>
     </div>

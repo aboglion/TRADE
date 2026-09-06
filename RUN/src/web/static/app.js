@@ -140,7 +140,7 @@ async function checkAuthStatus() {
                 if (data.locked_out) {
                     const errorMsg = document.getElementById("loginErrorMsg");
                     if (errorMsg) {
-                        errorMsg.textContent = `חשבון ננעל זמנית! נסה שוב בעוד ${data.retry_after_seconds} שניות.`;
+                        errorMsg.textContent = `Account temporarily locked! Try again in ${data.retry_after_seconds} seconds.`;
                         errorMsg.style.display = "block";
                     }
                 }
@@ -176,13 +176,13 @@ async function performLogin() {
 
     const password = input.value.trim();
     if (!password) {
-        errorMsg.textContent = "אנא הכנס סיסמה";
+        errorMsg.textContent = "Please enter password";
         errorMsg.style.display = "block";
         return;
     }
 
     btn.disabled = true;
-    btn.textContent = "מאמת...";
+    btn.textContent = "Authenticating...";
     errorMsg.style.display = "none";
 
     try {
@@ -198,20 +198,20 @@ async function performLogin() {
             sessionStorage.setItem("dash_password", password);
             input.value = "";
             closeLoginModal();
-            showToast("🔑 התחברת בהצלחה ללוח הבקרה!", "success");
+            showToast("🔑 Successfully logged in to dashboard!", "success");
             fetchDashboardData();
         } else {
             authToken = "";
             sessionStorage.removeItem("dash_password");
-            errorMsg.textContent = data.error || "סיסמה שגויה (Invalid password)";
+            errorMsg.textContent = data.error || "Invalid password";
             errorMsg.style.display = "block";
         }
     } catch (err) {
-        errorMsg.textContent = "שגיאת תקשורת: " + err;
+        errorMsg.textContent = "Communication error: " + err;
         errorMsg.style.display = "block";
     } finally {
         btn.disabled = false;
-        btn.textContent = "התחבר למערכת 🔑";
+        btn.textContent = "Login to Dashboard 🔑";
     }
 }
 
@@ -246,7 +246,7 @@ async function manualRefresh() {
     btn.classList.add("spinning");
     await fetchDashboardData();
     setTimeout(() => btn.classList.remove("spinning"), 500);
-    showToast("✨ נתוני הדשבורד רועננו בהצלחה!", "success");
+    showToast("✨ Dashboard data refreshed successfully!", "success");
 }
 
 // ── Clock ──────────────────────────────────────────────────
@@ -320,12 +320,12 @@ async function toggleUpdater() {
         await fetchUpdaterStatus();
 
         if (data.active) {
-            showToast("🔄 Git Auto-Updater הופעל בהצלחה! (Active)", "success");
+            showToast("🔄 Git Auto-Updater activated successfully! (Active)", "success");
         } else {
-            showToast("⏸️ Git Auto-Updater הוקפא (Paused)", "info");
+            showToast("⏸️ Git Auto-Updater paused", "info");
         }
     } catch (err) {
-        showToast("❌ שגיאה בשינוי סטטוס auto-updater: " + err, "error");
+        showToast("❌ Error updating auto-updater status: " + err, "error");
     } finally {
         btn.disabled = false;
     }
@@ -348,10 +348,10 @@ async function triggerManualPull() {
             }
             await fetchLogs();
         } else {
-            showToast("❌ שגיאה במשיכת קוד מ-GitHub: " + (data.error || data.message || "Unknown error"), "error");
+            showToast("❌ Error pulling code from GitHub: " + (data.error || data.message || "Unknown error"), "error");
         }
     } catch (err) {
-        showToast("❌ שגיאת תקשורת בביצוע Git Pull: " + err, "error");
+        showToast("❌ Communication error executing Git Pull: " + err, "error");
     } finally {
         btn.disabled = false;
         btn.innerHTML = `<span>⬇️</span> <span class="btn-text">Git Pull</span>`;
@@ -471,6 +471,21 @@ async function fetchPortfolio() {
             feeEl.textContent = feeStrings.length > 0 ? `Fees: ${feeStrings.join(', ')}` : "Fees: 0.00";
         }
 
+        // Coin performance summary tags in metric card 1
+        const coinPerfTagsEl = document.getElementById("coinPerfTags");
+        if (coinPerfTagsEl && data.holdings) {
+            const coinTags = data.holdings
+                .filter(h => h.symbol !== "USDT" && h.symbol !== "USD" && h.change_pct !== undefined)
+                .map(h => {
+                    const isPos = h.change_pct >= 0;
+                    const tagClass = isPos ? "tag tag-buy" : "tag tag-sell";
+                    const sign = isPos ? "+" : "";
+                    const icon = isPos ? "📈" : "📉";
+                    return `<span class="${tagClass}" title="Strategy Period Return (Base: $${h.initial_price || h.current_price})">${icon} ${h.symbol}: ${sign}${h.change_pct.toFixed(2)}%</span>`;
+                });
+            coinPerfTagsEl.innerHTML = coinTags.join(" ");
+        }
+
         // Allocation Bars
         const container = document.getElementById("allocationBars");
         container.innerHTML = "";
@@ -494,16 +509,36 @@ async function fetchPortfolio() {
             const valueStr = h.value_usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const fillWidth = isZero ? 0 : Math.min(100, Math.max(1, h.weight_pct));
 
+            const priceVal = h.current_price || 0;
+            const priceStr = priceVal > 0 ? `$${priceVal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: priceVal < 10 ? 4 : 2 })}` : "--";
+
+            const changePct = h.change_pct !== undefined ? h.change_pct : 0;
+            let perfBadgeHtml = "";
+            if (symbol !== "USDT" && symbol !== "USD") {
+                const isPos = changePct >= 0;
+                const sign = isPos ? "+" : "";
+                const icon = isPos ? "📈" : "📉";
+                const badgeClass = isPos ? "perf-pill perf-up" : "perf-pill perf-down";
+                const baseInfo = h.initial_price ? `Baseline: $${h.initial_price.toLocaleString("en-US")}` : "";
+                perfBadgeHtml = `<span class="${badgeClass}" title="Strategy Period Return (${baseInfo})">${icon} ${sign}${changePct.toFixed(2)}%</span>`;
+            }
+
             const row = document.createElement("div");
             row.className = `alloc-row ${isZero ? "alloc-row-zero" : ""}`;
             row.innerHTML = `
                 <div class="alloc-info">
                     <div class="alloc-symbol-badge">
                         <span class="coin-icon">${coinIcon}</span>
-                        <span>${symbol}</span>
+                        <span class="coin-symbol-name">${symbol}</span>
+                        ${perfBadgeHtml}
                     </div>
-                    <span class="alloc-center">${totalStr} ${symbol} ($${valueStr})</span>
-                    <span class="alloc-weight">${h.weight_pct}%</span>
+                    <div class="alloc-center">
+                        <span class="alloc-balance">${totalStr} ${symbol} ($${valueStr})</span>
+                        <span class="alloc-price-sub">${priceStr}</span>
+                    </div>
+                    <div class="alloc-right">
+                        <span class="alloc-weight">${h.weight_pct}%</span>
+                    </div>
                 </div>
                 <div class="progress-bg">
                     <div class="progress-fill ${bgClass}" style="width: ${fillWidth}%"></div>
@@ -612,7 +647,7 @@ async function fetchLogs() {
 
         const logConsole = document.getElementById("logConsole");
         const logCountEl = document.getElementById("logCount");
-        if (logCountEl) logCountEl.textContent = `${data.logs ? data.logs.length : 0} / 100`;
+        if (logCountEl) logCountEl.textContent = `${data.logs ? data.logs.length : 0} / 1000`;
 
         const wasScrolledToBottom = logConsole.scrollHeight - logConsole.clientHeight <= logConsole.scrollTop + 20;
 
@@ -624,7 +659,7 @@ async function fetchLogs() {
         }
 
         data.logs.forEach(rawLine => {
-            if (rawLine.includes("Loaded state:") || rawLine.includes("Portfolio snapshot:") || rawLine.includes("No state file found at")) {
+            if (rawLine.includes("Loaded state:") || rawLine.includes("Portfolio snapshot:") || rawLine.includes("No state file found at") || rawLine.includes("No new closed candles")) {
                 return;
             }
 
@@ -694,24 +729,24 @@ function copyLogsToClipboard() {
     if (!logConsole) return;
     const text = logConsole.innerText || logConsole.textContent;
     if (!text || text.trim() === "No logs recorded yet") {
-        showToast("⚠️ אין תוכן לוגים להעתקה", "info");
+        showToast("⚠️ No log content to copy", "info");
         return;
     }
     navigator.clipboard.writeText(text).then(() => {
-        showToast("📋 כל הלוגים הועתקו בהצלחה ללוח!", "success");
+        showToast("📋 All system logs copied to clipboard!", "success");
     }).catch(err => {
-        showToast("❌ שגיאה בהעתקת לוגים: " + err, "error");
+        showToast("❌ Error copying logs: " + err, "error");
     });
 }
 
 function clearLogsConsole() {
     const logConsole = document.getElementById("logConsole");
     if (logConsole) {
-        logConsole.innerHTML = `<div class="log-line text-muted">הלוגים נוקו על ידי המשתמש (תצוגת המסך נוקתה)</div>`;
+        logConsole.innerHTML = `<div class="log-line text-muted">Logs console cleared by user</div>`;
     }
     const logCountEl = document.getElementById("logCount");
-    if (logCountEl) logCountEl.textContent = "0 / 100";
-    showToast("🧹 תצוגת הלוגים נוקתה!", "info");
+    if (logCountEl) logCountEl.textContent = "0 / 1000";
+    showToast("🧹 Log console display cleared!", "info");
 }
 
 function copyOrdersToClipboard() {
@@ -724,24 +759,24 @@ function copyOrdersToClipboard() {
     });
     const text = textLines.join("\n");
     if (!text || text.includes("No order history available")) {
-        showToast("⚠️ אין היסטוריית עסקאות להעתקה", "info");
+        showToast("⚠️ No order history to copy", "info");
         return;
     }
     navigator.clipboard.writeText(text).then(() => {
-        showToast("📋 היסטוריית העסקאות הועתקה בהצלחה ללוח!", "success");
+        showToast("📋 Order history copied to clipboard!", "success");
     }).catch(err => {
-        showToast("❌ שגיאה בהעתקת עסקאות: " + err, "error");
+        showToast("❌ Error copying order history: " + err, "error");
     });
 }
 
 function clearOrdersTable() {
     const tableBody = document.getElementById("ordersTableBody");
     if (tableBody) {
-        tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">תצוגת העסקאות נוקתה על ידי המשתמש</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">Orders display cleared by user</td></tr>`;
     }
     const orderCountEl = document.getElementById("orderCount");
     if (orderCountEl) orderCountEl.textContent = "0 / 100+";
-    showToast("🧹 תצוגת העסקאות נוקתה!", "info");
+    showToast("🧹 Orders display cleared!", "info");
 }
 
 function escapeHtml(str) {
@@ -758,39 +793,39 @@ function openTriggerCycleModal() {
 
     if (currentRunMode === "LIVE") {
         if (title) {
-            title.textContent = "🔥 אישור הפעלת מחזור מסחר בלייב (LIVE MODE)";
+            title.textContent = "🔥 Confirm LIVE Trading Cycle Execution";
             title.style.color = "var(--accent-danger, #ef4444)";
         }
         if (desc) {
-            desc.innerHTML = "מצב נוכחי: <strong style='color:#ef4444;'>🔥 LIVE TRADING MODE</strong>.<br>האם אתה בטוח שברצונך להפעיל מחזור מסחר מיידי כעת במצב מסחר חי?";
+            desc.innerHTML = "Current mode: <strong style='color:#ef4444;'>🔥 LIVE TRADING MODE</strong>.<br>Are you sure you want to trigger an immediate trading cycle in live trading mode?";
         }
         if (warn) {
             warn.style.background = "rgba(244, 63, 94, 0.15)";
             warn.style.borderColor = "rgba(244, 63, 94, 0.4)";
             warn.style.color = "#fecdd3";
-            warn.innerHTML = "⚠️ <strong>אזהרת מסחר אמת (LIVE MODE):</strong> המערכת פועלת במצב LIVE! הפעלת המחזור תבצע ניתוח שוק בזמן אמת ותשלח פקודות קנייה/מכירה אמיתיות לחשבון ה-Binance שלך!";
+            warn.innerHTML = "⚠️ <strong>LIVE TRADING WARNING:</strong> System is running in LIVE mode! Executing cycle will analyze live market data and place REAL buy/sell orders on your Binance account!";
         }
         if (confirmBtn) {
             confirmBtn.className = "btn btn-danger";
-            confirmBtn.textContent = "אישור והפעלת LIVE ▶";
+            confirmBtn.textContent = "Confirm & Execute LIVE ▶";
         }
     } else {
         if (title) {
-            title.textContent = "▶ אישור הפעלת מחזור מסחר (DRY RUN)";
+            title.textContent = "▶ Confirm DRY RUN Trading Cycle Execution";
             title.style.color = "var(--accent-color, #3b82f6)";
         }
         if (desc) {
-            desc.innerHTML = "מצב נוכחי: <strong>⚙️ DRY_RUN (סימולציה)</strong>.<br>האם אתה בטוח שברצונך להפעיל מחזור מסחר מיידי כעת?";
+            desc.innerHTML = "Current mode: <strong>⚙️ DRY_RUN (Simulation)</strong>.<br>Are you sure you want to trigger an immediate trading cycle now?";
         }
         if (warn) {
             warn.style.background = "rgba(59, 130, 246, 0.12)";
             warn.style.borderColor = "rgba(59, 130, 246, 0.35)";
             warn.style.color = "#93c5fd";
-            warn.innerHTML = "ℹ️ <strong>מצב סימולציה (DRY RUN):</strong> הפעלת המחזור תבצע סימולציית מסחר על אחזקות ה-DRY RUN במערכת.";
+            warn.innerHTML = "ℹ️ <strong>Simulation Mode (DRY RUN):</strong> Executing cycle will perform simulation trading on recorded system holdings.";
         }
         if (confirmBtn) {
             confirmBtn.className = "btn btn-action";
-            confirmBtn.textContent = "אישור והפעלה ▶";
+            confirmBtn.textContent = "Confirm & Execute ▶";
         }
     }
 
@@ -817,9 +852,9 @@ async function triggerCycle() {
         const res = await apiFetch("/api/trigger", { method: "POST" });
         const data = await res.json();
         await fetchDashboardData();
-        showToast("▶ מחזור מסחר הופעל והושלם בהצלחה!", "success");
+        showToast("▶ Trading cycle triggered and completed successfully!", "success");
     } catch (err) {
-        showToast("❌ שגיאה בהפעלת מחזור: " + err, "error");
+        showToast("❌ Error executing trading cycle: " + err, "error");
     } finally {
         btn.disabled = false;
         btn.textContent = "▶ Run Instant Cycle";
@@ -834,9 +869,9 @@ function openKillSwitchModal() {
     const isActive = ksBtn.textContent.includes("ACTIVE");
 
     if (isActive) {
-        desc.innerHTML = "מצב נוכחי: <strong style='color:#ef4444;'>⚠️ KILL SWITCH פעיל</strong>.<br>האם אתה בטוח שברצונך לבטל את ה-Kill Switch ולהחזיר את המסחר לפעילות תקינה?";
+        desc.innerHTML = "Current state: <strong style='color:#ef4444;'>⚠️ KILL SWITCH ACTIVE</strong>.<br>Are you sure you want to deactivate Kill Switch and resume normal trading?";
     } else {
-        desc.innerHTML = "מצב נוכחי: <strong>🛡️ KILL SWITCH כבוי (תקין)</strong>.<br>האם אתה בטוח שברצונך להפעיל את ה-Kill Switch ולעצור מיידית פקודות מסחר חדשות במערכת?";
+        desc.innerHTML = "Current state: <strong>🛡️ KILL SWITCH OFF (Normal)</strong>.<br>Are you sure you want to activate Kill Switch and immediately block new trading orders?";
     }
 
     if (modal) modal.classList.add("active");
@@ -878,7 +913,7 @@ async function resetSessionStats() {
         const res = await apiFetch("/api/reset_stats", { method: "POST" });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast("🧹 נתוני הסשן (רווחים ועמלות) אופסו בהצלחה!", "success");
+            showToast("🧹 Session stats (PNL and fees) reset successfully!", "success");
             await fetchDashboardData();
         } else {
             showToast("❌ Error resetting stats: " + (data.error || "Unknown error"), "error");
@@ -924,7 +959,7 @@ function openDryRunConfirmModal() {
 
     const desc = document.getElementById("dryRunConfirmModalDesc");
     if (desc) {
-        desc.innerHTML = `האם אתה בטוח שברצונך לעדכן את אחזקות ה-DRY RUN במערכת לערכים הבאים?<br><br>` +
+        desc.innerHTML = `Are you sure you want to update system DRY RUN holdings to the following values?<br><br>` +
             `<strong style="color: #60a5fa; font-size: 1rem;">💵 USDT: ${usdt} | ₿ BTC: ${btc} | ⟠ ETH: ${eth} | ◎ SOL: ${sol}</strong>`;
     }
 
@@ -953,7 +988,7 @@ async function confirmSaveDryRunBalances() {
     if (confirmBtn) confirmBtn.disabled = true;
     if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.textContent = "שומר...";
+        saveBtn.textContent = "Saving...";
     }
 
     try {
@@ -964,19 +999,19 @@ async function confirmSaveDryRunBalances() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast("⚙️ אחזקות DRY RUN עודכנו בהצלחה!", "success");
+            showToast("⚙️ DRY RUN holdings updated successfully!", "success");
             closeDryRunModal();
             await fetchPortfolio();
         } else {
-            showToast("❌ שגיאה בעדכון אחזקות: " + (data.error || "Unknown error"), "error");
+            showToast("❌ Error updating holdings: " + (data.error || "Unknown error"), "error");
         }
     } catch (err) {
-        showToast("❌ שגיאה בעדכון אחזקות: " + err, "error");
+        showToast("❌ Error updating holdings: " + err, "error");
     } finally {
         if (confirmBtn) confirmBtn.disabled = false;
         if (saveBtn) {
             saveBtn.disabled = false;
-            saveBtn.textContent = "עדכן אחזקות 💾";
+            saveBtn.textContent = "Update Holdings 💾";
         }
     }
 }
@@ -989,7 +1024,7 @@ function openErrorsModal() {
     listEl.innerHTML = "";
 
     if (!activeErrorsList || activeErrorsList.length === 0) {
-        listEl.innerHTML = `<li class="empty-errors">אין שגיאות רשומות — המערכת פועלת באופן תקין לחלוטין ✓</li>`;
+        listEl.innerHTML = `<li class="empty-errors">No errors recorded — System is operating normally ✓</li>`;
     } else {
         activeErrorsList.forEach((err, idx) => {
             const li = document.createElement("li");
@@ -1009,24 +1044,24 @@ function closeErrorsModal() {
 async function clearSystemErrors() {
     const btn = document.getElementById("clearErrorsBtn");
     btn.disabled = true;
-    btn.textContent = "מנקה...";
+    btn.textContent = "Clearing...";
 
     try {
         const res = await apiFetch("/api/errors/clear", { method: "POST" });
         const data = await res.json();
         if (res.ok && data.success) {
-            showToast("🧹 שגיאות המערכת נוקו בהצלחה!", "success");
+            showToast("🧹 System errors cleared successfully!", "success");
             activeErrorsList = [];
             closeErrorsModal();
             await fetchStatus();
         } else {
-            showToast("❌ שגיאה בניקוי שגיאות: " + (data.error || "Unknown error"), "error");
+            showToast("❌ Error clearing system errors: " + (data.error || "Unknown error"), "error");
         }
     } catch (err) {
-        showToast("❌ שגיאה בניקוי שגיאות: " + err, "error");
+        showToast("❌ Error clearing system errors: " + err, "error");
     } finally {
         btn.disabled = false;
-        btn.textContent = "🧹 נקה שגיאות (Clear Errors)";
+        btn.textContent = "🧹 Clear Errors";
     }
 }
 
@@ -1083,12 +1118,12 @@ async function loadTelegramConfig() {
                 tgBtn.style.background = "rgba(34, 197, 94, 0.18)";
                 tgBtn.style.borderColor = "rgba(34, 197, 94, 0.5)";
                 tgBtn.style.color = "#86efac";
-                tgBtn.title = "התראות טלגרם פעילות! (לחץ לשינוי הגדרות)";
+                tgBtn.title = "Telegram alerts active! (Click to modify settings)";
             } else {
                 tgBtn.style.background = "";
                 tgBtn.style.borderColor = "";
                 tgBtn.style.color = "";
-                tgBtn.title = "הגדרות התראות Telegram (Telegram API Alerts)";
+                tgBtn.title = "Telegram Alerts Configuration (Telegram API Alerts)";
             }
         }
     } catch (e) {
@@ -1108,14 +1143,14 @@ async function testTelegramConnection() {
             statusBox.style.background = "rgba(239, 68, 68, 0.15)";
             statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
             statusBox.style.color = "#fca5a5";
-            statusBox.textContent = "⚠️ נא להזין Bot Token ו-Chat ID לפני בדיקת החיבור.";
+            statusBox.textContent = "⚠️ Please enter Bot Token and Chat ID before testing connection.";
         }
         return;
     }
 
     if (testBtn) {
         testBtn.disabled = true;
-        testBtn.textContent = "שולח הודעת ניסיון...";
+        testBtn.textContent = "Sending test message...";
     }
 
     if (statusBox) {
@@ -1123,7 +1158,7 @@ async function testTelegramConnection() {
         statusBox.style.background = "rgba(59, 130, 246, 0.15)";
         statusBox.style.border = "1px solid rgba(59, 130, 246, 0.4)";
         statusBox.style.color = "#93c5fd";
-        statusBox.textContent = "⏳ מבצע פנייה ל-Telegram API...";
+        statusBox.textContent = "⏳ Contacting Telegram API...";
     }
 
     try {
@@ -1135,15 +1170,15 @@ async function testTelegramConnection() {
         const data = await res.json();
 
         if (res.ok && data.success) {
-            showToast("🧪 " + (data.message || "הודעת ניסיון נשלחה בהצלחה לטלגרם!"), "success");
+            showToast("🧪 " + (data.message || "Test message sent successfully to Telegram!"), "success");
             if (statusBox) {
                 statusBox.style.background = "rgba(34, 197, 94, 0.15)";
                 statusBox.style.border = "1px solid rgba(34, 197, 94, 0.4)";
                 statusBox.style.color = "#86efac";
-                statusBox.textContent = "✅ " + (data.message || "הודעת ניסיון נשלחה בהצלחה לטלגרם!");
+                statusBox.textContent = "✅ " + (data.message || "Test message sent successfully to Telegram!");
             }
         } else {
-            const err = data.error || data.message || "שגיאה בריענון טלגרם";
+            const err = data.error || data.message || "Error testing Telegram";
             showToast("❌ " + err, "error");
             if (statusBox) {
                 statusBox.style.background = "rgba(239, 68, 68, 0.15)";
@@ -1153,17 +1188,17 @@ async function testTelegramConnection() {
             }
         }
     } catch (err) {
-        showToast("❌ שגיאה בחיבור לשרת: " + err, "error");
+        showToast("❌ Server communication error: " + err, "error");
         if (statusBox) {
             statusBox.style.background = "rgba(239, 68, 68, 0.15)";
             statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
             statusBox.style.color = "#fca5a5";
-            statusBox.textContent = "❌ שגיאה תקשורת: " + err;
+            statusBox.textContent = "❌ Communication error: " + err;
         }
     } finally {
         if (testBtn) {
             testBtn.disabled = false;
-            testBtn.textContent = "🧪 בדיקת חיבור (שלח הודעה)";
+            testBtn.textContent = "🧪 Test Connection (Send Test Message)";
         }
     }
 }
@@ -1177,7 +1212,7 @@ async function saveTelegramConfig() {
 
     if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.textContent = "שומר...";
+        saveBtn.textContent = "Saving...";
     }
 
     try {
@@ -1194,18 +1229,18 @@ async function saveTelegramConfig() {
         const data = await res.json();
 
         if (res.ok && data.success) {
-            showToast("✈️ " + (data.message || "הגדרות טלגרם שנשמרו בהצלחה!"), "success");
+            showToast("✈️ " + (data.message || "Telegram settings saved successfully!"), "success");
             closeTelegramModal();
             await loadTelegramConfig();
         } else {
-            showToast("❌ שגיאה בשמירת הגדרות: " + (data.error || "Unknown error"), "error");
+            showToast("❌ Error saving settings: " + (data.error || "Unknown error"), "error");
         }
     } catch (err) {
-        showToast("❌ שגיאה בחיבור לשרת: " + err, "error");
+        showToast("❌ Server communication error: " + err, "error");
     } finally {
         if (saveBtn) {
             saveBtn.disabled = false;
-            saveBtn.textContent = "שמור הגדרות 💾";
+            saveBtn.textContent = "Save Settings 💾";
         }
     }
 }

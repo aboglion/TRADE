@@ -116,7 +116,7 @@ class TelegramService:
             total_usd = amount * price
             side_is_buy = "BUY" in side_str
             side_emoji = "🟢" if side_is_buy else "🔴"
-            action_text = "קנייה (BUY)" if side_is_buy else "מכירה (SELL)"
+            action_text = "BUY" if side_is_buy else "SELL"
 
             url_to_link = dashboard_url or self.dashboard_url or "http://localhost:8080"
             if url_to_link and not url_to_link.startswith("http"):
@@ -124,20 +124,20 @@ class TelegramService:
 
             time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            header = "🧪 <b>בדיקת חיבור — עסקת דוגמה (העסקה האחרונה):</b>" if is_test else "⚡ <b>התראת מסחר — פקודה בוצעה!</b>"
+            header = "🧪 <b>Connection Test — Sample Order (Last Executed Trade):</b>" if is_test else "⚡ <b>Trade Alert — Order Executed!</b>"
 
             msg = (
                 f"{header}\n\n"
-                f"{side_emoji} <b>סוג פקודה:</b> {action_text}\n"
-                f"🪙 <b>נכס:</b> <code>{symbol}</code>\n"
-                f"📊 <b>כמות:</b> <code>{amount:.6f}</code>\n"
-                f"💵 <b>מחיר ביצוע:</b> <code>${price:,.2f}</code>\n"
-                f"💰 <b>שווי עיסקה:</b> <code>${total_usd:,.2f}</code>\n"
-                f"🏷️ <b>עמלה:</b> <code>{fees:.6f} {fee_curr}</code>\n"
-                f"🎯 <b>סיבה/אסטרטגיה:</b> {reason}\n"
-                f"⚙️ <b>מצב מנוע:</b> <code>{run_mode}</code>\n"
-                f"⏱️ <b>זמן:</b> {time_str}\n\n"
-                f"🌐 <b><a href=\"{url_to_link}\">לחץ כאן לפתיחת הדאשבורד החי</a></b>"
+                f"{side_emoji} <b>Order Type:</b> {action_text}\n"
+                f"🪙 <b>Asset:</b> <code>{symbol}</code>\n"
+                f"📊 <b>Amount:</b> <code>{amount:.6f}</code>\n"
+                f"💵 <b>Execution Price:</b> <code>${price:,.2f}</code>\n"
+                f"💰 <b>Total Value:</b> <code>${total_usd:,.2f}</code>\n"
+                f"🏷️ <b>Fee:</b> <code>{fees:.6f} {fee_curr}</code>\n"
+                f"🎯 <b>Reason/Strategy:</b> {reason}\n"
+                f"⚙️ <b>Engine Mode:</b> <code>{run_mode}</code>\n"
+                f"⏱️ <b>Time:</b> {time_str}\n\n"
+                f"🌐 <b><a href=\"{url_to_link}\">Click here to open live dashboard</a></b>"
             )
 
             if is_test:
@@ -186,15 +186,15 @@ class TelegramService:
         If no trades exist, sends an English test message.
         """
         if not self.is_configured():
-            return False, "נא להגדיר Bot Token ו-Chat ID במערכת"
+            return False, "Please configure Bot Token and Chat ID in system settings"
 
         try:
             if last_trade:
                 success = self.send_trade_notification(last_trade, run_mode=run_mode, is_test=True)
                 if success:
-                    return True, "הודעת בדיקה עם העסקה האחרונה נשלחה בהצלחה לטלגרם!"
+                    return True, "Test message with last trade sent successfully to Telegram!"
                 else:
-                    return False, "נכשל בשליחת הודעת הבדיקה עם העסקה האחרונה"
+                    return False, "Failed to send test message with last trade"
             else:
                 url_to_link = self.dashboard_url or "http://localhost:8080"
                 if url_to_link and not url_to_link.startswith("http"):
@@ -212,9 +212,9 @@ class TelegramService:
                 )
                 success = self._send_raw_html(msg)
                 if success:
-                    return True, "הודעת בדיקה באנגלית (ללא עסקאות) נשלחה בהצלחה לטלגרם!"
+                    return True, "Test message sent successfully to Telegram!"
                 else:
-                    return False, "נכשל בשליחת הודעת הבדיקה לטלגרם"
+                    return False, "Failed to send test message to Telegram"
 
         except Exception as e:
-            return False, f"שגיאה בשליחת הודעת ניסיון: {e}"
+            return False, f"Error sending test message: {e}"
