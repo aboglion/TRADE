@@ -15,12 +15,91 @@ import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("bot.web.server")
 
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
+
+# Global market metrics cache for BTC, ETH, SOL multi-timeframe performance
+_market_metrics_cache: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+_market_metrics_lock = Lock()
+_market_metrics_updating = False
+
+
+def _fetch_market_metrics_worker() -> None:
+    global _market_metrics_cache, _market_metrics_updating
+    try:
+        import ccxt
+        import numpy as np
+        exchange = ccxt.binance({"timeout": 5000, "enableRateLimit": False})
+        symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+        
+        tickers = {}
+        try:
+            tickers = exchange.fetch_tickers(symbols)
+        except Exception as te:
+            logger.debug("Failed batch fetch_tickers: %s", te)
+
+        results = {}
+        for sym in symbols:
+            coin = sym.split("/")[0]
+            try:
+                ticker = tickers.get(sym, {})
+                pct_24h = float(ticker.get("percentage", 0.0) or 0.0)
+
+                c4h = exchange.fetch_ohlcv(sym, timeframe="4h", limit=3)
+                curr_price = float(c4h[-1][4]) if c4h else float(ticker.get("last", 0.0) or 0.0)
+                prev_4h = float(c4h[-2][4]) if len(c4h) >= 2 else (float(c4h[-1][1]) if c4h else curr_price)
+                pct_4h = ((curr_price - prev_4h) / prev_4h * 100.0) if prev_4h > 0 else 0.0
+
+                c1d = exchange.fetch_ohlcv(sym, timeframe="1d", limit=160)
+                closes = [float(c[4]) for c in c1d]
+                if len(closes) >= 150:
+                    sma150 = float(np.mean(closes[-150:]))
+                    pct_sma150 = ((curr_price - sma150) / sma150 * 100.0) if sma150 > 0 else 0.0
+                else:
+                    pct_sma150 = 0.0
+
+                results[coin] = {
+                    "price": curr_price,
+                    "change_4h": round(pct_4h, 2),
+                    "change_24h": round(pct_24h, 2),
+                    "change_sma150": round(pct_sma150, 2),
+                }
+            except Exception as ex:
+                logger.debug("Failed to fetch market metrics for %s: %s", sym, ex)
+
+        if results:
+            with _market_metrics_lock:
+                _market_metrics_cache = {"timestamp": time.time(), "data": results}
+    except Exception as e:
+        logger.debug("Error updating market metrics cache: %s", e)
+    finally:
+        _market_metrics_updating = False
+
+
+def get_market_metrics_cached() -> Dict[str, Any]:
+    global _market_metrics_updating
+    now = time.time()
+    with _market_metrics_lock:
+        data = _market_metrics_cache.get("data", {})
+        ts = _market_metrics_cache.get("timestamp", 0.0)
+
+    if (now - ts > 30.0) and not _market_metrics_updating:
+        _market_metrics_updating = True
+        t = Thread(target=_fetch_market_metrics_worker, daemon=True)
+        t.start()
+
+    return data
+
+# Warm-up initial fetch on module load
+try:
+    _market_metrics_updating = True
+    Thread(target=_fetch_market_metrics_worker, daemon=True).start()
+except Exception:
+    _market_metrics_updating = False
 
 
 class LoginRateLimiter:
@@ -317,6 +396,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "critical_errors": critical_errors[-5:],
             "kill_switch": self.config.risk.kill_switch if self.config else False,
             "assets": list(self.config.strategy.assets.keys()) if self.config else [],
+            "market_metrics": get_market_metrics_cached(),
         }
         self._send_json(data)
 
@@ -334,6 +414,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             initial_val = state.session_initial_value_usd if state else None
             initial_prices = dict(state.session_initial_prices) if (state and state.session_initial_prices) else {}
             state_updated = False
+
+            strategy_positions = state.strategy_state.get("positions", {}) if (state and state.strategy_state) else {}
 
             holdings_list = []
             for symbol, h in snapshot.holdings.items():
@@ -359,11 +441,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     init_price = current_price
                     state_updated = True
 
+                # Determine active strategy entry price if available, otherwise baseline init_price
+                pos_info = strategy_positions.get(symbol, {})
+                entry_price = float(pos_info.get("entry_px", 0.0) or 0.0) if pos_info.get("active") else 0.0
+                if entry_price <= 0:
+                    entry_price = init_price or 0.0
+
                 change_pct = 0.0
-                if symbol in ("USDT", "USD", "BUSD", "USDC"):
-                    change_pct = 0.0
-                elif init_price and init_price > 0 and current_price > 0:
-                    change_pct = ((current_price - init_price) / init_price) * 100.0
+                net_change_pct = 0.0
+                if symbol not in ("USDT", "USD", "BUSD", "USDC") and entry_price > 0 and current_price > 0:
+                    change_pct = ((current_price - entry_price) / entry_price) * 100.0
+                    # Net PnL % relative to entry price, deducting 0.1% buy fee and 0.1% estimated sell fee
+                    # Net multiplier = (1 - 0.001) * (1 - 0.001) * (current_price / entry_price)
+                    net_multiplier = 0.998001 * (current_price / entry_price)
+                    net_change_pct = (net_multiplier - 1.0) * 100.0
 
                 holdings_list.append({
                     "symbol": symbol,
@@ -374,7 +465,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "weight_pct": round(weight, 2),
                     "current_price": round(current_price, 4 if current_price < 10 else 2),
                     "initial_price": round(init_price, 4 if init_price < 10 else 2) if init_price else None,
+                    "entry_price": round(entry_price, 4 if entry_price < 10 else 2) if entry_price else None,
                     "change_pct": round(change_pct, 2),
+                    "net_change_pct": round(net_change_pct, 2),
                 })
 
             data = {

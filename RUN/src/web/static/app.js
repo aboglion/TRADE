@@ -395,6 +395,56 @@ async function fetchStatus() {
             macroRegimeSub.textContent = "Spot Protection Active (100% USDT Cash)";
         }
 
+        // Update Market Performance Table (BTC, ETH, SOL: 4H, 24H, SMA-150)
+        const macroCoinPerf = document.getElementById("macroCoinPerf");
+        if (macroCoinPerf && data.market_metrics) {
+            const metrics = data.market_metrics;
+            const coins = ["BTC", "ETH", "SOL"];
+            let rowsHtml = "";
+
+            coins.forEach(coin => {
+                const item = metrics[coin];
+                if (!item) return;
+
+                let icon = "₿";
+                if (coin === "ETH") icon = "⟠";
+                if (coin === "SOL") icon = "◎";
+
+                const formatCell = (val) => {
+                    const isPos = val >= 0;
+                    const sign = isPos ? "+" : "";
+                    const cls = isPos ? "perf-val-up" : "perf-val-down";
+                    return `<span class="${cls}">${sign}${val.toFixed(2)}%</span>`;
+                };
+
+                rowsHtml += `
+                    <div class="macro-perf-row">
+                        <div class="col-coin">
+                            <span class="coin-mini-icon">${icon}</span>
+                            <span class="coin-name">${coin}</span>
+                        </div>
+                        <div class="col-tf" title="4-Hour Change">${formatCell(item.change_4h)}</div>
+                        <div class="col-tf" title="24-Hour Change">${formatCell(item.change_24h)}</div>
+                        <div class="col-tf" title="Distance from SMA-150 Trendline">${formatCell(item.change_sma150)}</div>
+                    </div>
+                `;
+            });
+
+            if (rowsHtml) {
+                macroCoinPerf.innerHTML = `
+                    <div class="macro-perf-table">
+                        <div class="macro-perf-header">
+                            <div class="col-coin">COIN</div>
+                            <div class="col-tf" title="4-Hour Price Change">4H</div>
+                            <div class="col-tf" title="24-Hour Price Change">24H</div>
+                            <div class="col-tf" title="Distance from SMA-150 Trendline">SMA-150</div>
+                        </div>
+                        ${rowsHtml}
+                    </div>
+                `;
+            }
+        }
+
         // Health
         activeErrorsList = data.critical_errors || [];
         const healthVal = document.getElementById("systemHealthVal");
@@ -471,19 +521,10 @@ async function fetchPortfolio() {
             feeEl.textContent = feeStrings.length > 0 ? `Fees: ${feeStrings.join(', ')}` : "Fees: 0.00";
         }
 
-        // Coin performance summary tags in metric card 1
+        // Coin performance summary tags removed from metric card 1 (user requested PNL & FEES only)
         const coinPerfTagsEl = document.getElementById("coinPerfTags");
-        if (coinPerfTagsEl && data.holdings) {
-            const coinTags = data.holdings
-                .filter(h => h.symbol !== "USDT" && h.symbol !== "USD" && h.change_pct !== undefined)
-                .map(h => {
-                    const isPos = h.change_pct >= 0;
-                    const tagClass = isPos ? "tag tag-buy" : "tag tag-sell";
-                    const sign = isPos ? "+" : "";
-                    const icon = isPos ? "📈" : "📉";
-                    return `<span class="${tagClass}" title="Strategy Period Return (Base: $${h.initial_price || h.current_price})">${icon} ${h.symbol}: ${sign}${h.change_pct.toFixed(2)}%</span>`;
-                });
-            coinPerfTagsEl.innerHTML = coinTags.join(" ");
+        if (coinPerfTagsEl) {
+            coinPerfTagsEl.innerHTML = "";
         }
 
         // Allocation Bars
@@ -512,15 +553,16 @@ async function fetchPortfolio() {
             const priceVal = h.current_price || 0;
             const priceStr = priceVal > 0 ? `$${priceVal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: priceVal < 10 ? 4 : 2 })}` : "--";
 
-            const changePct = h.change_pct !== undefined ? h.change_pct : 0;
+            const netChangePct = h.net_change_pct !== undefined ? h.net_change_pct : (h.change_pct !== undefined ? h.change_pct : 0);
             let perfBadgeHtml = "";
             if (symbol !== "USDT" && symbol !== "USD") {
-                const isPos = changePct >= 0;
+                const isPos = netChangePct >= 0;
                 const sign = isPos ? "+" : "";
                 const icon = isPos ? "📈" : "📉";
                 const badgeClass = isPos ? "perf-pill perf-up" : "perf-pill perf-down";
-                const baseInfo = h.initial_price ? `Baseline: $${h.initial_price.toLocaleString("en-US")}` : "";
-                perfBadgeHtml = `<span class="${badgeClass}" title="Strategy Period Return (${baseInfo})">${icon} ${sign}${changePct.toFixed(2)}%</span>`;
+                const entryPx = h.entry_price || h.initial_price;
+                const baseInfo = entryPx ? `Buy Price: $${entryPx.toLocaleString("en-US", { minimumFractionDigits: 2 })} | Net PnL (Deducting Buy & Exit Fees)` : "Net PnL (Deducting Buy & Exit Fees)";
+                perfBadgeHtml = `<span class="${badgeClass}" title="${baseInfo}">${icon} Net: ${sign}${netChangePct.toFixed(2)}%</span>`;
             }
 
             const row = document.createElement("div");
