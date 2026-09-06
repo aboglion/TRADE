@@ -6,7 +6,10 @@ gp:
 	git push
 
 pull:
-	git pull
+	git pull --autostash || git pull
+
+pull-safe:
+	@git pull --autostash || git pull || true
 
 # 24/7 Background execution modes
 dry:
@@ -41,6 +44,6 @@ check:
 balance:
 	python3 scripts/show_balances.py
 
-restart: stop pull run
+restart: stop pull-safe run
 
-restart-dry: stop pull dry
+restart-dry: stop pull-safe dry

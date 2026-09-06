@@ -40,11 +40,14 @@ check:
 	$(PYTHON) RUN/scripts/check_connection.py
 
 pull:
-	git pull
+	git pull --autostash || git pull
 
-restart: stop pull run
+pull-safe:
+	@git pull --autostash || git pull || true
 
-restart-dry: stop pull dry
+restart: stop pull-safe run
+
+restart-dry: stop pull-safe dry
 
 # Git Auto-Updater Watcher
 watch:

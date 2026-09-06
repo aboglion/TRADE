@@ -636,12 +636,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             import subprocess
             project_dir = Path(__file__).resolve().parent.parent.parent.parent
             res = subprocess.run(
-                ["git", "pull", "origin", "main"],
+                ["git", "pull", "origin", "main", "--autostash"],
                 cwd=str(project_dir),
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
+            if res.returncode != 0:
+                res = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd=str(project_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
             stdout = res.stdout.strip() if res.stdout else ""
             stderr = res.stderr.strip() if res.stderr else ""
             output_msg = stdout or stderr

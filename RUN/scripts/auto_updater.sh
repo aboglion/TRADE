@@ -38,7 +38,8 @@ run_loop() {
                 if make restart >> "$LOG_FILE" 2>&1; then
                     log "✅ Restart completed successfully."
                 else
-                    log "❌ Restart encountered issues. Check $LOG_FILE for details."
+                    log "⚠️ Restart encountered issues. Attempting recovery with 'make run'..."
+                    make run >> "$LOG_FILE" 2>&1 || true
                 fi
             fi
         else
