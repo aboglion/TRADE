@@ -373,6 +373,17 @@ body {
     overflow: hidden;
 }
 
+#dashboardPipelineCard {
+    overflow: visible !important;
+    position: relative;
+    z-index: 10;
+}
+
+#dashboardPipelineCard:hover,
+#dashboardPipelineCard:has(.pipeline-node-wrapper:hover) {
+    z-index: 99999 !important;
+}
+
 .card:hover {
     border-color: var(--border-accent);
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 20px var(--border-glow);
@@ -2283,11 +2294,15 @@ body {
     gap: 0.75rem;
     transition: all 0.3s ease;
     position: relative;
+    overflow: visible !important;
+    z-index: 10;
 }
 
-.pipeline-card:hover {
+.pipeline-card:hover,
+.pipeline-card:has(.pipeline-node-wrapper:hover) {
     border-color: rgba(56, 189, 248, 0.3);
     box-shadow: 0 12px 35px rgba(56, 189, 248, 0.12);
+    z-index: 99999 !important;
 }
 
 .pipeline-card-header {
@@ -2421,14 +2436,14 @@ body {
     align-items: center;
     position: relative;
     cursor: pointer;
-    z-index: 2;
+    z-index: 20;
     min-width: 62px;
     flex-shrink: 0;
 }
 
 .pipeline-node-wrapper:hover,
 .pipeline-node-wrapper.active {
-    z-index: 10000;
+    z-index: 999999 !important;
 }
 
 .pipeline-node-circle {
@@ -2490,21 +2505,21 @@ body {
 /* Interactive Popover Tooltip */
 .pipeline-popover {
     position: absolute;
-    bottom: calc(100% + 10px);
+    bottom: calc(100% + 12px);
     left: 50%;
-    transform: translateX(-50%) translateY(10px);
-    width: 270px;
-    background: #0f172a !important;
-    background-color: #0f172a !important;
-    border: 1.5px solid rgba(56, 189, 248, 0.6);
+    transform: translateX(-50%) translateY(4px);
+    width: 275px;
+    background: #0b1329 !important;
+    background-color: #0b1329 !important;
+    border: 1.5px solid rgba(56, 189, 248, 0.7);
     border-radius: 12px;
     padding: 0.75rem 0.9rem;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.95), 0 0 25px rgba(56, 189, 248, 0.3);
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.98), 0 0 30px rgba(56, 189, 248, 0.4);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    z-index: 10000;
+    transition: opacity 0.05s ease, transform 0.05s ease;
+    z-index: 9999999 !important;
     direction: rtl;
     text-align: right;
 }
@@ -2517,7 +2532,7 @@ body {
     transform: translateX(-50%);
     border-width: 7px;
     border-style: solid;
-    border-color: #0f172a transparent transparent transparent;
+    border-color: #0b1329 transparent transparent transparent;
 }
 
 .pipeline-node-wrapper:hover .pipeline-popover,
