@@ -367,9 +367,14 @@ async function triggerManualPull() {
 // ── Status & Regime ────────────────────────────────────────
 
 async function fetchStatus() {
+    const startTime = performance.now();
     try {
         const res = await apiFetch("/api/status");
         if (!res.ok) return;
+        const latencyMs = performance.now() - startTime;
+        if (typeof recordHealthPoint === "function") {
+            recordHealthPoint(latencyMs);
+        }
         const data = await res.json();
 
         // Mode badge
