@@ -320,8 +320,55 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             justify-content: space-between;
             align-items: center;
             margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
         }}
         .log-header h2 {{ font-size: 1.2rem; font-weight: 600; color: #ffffff; }}
+        .log-actions {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }}
+        .btn-copy {{
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: #ffffff;
+            border: none;
+            padding: 6px 14px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .btn-copy:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        }}
+        .btn-copy:active {{ transform: translateY(0); }}
+        .btn-select {{
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 6px 14px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .btn-select:hover {{
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }}
         .live-tag {{
             background: rgba(239, 68, 68, 0.15);
             color: var(--red-alert);
@@ -347,6 +394,8 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             text-align: left;
             white-space: pre-wrap;
             word-break: break-all;
+            user-select: text;
+            -webkit-user-select: text;
         }}
         .log-line {{ margin-bottom: 2px; }}
         .log-error {{ color: #f87171; font-weight: bold; }}
@@ -401,7 +450,11 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         <div class="log-section">
             <div class="log-header">
                 <h2>📋 Error Log & Detailed Traceback (logs/bot.log)</h2>
-                <div class="live-tag">Auto Refresh (5s)</div>
+                <div class="log-actions">
+                    <button class="btn-copy" onclick="copyLogsToClipboard()">📋 Copy Traceback</button>
+                    <button class="btn-select" onclick="selectAllLogs()">🔍 Select All</button>
+                    <div class="live-tag">Auto Refresh (5s)</div>
+                </div>
             </div>
             <div class="log-console" id="logConsole">Loading logs...</div>
         </div>
@@ -410,11 +463,103 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
     <div id="toast"></div>
 
     <script>
-        function showToast(msg) {{
+        function showToast(msg, isError = false) {{
             const t = document.getElementById("toast");
             t.innerText = msg;
+            t.style.background = isError ? "var(--red-alert)" : "var(--green-btn)";
             t.style.display = "block";
             setTimeout(() => {{ t.style.display = "none"; }}, 4000);
+        }}
+
+        async function copyTextToClipboard(text) {{
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {{
+                try {{
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                }} catch (err) {{
+                    console.warn("navigator.clipboard failed, attempting execCommand fallback:", err);
+                }}
+            }}
+
+            let success = false;
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.top = "0";
+            textArea.style.left = "0";
+            textArea.style.width = "2em";
+            textArea.style.height = "2em";
+            textArea.style.padding = "0";
+            textArea.style.border = "none";
+            textArea.style.outline = "none";
+            textArea.style.boxShadow = "none";
+            textArea.style.background = "transparent";
+            textArea.setAttribute("readonly", "");
+            document.body.appendChild(textArea);
+
+            textArea.focus();
+            textArea.select();
+            if (textArea.setSelectionRange) {{
+                textArea.setSelectionRange(0, 999999);
+            }}
+
+            try {{
+                success = document.execCommand("copy");
+            }} catch (err) {{
+                console.error("document.execCommand copy failed:", err);
+                success = false;
+            }}
+
+            document.body.removeChild(textArea);
+            if (success) return true;
+
+            try {{
+                const consoleEl = document.getElementById("logConsole");
+                if (consoleEl) {{
+                    const range = document.createRange();
+                    range.selectNodeContents(consoleEl);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    success = document.execCommand("copy");
+                    if (success) return true;
+                }}
+            }} catch (err) {{
+                console.error("Selection range copy failed:", err);
+            }}
+
+            return false;
+        }}
+
+        async function copyLogsToClipboard() {{
+            const container = document.getElementById("logConsole");
+            if (!container) return;
+
+            let text = (container.innerText || container.textContent || "").trim();
+
+            if (!text || text === "Loading logs...") {{
+                showToast("⚠️ No log content available to copy.", true);
+                return;
+            }}
+
+            const copied = await copyTextToClipboard(text);
+            if (copied) {{
+                showToast("📋 Traceback & logs copied to clipboard!");
+            }} else {{
+                selectAllLogs();
+                showToast("⚠️ Browser security blocked auto-copy. Text selected! Press Ctrl+C to copy.", true);
+            }}
+        }}
+
+        function selectAllLogs() {{
+            const container = document.getElementById("logConsole");
+            if (!container) return;
+            const range = document.createRange();
+            range.selectNodeContents(container);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            showToast("🔍 All log lines selected! Press Ctrl+C to copy.");
         }}
 
         async function fetchLogs() {{
