@@ -766,10 +766,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     sell_tree_nodes = [
                         {
                             "id": "node_bear_emergency",
-                            "title": "1. יציאת חירום דובים (Bear Regime Exit)",
-                            "subtitle": "נפילה למשטר דובים (BTC < SMA150)",
-                            "criteria": "BTC < SMA150 -> Sell to 100% USDT",
-                            "actual": "BEAR ACTIVE (Sell All)" if macro_regime == "BEAR" else "BULL ACTIVE (Safe)",
+                            "title": "1. יציאת חירום דובים ושורט (Bear Exit & Short Hedge)",
+                            "subtitle": "מעבר למשטר דובים (BTC < SMA150) ופתיחת 15% שורט",
+                            "criteria": "BTC < SMA150 -> Close Longs & Open 15% BTC Short",
+                            "actual": "BEAR ACTIVE (15% Short BTC + 85% USDT)" if macro_regime == "BEAR" else "BULL ACTIVE (Safe)",
                             "triggered": macro_regime == "BEAR",
                         },
                         {

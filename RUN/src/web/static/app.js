@@ -1592,7 +1592,7 @@ function renderBinaryTree(data) {
         nodes = coinData ? (coinData.sell_tree_nodes || []) : [];
     } else if (isRiskMode) {
         treeTitle = "עץ ניהול סיכונים ומינוף (RISK GUARD TREE)";
-        treeSub = "הערכת סיכוני מקרו לקביעת רמת הטיפול והמינוף (0.0x / 1.0x / 2.0x)";
+        treeSub = "הערכת סיכוני מקרו לקביעת רמת הטיפול והמינוף (15% Short / 1.0x / 2.0x)";
         const isBull = macro.regime === "BULL";
         const pullback = macro.pullback_pct || 0;
         const underEma = !!macro.under_ema20_daily;
@@ -1749,8 +1749,8 @@ function renderBinaryTree(data) {
         if (macro.regime === "BEAR") {
             html += `
                 <div class="tree-leaf-outcome outcome-sell-triggered">
-                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 100% USDT)</div>
-                    <div class="outcome-desc">מינוף 0.0x — הגנת מזומן מלאה בדולרים (USDT) ללא חשיפה לפוזיציות לונג.</div>
+                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 85% USDT + 15% SHORT HEDGE)</div>
+                    <div class="outcome-desc">סגירת כל פוזיציות הלונג + פתיחת 15% שורט על BTC לגידור והפקת רווחים בירידות, לצד 85% מזומן USDT.</div>
                 </div>
             `;
         } else if (riskActive) {
