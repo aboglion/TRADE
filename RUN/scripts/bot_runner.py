@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import time
 import signal
@@ -115,6 +116,14 @@ def send_telegram_crash_alert(exit_code: int, last_logs: List[str]) -> None:
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except Exception:
+                pass
+        super().server_bind()
 
 
 class FallbackCrashHandler(SimpleHTTPRequestHandler):
@@ -478,7 +487,21 @@ def run_fallback_server(port: int, exit_code: int) -> bool:
 
     log_runner(f"🚨 Launching Emergency Fallback Log Server on http://0.0.0.0:{port}")
 
-    server = ThreadedHTTPServer(("0.0.0.0", port), FallbackCrashHandler)
+    server = None
+    for attempt in range(15):
+        try:
+            server = ThreadedHTTPServer(("0.0.0.0", port), FallbackCrashHandler)
+            break
+        except OSError as ex:
+            if ex.errno == 98 and attempt < 14:
+                log_runner(f"Port {port} busy during fallback server startup. Retrying in 1s... ({attempt + 1}/15)")
+                time.sleep(1.0)
+            else:
+                raise
+
+    if server is None:
+        return False
+
     FallbackCrashHandler.server_instance = server
 
     try:
@@ -564,8 +587,17 @@ def main() -> None:
         should_restart = run_fallback_server(port=port, exit_code=exit_code)
 
         if should_restart:
-            log_runner("User requested restart from Emergency Web UI. Rebooting main.py in 1 second...")
-            time.sleep(1.0)
+            log_runner("User requested restart from Emergency Web UI. Waiting for port to free up...")
+            for _ in range(10):
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(0.5)
+                        if s.connect_ex(("127.0.0.1", port)) != 0:
+                            break
+                except Exception:
+                    break
+                time.sleep(0.5)
+            log_runner("Rebooting main.py...")
             continue
         else:
             log_runner("Fallback server exited without restart request. Supervisor shutting down.")

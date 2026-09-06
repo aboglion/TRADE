@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -175,6 +176,14 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
     daemon_threads = True
     allow_reuse_address = True
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except Exception:
+                pass
+        super().server_bind()
 
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
@@ -1006,6 +1015,7 @@ def run_dashboard_server(
     telegram_service: Any = None,
     host: str = "0.0.0.0",
     port: int = 8080,
+    max_retries: int = 15,
 ) -> ThreadedHTTPServer:
     """Initialize and start the dashboard HTTP server."""
     DashboardRequestHandler.config = config
@@ -1015,6 +1025,17 @@ def run_dashboard_server(
     DashboardRequestHandler.telegram_service = telegram_service
     DashboardRequestHandler.log_file_path = config.logging.file if config else "logs/bot.log"
 
-    server = ThreadedHTTPServer((host, port), DashboardRequestHandler)
-    logger.info("Dashboard web server listening on http://%s:%d", host, port)
-    return server
+    for attempt in range(max_retries):
+        try:
+            server = ThreadedHTTPServer((host, port), DashboardRequestHandler)
+            logger.info("Dashboard web server listening on http://%s:%d", host, port)
+            return server
+        except OSError as ex:
+            if ex.errno == 98 and attempt < max_retries - 1:
+                logger.warning(
+                    "Port %d busy (Errno 98). Retrying bind in 1s... (%d/%d)",
+                    port, attempt + 1, max_retries
+                )
+                time.sleep(1.0)
+            else:
+                raise
