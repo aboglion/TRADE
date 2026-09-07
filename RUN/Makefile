@@ -1,10 +1,12 @@
 PYTHON := $(shell \
     if [ -n "$$VIRTUAL_ENV" ] && [ -x "$$VIRTUAL_ENV/bin/python3" ]; then echo "$$VIRTUAL_ENV/bin/python3"; \
+    elif [ -x /root/TRADE/venv/bin/python3 ]; then echo "/root/TRADE/venv/bin/python3"; \
+    elif [ -x "$(CURDIR)/../venv/bin/python3" ]; then echo "$(CURDIR)/../venv/bin/python3"; \
+    elif [ -x "$(CURDIR)/../.venv/bin/python3" ]; then echo "$(CURDIR)/../.venv/bin/python3"; \
+    elif [ -x "$(CURDIR)/venv/bin/python3" ]; then echo "$(CURDIR)/venv/bin/python3"; \
+    elif [ -x "$(CURDIR)/.venv/bin/python3" ]; then echo "$(CURDIR)/.venv/bin/python3"; \
     elif [ -x ../venv/bin/python3 ]; then echo ../venv/bin/python3; \
     elif [ -x ../.venv/bin/python3 ]; then echo ../.venv/bin/python3; \
-    elif [ -x venv/bin/python3 ]; then echo venv/bin/python3; \
-    elif [ -x .venv/bin/python3 ]; then echo .venv/bin/python3; \
-    elif [ -x /root/TRADE/venv/bin/python3 ]; then echo /root/TRADE/venv/bin/python3; \
     elif command -v python3 >/dev/null 2>&1; then echo python3; \
     else echo python; fi)
 
