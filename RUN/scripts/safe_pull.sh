@@ -111,6 +111,18 @@ if [ "$STASH_CREATED" -eq 1 ]; then
         echo "⚠️ Conflict detected when reapplying local modifications!"
         echo "🧹 Resetting working tree to remote HEAD so application can boot cleanly."
         git reset --hard HEAD >/dev/null 2>&1 || true
+
+        # Restore critical local config and untracked files from backup if they were swept away
+        if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+            echo "🔄 Restoring critical configuration files from backup..."
+            cp -rn "$BACKUP_DIR/"* "$PROJECT_DIR/" 2>/dev/null || true
+            for cfg in ".env" "RUN/.env" "RUN/config.yaml" "config.yaml" "data/bot_state.json" "RUN/data/bot_state.json"; do
+                if [ -f "$BACKUP_DIR/$cfg" ]; then
+                    cp -p "$BACKUP_DIR/$cfg" "$PROJECT_DIR/$cfg" 2>/dev/null || true
+                fi
+            done
+        fi
+
         echo "📦 Your local changes remain 100% safe:"
         echo "   1. Preserved in Git Stash: check with 'git stash list'"
         if [ -n "$BACKUP_DIR" ]; then
@@ -118,6 +130,9 @@ if [ "$STASH_CREATED" -eq 1 ]; then
         fi
     fi
 fi
+
+# Ensure executable permissions on all shell and python entrypoints
+chmod +x "$PROJECT_DIR"/RUN/scripts/*.sh "$PROJECT_DIR"/RUN/scripts/bot_runner.py 2>/dev/null || true
 
 echo "=================================================================="
 echo "🎉 Safe Git Pull completed successfully."

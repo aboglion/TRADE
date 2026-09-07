@@ -10,6 +10,15 @@ LOG_FILE="${PROJECT_DIR}/logs/updater.log"
 BRANCH="main"
 CHECK_INTERVAL=60 # Check interval in seconds
 
+# Ensure virtualenv bin is prioritized in PATH
+for venv_path in "${PROJECT_DIR}/venv" "${PROJECT_DIR}/.venv" "/root/TRADE/venv"; do
+    if [ -d "$venv_path/bin" ]; then
+        export PATH="$venv_path/bin:$PATH"
+        export VIRTUAL_ENV="$venv_path"
+        break
+    fi
+done
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
@@ -30,7 +39,7 @@ run_loop() {
 
             if [ -n "$LOCAL" ] && [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
                 COMMIT_MSG=$(git log -1 --pretty=format:"%h - %an: %s" "origin/$BRANCH")
-                log "🚀 New commit detected on GitHub!"
+                log "🚀 New commit detected on GitHub: $COMMIT_MSG"
                 log "🔄 Executing 'make restart' (Safe Git Pull with stash preservation)..."
 
                 # Execute make restart and write output to log

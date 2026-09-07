@@ -37,6 +37,23 @@ sys.path.insert(0, str(RUN_DIR))
 sys.path.insert(0, str(PROJECT_DIR))
 
 
+def find_python_executable() -> str:
+    """Find the best python executable, prioritizing virtual environments."""
+    candidates = [
+        PROJECT_DIR / "venv" / "bin" / "python3",
+        PROJECT_DIR / ".venv" / "bin" / "python3",
+        RUN_DIR / "venv" / "bin" / "python3",
+        RUN_DIR / ".venv" / "bin" / "python3",
+        Path("/root/TRADE/venv/bin/python3"),
+    ]
+    if "VIRTUAL_ENV" in os.environ:
+        candidates.insert(0, Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python3")
+    for cand in candidates:
+        if cand.is_file() and os.access(str(cand), os.X_OK):
+            return str(cand.resolve())
+    return sys.executable
+
+
 def log_runner(msg: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{timestamp}] [RUNNER] {msg}"
@@ -667,6 +684,16 @@ def run_fallback_server(port: int, exit_code: int) -> bool:
 
 
 def main() -> None:
+    # Auto-switch to virtual environment python if available and not currently active
+    py_exec = find_python_executable()
+    if os.path.exists(py_exec):
+        try:
+            if os.path.realpath(sys.executable) != os.path.realpath(py_exec):
+                log_runner(f"Switching Python runtime to virtual environment: {py_exec}")
+                os.execv(py_exec, [py_exec] + sys.argv)
+        except Exception as e:
+            log_runner(f"Runtime switch note ({e}), continuing with {sys.executable}")
+
     # Forward CLI args to main.py
     cli_args = sys.argv[1:]
 
@@ -680,6 +707,24 @@ def main() -> None:
                 pass
 
     main_py_path = RUN_DIR / "main.py"
+    logs_dir = PROJECT_DIR / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    runner_pid_file = logs_dir / "bot_runner.pid"
+    bot_pid_file = logs_dir / "bot.pid"
+    stop_flag_file = logs_dir / "stop.flag"
+
+    def cleanup_pids() -> None:
+        for f in (runner_pid_file, bot_pid_file):
+            try:
+                if f.exists():
+                    f.unlink()
+            except Exception:
+                pass
+
+    try:
+        runner_pid_file.write_text(str(os.getpid()))
+    except Exception:
+        pass
 
     log_runner("Starting Bot Supervisor loop 24/7...")
 
@@ -688,7 +733,7 @@ def main() -> None:
 
     def handle_signal(sig, frame):
         nonlocal shutdown_flag
-        log_runner(f"Received signal {sig}. Terminating bot runner and main process...")
+        log_runner(f"Received signal {sig}. Terminating bot runner and main process gracefully...")
         shutdown_flag = True
         if proc and proc.poll() is None:
             try:
@@ -699,72 +744,100 @@ def main() -> None:
                     proc.kill()
                 except Exception:
                     pass
+        cleanup_pids()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, handle_signal)
 
-    while not shutdown_flag:
-        log_runner(f"Launching main.py process: {sys.executable} {main_py_path} {' '.join(cli_args)}")
-        
-        proc = subprocess.Popen(
-            [sys.executable, str(main_py_path)] + cli_args,
-            cwd=str(RUN_DIR)
-        )
-
-        # Wait for child process
-        try:
-            exit_code = proc.wait()
-        except KeyboardInterrupt:
-            log_runner("KeyboardInterrupt received while waiting for main.py. Terminating child process...")
-            if proc and proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-            break
-
-        log_runner(f"main.py exited with code: {exit_code}")
-
-        # If clean exit (0), intentional termination (-15/143), or shutdown requested, don't trigger emergency server
-        if shutdown_flag or exit_code in (0, -15, 143):
-            log_runner(f"main.py stopped gracefully (Code {exit_code}). Exiting supervisor.")
-            break
-
-        # Read last 50 lines of logs/bot.log for Telegram crash alert
-        log_path = PROJECT_DIR / "logs" / "bot.log"
-        last_logs = []
-        if log_path.exists():
+    try:
+        while not shutdown_flag:
+            # Re-resolve executable in case environment changed
+            active_python = find_python_executable()
+            log_runner(f"Launching main.py process: {active_python} {main_py_path} {' '.join(cli_args)}")
+            
+            proc = subprocess.Popen(
+                [active_python, str(main_py_path)] + cli_args,
+                cwd=str(RUN_DIR)
+            )
             try:
-                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                    last_logs = [line.strip() for line in f.readlines()[-50:] if line.strip()]
+                bot_pid_file.write_text(str(proc.pid))
             except Exception:
                 pass
 
-        # Send Telegram Crash Notification
-        send_telegram_crash_alert(exit_code, last_logs)
+            # Wait for child process
+            try:
+                exit_code = proc.wait()
+            except KeyboardInterrupt:
+                log_runner("KeyboardInterrupt received while waiting for main.py. Terminating child process...")
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                cleanup_pids()
+                break
 
-        # Launch Emergency Fallback HTTP Server
-        log_runner("Starting Emergency Fallback Log Server...")
-        should_restart = run_fallback_server(port=port, exit_code=exit_code)
+            log_runner(f"main.py exited with code: {exit_code}")
 
-        if should_restart:
-            log_runner("User requested restart from Emergency Web UI. Waiting for port to free up...")
-            for _ in range(10):
+            # Check if this was an intentional shutdown or restart
+            is_intentional = (
+                shutdown_flag
+                or stop_flag_file.exists()
+                or exit_code in (0, -15, 143)
+            )
+
+            # Consume stop flag if present
+            if stop_flag_file.exists():
                 try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.settimeout(0.5)
-                        if s.connect_ex(("127.0.0.1", port)) != 0:
-                            break
+                    stop_flag_file.unlink()
                 except Exception:
-                    break
-                time.sleep(0.5)
-            log_runner("Rebooting main.py...")
-            continue
-        else:
-            log_runner("Fallback server exited without restart request. Supervisor shutting down.")
-            break
+                    pass
+
+            if is_intentional:
+                log_runner(f"main.py stopped gracefully or stop flag detected (Code {exit_code}). Exiting supervisor.")
+                cleanup_pids()
+                break
+
+            # Read last 50 lines of logs/bot.log for Telegram crash alert
+            log_path = PROJECT_DIR / "logs" / "bot.log"
+            last_logs = []
+            if log_path.exists():
+                try:
+                    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                        last_logs = [line.strip() for line in f.readlines()[-50:] if line.strip()]
+                except Exception:
+                    pass
+
+            # Send Telegram Crash Notification
+            send_telegram_crash_alert(exit_code, last_logs)
+
+            # Launch Emergency Fallback HTTP Server
+            log_runner("Starting Emergency Fallback Log Server...")
+            should_restart = run_fallback_server(port=port, exit_code=exit_code)
+
+            if should_restart:
+                log_runner("User requested restart from Emergency Web UI. Waiting for port to free up...")
+                for _ in range(10):
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.settimeout(0.5)
+                            if s.connect_ex(("127.0.0.1", port)) != 0:
+                                break
+                    except Exception:
+                        break
+                    time.sleep(0.5)
+                log_runner("Rebooting main.py...")
+                continue
+            else:
+                log_runner("Fallback server exited without restart request. Supervisor shutting down.")
+                cleanup_pids()
+                break
+    finally:
+        cleanup_pids()
 
 
 if __name__ == "__main__":

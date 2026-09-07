@@ -1,3 +1,13 @@
+PYTHON := $(shell \
+    if [ -n "$$VIRTUAL_ENV" ] && [ -x "$$VIRTUAL_ENV/bin/python3" ]; then echo "$$VIRTUAL_ENV/bin/python3"; \
+    elif [ -x ../venv/bin/python3 ]; then echo ../venv/bin/python3; \
+    elif [ -x ../.venv/bin/python3 ]; then echo ../.venv/bin/python3; \
+    elif [ -x venv/bin/python3 ]; then echo venv/bin/python3; \
+    elif [ -x .venv/bin/python3 ]; then echo .venv/bin/python3; \
+    elif [ -x /root/TRADE/venv/bin/python3 ]; then echo /root/TRADE/venv/bin/python3; \
+    elif command -v python3 >/dev/null 2>&1; then echo python3; \
+    else echo python; fi)
+
 .PHONY: gp dry run stop status logs test check balance pull restart restart-dry
 
 gp:
@@ -14,36 +24,43 @@ pull-safe:
 # 24/7 Background execution modes
 dry:
 	@mkdir -p logs
-	@fuser -k 8090/tcp >/dev/null 2>&1 || true
-	@nohup python3 scripts/bot_runner.py --mode DRY_RUN --dashboard --port 8090 > logs/bot.log 2>&1 &
+	@scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
+	@nohup $(PYTHON) scripts/bot_runner.py --mode DRY_RUN --dashboard --port 8090 > logs/bot.log 2>&1 &
 	@echo "⚡ Bot started in DRY_RUN mode with Emergency Crash Fallback Server (24/7 on port 8090)"
 
 run:
 	@mkdir -p logs
-	@fuser -k 8090/tcp >/dev/null 2>&1 || true
-	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup python3 scripts/bot_runner.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
+	@scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
+	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup $(PYTHON) scripts/bot_runner.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
 	@echo "🔥 Bot started in LIVE mode with Emergency Crash Fallback Server (24/7 on port 8090)"
 
 # Management and Diagnostics
 stop:
-	@pkill -SIGTERM -f "python3.*(main\.py|bot_runner\.py)" >/dev/null 2>&1 || true
-	@fuser -k 8090/tcp >/dev/null 2>&1 || true
-	@echo "🛑 Stopped all bot background processes"
+	@scripts/stop_bot.sh 8090
 
 status:
-	@ps aux | grep -E "python3.*(main\.py|bot_runner\.py)" | grep -v grep || echo "No bot process currently running"
+	@if [ -f ../logs/bot.pid ] && kill -0 $$(cat ../logs/bot.pid 2>/dev/null) 2>/dev/null; then \
+		echo "🟢 Trading bot is running (PID: $$(cat ../logs/bot.pid))"; \
+	elif [ -f logs/bot.pid ] && kill -0 $$(cat logs/bot.pid 2>/dev/null) 2>/dev/null; then \
+		echo "🟢 Trading bot is running (PID: $$(cat logs/bot.pid))"; \
+	elif pgrep -f "(bot_runner\.py|main\.py)" >/dev/null 2>&1; then \
+		echo "🟡 Bot process detected:"; \
+		ps aux | grep -E "(bot_runner\.py|main\.py)" | grep -v grep; \
+	else \
+		echo "🔴 No bot process currently running"; \
+	fi
 
 logs:
 	tail -n 100 -f logs/bot.log
 
 test:
-	pytest tests -v
+	$(PYTHON) -m pytest tests -v
 
 check:
-	python3 scripts/check_connection.py
+	$(PYTHON) scripts/check_connection.py
 
 balance:
-	python3 scripts/show_balances.py
+	$(PYTHON) scripts/show_balances.py
 
 restart: stop pull-safe run
 
