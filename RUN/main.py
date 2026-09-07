@@ -27,6 +27,45 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def _ensure_venv() -> None:
+    """Ensure runtime executes within a virtual environment where dependencies are installed."""
+    try:
+        import ccxt  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    cur_file = Path(__file__).resolve()
+    run_dir = cur_file.parent
+    proj_dir = run_dir.parent
+
+    candidates = [
+        proj_dir / "venv" / "bin" / "python3",
+        proj_dir / "venv" / "bin" / "python",
+        proj_dir / ".venv" / "bin" / "python3",
+        proj_dir / ".venv" / "bin" / "python",
+        run_dir / "venv" / "bin" / "python3",
+        run_dir / "venv" / "bin" / "python",
+        run_dir / ".venv" / "bin" / "python3",
+        Path("/root/TRADE/venv/bin/python3"),
+        Path("/root/TRADE/venv/bin/python"),
+    ]
+    if "VIRTUAL_ENV" in os.environ:
+        candidates.insert(0, Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python3")
+        candidates.insert(1, Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python")
+
+    for cand in candidates:
+        if cand.is_file() and os.access(str(cand), os.X_OK):
+            target = str(cand.resolve())
+            if os.path.realpath(sys.executable) != os.path.realpath(target):
+                os.environ["VIRTUAL_ENV"] = str(cand.parent.parent)
+                os.environ["PATH"] = f"{cand.parent}:{os.environ.get('PATH', '')}"
+                os.execv(target, [target] + sys.argv)
+
+
+_ensure_venv()
+
+
 def load_dotenv(path: str = ".env") -> None:
     """Load .env file into environment variables (no external dependency)."""
     env_path = Path(path)

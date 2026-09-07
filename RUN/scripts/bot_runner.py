@@ -41,13 +41,18 @@ def find_python_executable() -> str:
     """Find the best python executable, prioritizing virtual environments."""
     candidates = [
         PROJECT_DIR / "venv" / "bin" / "python3",
+        PROJECT_DIR / "venv" / "bin" / "python",
         PROJECT_DIR / ".venv" / "bin" / "python3",
+        PROJECT_DIR / ".venv" / "bin" / "python",
         RUN_DIR / "venv" / "bin" / "python3",
+        RUN_DIR / "venv" / "bin" / "python",
         RUN_DIR / ".venv" / "bin" / "python3",
         Path("/root/TRADE/venv/bin/python3"),
+        Path("/root/TRADE/venv/bin/python"),
     ]
     if "VIRTUAL_ENV" in os.environ:
         candidates.insert(0, Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python3")
+        candidates.insert(1, Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python")
     for cand in candidates:
         if cand.is_file() and os.access(str(cand), os.X_OK):
             return str(cand.resolve())
@@ -77,6 +82,7 @@ def send_telegram_crash_alert(exit_code: int, last_logs: List[str]) -> None:
             return
 
         import yaml
+        import html
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
 
@@ -92,10 +98,11 @@ def send_telegram_crash_alert(exit_code: int, last_logs: List[str]) -> None:
         if dash_url and not dash_url.startswith("http"):
             dash_url = f"http://{dash_url}"
 
-        error_snippet = "\n".join(last_logs[-5:]) if last_logs else "No log detail available."
+        raw_snippet = "\n".join(last_logs[-5:]) if last_logs else "No log detail available."
         # Truncate snippet if too long
-        if len(error_snippet) > 800:
-            error_snippet = error_snippet[-800:]
+        if len(raw_snippet) > 800:
+            raw_snippet = raw_snippet[-800:]
+        error_snippet = html.escape(raw_snippet)
 
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         msg = (
