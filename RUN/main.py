@@ -35,6 +35,24 @@ def _ensure_venv() -> None:
     except ImportError:
         pass
 
+    # 1. Search for any installed site-packages on the system and add them to sys.path
+    import glob
+    site_candidates = (
+        glob.glob("/root/**/site-packages", recursive=True)
+        + glob.glob("/home/**/site-packages", recursive=True)
+        + glob.glob(str(Path(__file__).resolve().parent.parent) + "/**/site-packages", recursive=True)
+    )
+    for sp in site_candidates:
+        if os.path.isdir(sp) and sp not in sys.path:
+            sys.path.insert(0, sp)
+
+    try:
+        import ccxt  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    # 2. Locate virtual environment python executable without resolving symlinks
     cur_file = Path(__file__).resolve()
     run_dir = cur_file.parent
     proj_dir = run_dir.parent
@@ -56,8 +74,8 @@ def _ensure_venv() -> None:
 
     for cand in candidates:
         if cand.is_file() and os.access(str(cand), os.X_OK):
-            target = str(cand.resolve())
-            if os.path.realpath(sys.executable) != os.path.realpath(target):
+            target = str(cand)  # DO NOT call cand.resolve() to keep venv path!
+            if target != sys.executable:
                 os.environ["VIRTUAL_ENV"] = str(cand.parent.parent)
                 os.environ["PATH"] = f"{cand.parent}:{os.environ.get('PATH', '')}"
                 os.execv(target, [target] + sys.argv)
