@@ -1147,14 +1147,27 @@ def generate_dashboard_html():
         .chart-card {{ background: var(--bg-card); padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 25px; }}
         .chart-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }}
         .chart-title {{ font-size: 16px; font-weight: 600; }}
-        .table-card {{ background: var(--bg-card); padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 25px; }}
-        table {{ width: 100%; border-collapse: collapse; text-align: right; font-size: 13px; }}
+        .table-card {{ background: var(--bg-card); padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); margin-bottom: 25px; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+        table {{ width: 100%; min-width: 580px; border-collapse: collapse; text-align: right; font-size: 13px; }}
         th {{ color: var(--text-secondary); font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--border-color); }}
         td {{ padding: 12px 14px; border-bottom: 1px solid #161e2e; }}
         tr:hover td {{ background: var(--bg-card-hover); }}
         .tag {{ padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }}
         .tag-macro {{ background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); border: 1px solid rgba(59, 130, 246, 0.3); }}
         .tag-micro {{ background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); border: 1px solid rgba(139, 92, 246, 0.3); }}
+        @media (max-width: 768px) {{
+            body {{ padding: 10px; }}
+            header {{ flex-direction: column; align-items: flex-start; gap: 12px; }}
+            .title-group h1 {{ font-size: 18px; }}
+            .controls-bar {{ flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }}
+            .stats-grid {{ grid-template-columns: repeat(2, 1fr); gap: 10px; }}
+            .stat-value {{ font-size: 18px; }}
+            .chart-card {{ padding: 12px; }}
+            .table-card {{ padding: 12px; }}
+        }}
+        @media (max-width: 480px) {{
+            .stats-grid {{ grid-template-columns: 1fr; }}
+        }}
     </style>
 </head>
 <body>

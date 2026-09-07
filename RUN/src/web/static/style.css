@@ -40,18 +40,23 @@
 
 html, body {
     width: 100%;
-    max-width: 100vw;
+    max-width: 100%;
     overflow-x: hidden;
     background-color: var(--bg-primary);
     color: var(--text-main);
     font-family: var(--font-sans);
     min-height: 100vh;
+    min-height: 100dvh;
     -webkit-font-smoothing: antialiased;
+    box-sizing: border-box;
 }
 
 body {
     padding: 1.25rem;
     position: relative;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 /* Ambient Glows */
@@ -87,7 +92,9 @@ body {
     flex-direction: column;
     gap: 1.25rem;
     width: 100%;
+    min-width: 0;
     box-sizing: border-box;
+    overflow-x: hidden;
 }
 
 /* Glassmorphism Base */
@@ -356,9 +363,11 @@ body {
 /* Grid Layout */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1.25rem;
     width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .card {
@@ -369,14 +378,24 @@ body {
     transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
     width: 100%;
     max-width: 100%;
+    min-width: 0;
     box-sizing: border-box;
     overflow: hidden;
 }
 
 #dashboardPipelineCard {
-    overflow: visible !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     position: relative;
     z-index: 10;
+}
+
+@media (min-width: 1025px) {
+    #dashboardPipelineCard {
+        overflow: visible;
+    }
 }
 
 #dashboardPipelineCard:hover,
@@ -855,11 +874,13 @@ body {
 .table-container {
     width: 100%;
     max-width: 100%;
+    min-width: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     max-height: 320px;
     border-radius: var(--radius-md);
     border: 1px solid rgba(255, 255, 255, 0.04);
+    box-sizing: border-box;
 }
 
 .data-table {
@@ -1048,24 +1069,28 @@ body {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(3, 7, 18, 0.82);
+    width: 100%;
+    height: 100%;
+    background: rgba(3, 7, 18, 0.85);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    display: flex;
+    display: none;
+    visibility: hidden;
     align-items: center;
     justify-content: center;
     z-index: 99999;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.25s ease;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
     padding: 1rem;
     box-sizing: border-box;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .modal-backdrop.active {
     display: flex !important;
+    visibility: visible !important;
     opacity: 1 !important;
     pointer-events: auto !important;
     z-index: 999999 !important;
@@ -1074,6 +1099,9 @@ body {
 .modal-content {
     width: 100%;
     max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     padding: 1.75rem;
     display: flex;
     flex-direction: column;
@@ -1312,63 +1340,121 @@ body {
 
 @media (max-width: 1024px) {
     .dashboard-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
     .metric-card, .full-width {
         grid-column: span 1;
+        width: 100%;
+        min-width: 0;
+    }
+    .toolbar-actions {
+        flex-wrap: wrap;
     }
 }
 
 @media (max-width: 768px) {
     body {
-        padding: 0.6rem;
+        padding: 0.5rem;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    .ambient-glow {
+        opacity: 0.35;
+        filter: blur(50px);
     }
 
     .app-container {
-        gap: 0.85rem;
+        gap: 0.75rem;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
     }
 
     .navbar {
-        padding: 0.85rem;
-        gap: 0.85rem;
+        padding: 0.75rem;
+        gap: 0.75rem;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
     }
 
     .navbar-top {
         flex-direction: column;
-        align-items: flex-start;
-        gap: 0.75rem;
+        align-items: stretch;
+        gap: 0.65rem;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .brand {
+        width: 100%;
+        gap: 0.65rem;
     }
 
     .brand-text h1 {
-        font-size: 1.15rem;
+        font-size: 1.1rem;
+    }
+
+    .sub-logo {
+        font-size: 0.72rem;
     }
 
     .header-badges {
         width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
         justify-content: flex-start;
+    }
+
+    .status-badge {
+        font-size: 0.74rem;
+        padding: 0.3rem 0.6rem;
     }
 
     .toolbar {
         flex-direction: column;
         align-items: stretch;
-        gap: 0.65rem;
+        gap: 0.55rem;
+        width: 100%;
+        min-width: 0;
+        padding-top: 0.65rem;
     }
 
     .clock-display {
+        width: 100%;
         justify-content: center;
+        box-sizing: border-box;
+        font-size: 0.78rem;
+        padding: 0.35rem 0.65rem;
     }
 
     .toolbar-actions {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.45rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.4rem;
         width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
     }
 
     .toolbar-actions .btn {
-        padding: 0.55rem 0.75rem;
-        font-size: 0.85rem;
-        gap: 0.45rem;
+        padding: 0.5rem 0.55rem;
+        font-size: 0.8rem;
+        min-height: 40px;
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    .toolbar-actions .btn-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.8rem;
     }
 
     .btn-icon {
@@ -1380,8 +1466,49 @@ body {
     }
 
     .card {
-        padding: 1rem;
-        gap: 0.85rem;
+        padding: 0.85rem;
+        gap: 0.75rem;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .card-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .card-header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+
+    .card-header-right {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+
+    .timeframe-selector.mini-tf {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .timeframe-selector.mini-tf .tf-btn {
+        padding: 0.2rem 0.45rem;
+        font-size: 0.7rem;
     }
 
     .portfolio-card, .regime-card, .health-card {
@@ -1389,36 +1516,42 @@ body {
     }
 
     .portfolio-card-body, .regime-card-body, .health-card-body {
-        flex-direction: row;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-        width: 100%;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+        gap: 0.65rem !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
     }
 
     .portfolio-card-body .metric-value-container,
     .regime-card-body .metric-value-container,
     .health-card-body .metric-value-container {
-        flex: 1;
-        min-width: 0;
+        width: 100% !important;
+        min-width: 0 !important;
+        flex: none !important;
     }
 
     .portfolio-card-body .mini-chart-container,
     .regime-card-body .mini-chart-container,
     .health-card-body .mini-chart-container {
-        flex: 1.15;
-        min-width: 0;
-        margin: 0;
+        width: 100% !important;
+        min-width: 0 !important;
+        flex: none !important;
+        margin: 0.25rem 0 0 0 !important;
     }
 
     .portfolio-card-body .mini-chart-wrapper,
     .regime-card-body .mini-chart-wrapper,
     .health-card-body .mini-chart-wrapper {
-        height: 100px;
+        height: 115px !important;
+        width: 100% !important;
+        min-width: 0 !important;
     }
 
     .metric-value {
-        font-size: 1.75rem;
+        font-size: 1.85rem;
     }
 
     .form-grid {
@@ -1430,13 +1563,14 @@ body {
     }
 
     .toast-container {
-        left: 0.75rem;
-        right: 0.75rem;
-        bottom: 0.75rem;
+        left: 0.5rem;
+        right: 0.5rem;
+        bottom: 0.5rem;
     }
 
     .toast {
         text-align: center;
+        font-size: 0.82rem;
     }
 }
 
@@ -1447,6 +1581,7 @@ body {
         align-items: stretch;
         gap: 0.45rem;
         width: 100%;
+        min-width: 0;
     }
 
     .alloc-symbol-badge {
@@ -1473,40 +1608,82 @@ body {
         font-size: 0.74rem;
         padding: 0.18rem 0.45rem;
     }
+
+    .modal-content {
+        padding: 1.1rem 0.9rem;
+        gap: 1rem;
+        border-radius: 14px;
+        max-width: 100%;
+    }
+
+    .tree-node-body {
+        grid-template-columns: 1fr !important;
+        gap: 0.5rem !important;
+    }
 }
 
 @media (max-width: 480px) {
     .brand {
-        gap: 0.6rem;
+        gap: 0.5rem;
+    }
+
+    .brand-text h1 {
+        font-size: 0.98rem;
+    }
+
+    .sub-logo {
+        font-size: 0.65rem;
     }
 
     .logo-icon {
-        width: 38px;
-        height: 38px;
-        font-size: 1.2rem;
+        width: 36px;
+        height: 36px;
+        font-size: 1.1rem;
     }
 
     .status-badge {
-        font-size: 0.73rem;
-        padding: 0.3rem 0.6rem;
+        font-size: 0.7rem;
+        padding: 0.25rem 0.5rem;
     }
 
-    .btn {
-        font-size: 0.78rem;
-        padding: 0.45rem 0.55rem;
+    .toolbar-actions .btn {
+        font-size: 0.75rem;
+        padding: 0.45rem 0.4rem;
         min-height: 38px;
     }
 
-    .btn-text {
-        font-size: 0.78rem;
-    }
-
-    .card-header {
-        flex-wrap: wrap;
+    .toolbar-actions .btn-text {
+        font-size: 0.75rem;
     }
 
     .card-title {
         font-size: 0.72rem;
+    }
+
+    .metric-value {
+        font-size: 1.6rem;
+    }
+
+    .macro-perf-table {
+        padding: 0.4rem 0.45rem;
+        gap: 0.2rem;
+    }
+
+    .col-coin {
+        font-size: 0.72rem;
+    }
+
+    .col-tf {
+        font-size: 0.7rem;
+    }
+}
+
+@media (max-width: 360px) {
+    .toolbar-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #killSwitchBtn {
+        grid-column: span 1;
     }
 }
 
@@ -2279,6 +2456,9 @@ body {
     flex-direction: column;
     gap: 0.85rem;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     padding: 0.25rem 0;
 }
 
@@ -2294,8 +2474,23 @@ body {
     gap: 0.75rem;
     transition: all 0.3s ease;
     position: relative;
-    overflow: visible !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     z-index: 10;
+}
+
+@media (min-width: 1025px) {
+    .pipeline-card {
+        overflow: visible;
+    }
+}
+
+@media (max-width: 1024px) {
+    .pipeline-card {
+        overflow: hidden;
+    }
 }
 
 .pipeline-card:hover,
@@ -2313,12 +2508,15 @@ body {
     flex-wrap: wrap;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     padding-bottom: 0.55rem;
+    width: 100%;
+    min-width: 0;
 }
 
 .pipeline-coin-info {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
 }
 
 .pipeline-coin-badge {
@@ -2364,6 +2562,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.35rem;
+    white-space: nowrap;
 }
 
 .pipeline-outcome-pill.pass {
@@ -2390,11 +2589,16 @@ body {
     align-items: center;
     justify-content: space-between;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     position: relative;
     padding: 0.35rem 0.2rem 0.85rem 0.2rem;
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
     scrollbar-color: rgba(56, 189, 248, 0.3) transparent;
+    box-sizing: border-box;
 }
 
 .pipeline-track::-webkit-scrollbar {
@@ -2595,102 +2799,342 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Mobile Responsive Optimizations (< 640px)
+   Mobile Responsive Optimizations for Strategy Conditions Pipeline (<= 768px)
    ═══════════════════════════════════════════════════════════ */
-@media (max-width: 640px) {
-    .pipeline-widget-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.5rem !important;
+@media (max-width: 768px) {
+    #dashboardPipelineCard {
+        overflow: hidden !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
     }
 
-    .mini-pipeline-controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.4rem;
-        justify-content: space-between;
-        width: 100%;
+    #dashPipelineContainer {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
     }
 
-    .mini-pipeline-controls .tree-controls-group {
-        gap: 0.25rem;
-    }
-
-    .mini-pipeline-controls .tree-pill-btn {
-        padding: 0.2rem 0.45rem;
-        font-size: 0.68rem;
+    .pipeline-stepper-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        gap: 0.65rem !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
     }
 
     .pipeline-card {
-        padding: 0.65rem 0.75rem;
-        gap: 0.6rem;
+        padding: 0.65rem 0.75rem !important;
+        gap: 0.6rem !important;
+        overflow: hidden !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
     }
 
     .pipeline-card-header {
-        padding-bottom: 0.45rem;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.45rem !important;
+        padding-bottom: 0.45rem !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .pipeline-coin-info {
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        min-width: 0 !important;
     }
 
     .pipeline-coin-badge {
-        font-size: 0.9rem;
+        font-size: 0.88rem !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 
     .pipeline-type-tag {
-        font-size: 0.62rem;
-        padding: 0.12rem 0.4rem;
+        font-size: 0.62rem !important;
+        padding: 0.12rem 0.4rem !important;
+        flex-shrink: 0 !important;
     }
 
     .pipeline-outcome-pill {
-        font-size: 0.7rem;
-        padding: 0.2rem 0.55rem;
+        align-self: flex-start !important;
+        font-size: 0.7rem !important;
+        padding: 0.2rem 0.55rem !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 
-    .pipeline-node-circle {
-        width: 36px;
-        height: 36px;
-        font-size: 0.9rem;
-        border-width: 2px;
+    /* Horizontal Connected Node Track with smooth touch scrolling */
+    .pipeline-track {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        gap: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        padding: 0.6rem 0.35rem 0.9rem 0.35rem !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: thin !important;
+        scrollbar-color: rgba(56, 189, 248, 0.4) transparent !important;
+        box-sizing: border-box !important;
+    }
+
+    .pipeline-track::-webkit-scrollbar {
+        height: 4px !important;
+    }
+
+    .pipeline-track::-webkit-scrollbar-thumb {
+        background: rgba(56, 189, 248, 0.5) !important;
+        border-radius: 4px !important;
     }
 
     .pipeline-node-wrapper {
-        min-width: 54px;
+        min-width: 58px !important;
+        flex-shrink: 0 !important;
+    }
+
+    .pipeline-node-circle {
+        width: 36px !important;
+        height: 36px !important;
+        font-size: 0.9rem !important;
+        border-width: 2px !important;
     }
 
     .pipeline-node-label {
-        font-size: 0.64rem;
-        max-width: 56px;
+        font-size: 0.64rem !important;
+        max-width: 56px !important;
+        line-height: 1.15 !important;
     }
 
     .pipeline-node-sub {
-        font-size: 0.58rem;
+        font-size: 0.58rem !important;
     }
 
     .pipeline-connector {
-        min-width: 12px;
-        top: -10px;
-        height: 3px;
+        min-width: 14px !important;
+        max-width: 28px !important;
+        flex-shrink: 0 !important;
+        top: -11px !important;
+        height: 3px !important;
+    }
+
+    .pipeline-widget-header {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 0.55rem !important;
+    }
+
+    .mini-pipeline-controls {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.4rem !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .mini-pipeline-controls .tree-controls-group {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        width: 100% !important;
+        gap: 0.4rem !important;
+        box-sizing: border-box !important;
+    }
+
+    .mini-pipeline-controls .tree-control-label {
+        font-size: 0.72rem !important;
+        flex-shrink: 0 !important;
+    }
+
+    .mini-pipeline-controls .tree-pill-selector {
+        display: flex !important;
+        flex: 1 !important;
+        justify-content: space-between !important;
+        gap: 0.2rem !important;
+    }
+
+    .mini-pipeline-controls .tree-pill-btn {
+        flex: 1 !important;
+        padding: 0.25rem 0.35rem !important;
+        font-size: 0.68rem !important;
+        text-align: center !important;
+        white-space: nowrap !important;
     }
 
     /* Fixed floating popover on mobile to prevent edge clipping */
     .pipeline-popover {
-        position: fixed;
-        bottom: 20px;
+        position: fixed !important;
+        bottom: 24px !important;
         left: 50% !important;
         transform: translateX(-50%) translateY(20px) !important;
-        width: calc(100vw - 32px);
-        max-width: 340px;
+        width: calc(100vw - 32px) !important;
+        max-width: 340px !important;
         background: #0f172a !important;
         background-color: #0f172a !important;
-        z-index: 999999;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95), 0 0 25px rgba(56, 189, 248, 0.35);
+        z-index: 999999 !important;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95), 0 0 25px rgba(56, 189, 248, 0.35) !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease !important;
     }
 
     .pipeline-node-wrapper:hover .pipeline-popover,
     .pipeline-node-wrapper.active .pipeline-popover {
         transform: translateX(-50%) translateY(0) !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
     }
 
     .pipeline-popover::after {
-        display: none;
+        display: none !important;
+    }
+
+    /* Conditions Modal Mobile Overhaul */
+    .conditions-tabs {
+        flex-wrap: wrap !important;
+        gap: 0.35rem !important;
+        padding: 0.25rem !important;
+    }
+
+    .cond-tab-btn {
+        font-size: 0.74rem !important;
+        padding: 0.45rem 0.5rem !important;
+        flex: 1 1 calc(50% - 0.35rem) !important;
+    }
+
+    .cond-tab-btn:first-child {
+        flex: 1 1 100% !important;
+    }
+
+    .tree-controls-bar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 0.5rem !important;
+        padding: 0.65rem 0.75rem !important;
+    }
+
+    .tree-controls-group {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        width: 100% !important;
+        gap: 0.4rem !important;
+    }
+
+    .tree-pill-selector {
+        display: flex !important;
+        flex: 1 !important;
+        justify-content: space-between !important;
+        gap: 0.2rem !important;
+    }
+
+    .tree-pill-btn {
+        flex: 1 !important;
+        padding: 0.3rem 0.4rem !important;
+        font-size: 0.72rem !important;
+        text-align: center !important;
+        white-space: nowrap !important;
+    }
+
+    .macro-cond-banner {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.5rem !important;
+        padding: 0.65rem 0.85rem !important;
+    }
+
+    .macro-banner-left, .macro-banner-right {
+        width: 100% !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+    }
+
+    .binary-tree-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        padding: 0.5rem 0 !important;
+    }
+
+    .binary-tree-flow {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .tree-root-card {
+        padding: 0.65rem 0.85rem !important;
+    }
+
+    .root-title {
+        font-size: 0.95rem !important;
+    }
+
+    .root-subtitle {
+        font-size: 0.75rem !important;
+    }
+
+    .tree-node {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
+        padding: 0.75rem 0.85rem !important;
+    }
+
+    .tree-node-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.4rem !important;
+    }
+
+    .tree-node-status-badge {
+        align-self: flex-start !important;
+    }
+
+    .tree-node-body {
+        grid-template-columns: 1fr !important;
+        gap: 0.5rem !important;
+    }
+
+    .tree-branch-container {
+        padding: 0.4rem 0 !important;
+    }
+
+    .tree-branch-line {
+        height: 24px !important;
+    }
+
+    .tree-leaf-outcome {
+        padding: 0.85rem !important;
+    }
+
+    .outcome-title {
+        font-size: 1rem !important;
+    }
+
+    .outcome-desc {
+        font-size: 0.78rem !important;
     }
 }
 

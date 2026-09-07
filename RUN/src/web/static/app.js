@@ -1555,6 +1555,8 @@ window.manualRefresh = manualRefresh;
 window.toggleUpdater = toggleUpdater;
 window.triggerManualPull = triggerManualPull;
 window.switchConditionsTab = switchConditionsTab;
+window.renderDashboardPipeline = renderDashboardPipeline;
+window.renderBinaryTree = renderBinaryTree;
 
 async function openConditionsModal() {
     console.log("[StrategyConditions] Opening modal...");
