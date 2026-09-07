@@ -55,7 +55,7 @@ def find_python_executable() -> str:
         candidates.insert(1, Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python")
     for cand in candidates:
         if cand.is_file() and os.access(str(cand), os.X_OK):
-            return str(cand.resolve())
+            return str(cand)
     return sys.executable
 
 
@@ -200,7 +200,14 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         if clean_path in ("/api/restart", "/api/trigger"):
             log_runner("Restart requested via Emergency Web Server UI!")
             FallbackCrashHandler.restart_requested = True
-            self._send_json({"success": True, "message": "Restarting main bot process..."})
+            safe_pull_script = PROJECT_DIR / "RUN" / "scripts" / "safe_pull.sh"
+            if safe_pull_script.exists():
+                try:
+                    log_runner("Executing safe_pull.sh on emergency restart request...")
+                    subprocess.run([str(safe_pull_script), "main"], cwd=str(PROJECT_DIR), timeout=30)
+                except Exception as ex:
+                    log_runner(f"safe_pull note on restart: {ex}")
+            self._send_json({"success": True, "message": "Restarting main bot process with latest updates..."})
             if FallbackCrashHandler.server_instance:
                 # Schedule server shutdown in separate thread so HTTP response finishes first
                 import threading
@@ -680,11 +687,52 @@ def run_fallback_server(port: int, exit_code: int) -> bool:
 
     FallbackCrashHandler.server_instance = server
 
+    import threading
+    stop_event = threading.Event()
+
+    def _fallback_auto_pull_loop():
+        while not stop_event.wait(15):
+            try:
+                res = subprocess.run(
+                    ["git", "fetch", "origin", "main"],
+                    cwd=str(PROJECT_DIR),
+                    capture_output=True,
+                    timeout=15,
+                )
+                if res.returncode == 0:
+                    local_rev = subprocess.check_output(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=str(PROJECT_DIR),
+                        text=True,
+                        timeout=5
+                    ).strip()
+                    remote_rev = subprocess.check_output(
+                        ["git", "rev-parse", "origin/main"],
+                        cwd=str(PROJECT_DIR),
+                        text=True,
+                        timeout=5
+                    ).strip()
+                    if local_rev and remote_rev and local_rev != remote_rev:
+                        log_runner(f"Fallback server detected new commit on GitHub ({remote_rev[:8]}). Auto-updating and rebooting bot...")
+                        safe_pull_script = PROJECT_DIR / "RUN" / "scripts" / "safe_pull.sh"
+                        if safe_pull_script.exists():
+                            subprocess.run([str(safe_pull_script), "main"], cwd=str(PROJECT_DIR), timeout=45)
+                        FallbackCrashHandler.restart_requested = True
+                        if FallbackCrashHandler.server_instance:
+                            threading.Thread(target=FallbackCrashHandler.server_instance.shutdown).start()
+                        break
+            except Exception as ex:
+                log_runner(f"Fallback auto-pull watcher note: {ex}")
+
+    watcher_thread = threading.Thread(target=_fallback_auto_pull_loop, daemon=True)
+    watcher_thread.start()
+
     try:
         server.serve_forever()
     except (KeyboardInterrupt, SystemExit):
         log_runner("Fallback server interrupted.")
     finally:
+        stop_event.set()
         server.server_close()
 
     return FallbackCrashHandler.restart_requested
@@ -828,6 +876,13 @@ def main() -> None:
 
             if should_restart:
                 log_runner("User requested restart from Emergency Web UI. Waiting for port to free up...")
+                safe_pull_script = PROJECT_DIR / "RUN" / "scripts" / "safe_pull.sh"
+                if safe_pull_script.exists():
+                    try:
+                        log_runner("Executing safe_pull.sh before bot reboot...")
+                        subprocess.run([str(safe_pull_script), "main"], cwd=str(PROJECT_DIR), timeout=45)
+                    except Exception as ex:
+                        log_runner(f"safe_pull.sh note: {ex}")
                 for _ in range(10):
                     try:
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
