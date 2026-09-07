@@ -41,10 +41,10 @@ check:
 	$(PYTHON) RUN/scripts/check_connection.py
 
 pull:
-	git pull --autostash || git pull
+	@RUN/scripts/safe_pull.sh
 
 pull-safe:
-	@git pull --autostash || git pull || true
+	@RUN/scripts/safe_pull.sh
 
 restart: stop pull-safe run
 

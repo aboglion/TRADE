@@ -31,14 +31,14 @@ run_loop() {
             if [ -n "$LOCAL" ] && [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
                 COMMIT_MSG=$(git log -1 --pretty=format:"%h - %an: %s" "origin/$BRANCH")
                 log "🚀 New commit detected on GitHub!"
-                log "Detail: $COMMIT_MSG"
-                log "🔄 Executing 'make restart'..."
+                log "🔄 Executing 'make restart' (Safe Git Pull with stash preservation)..."
 
                 # Execute make restart and write output to log
                 if make restart >> "$LOG_FILE" 2>&1; then
                     log "✅ Restart completed successfully."
                 else
-                    log "⚠️ Restart encountered issues. Attempting recovery with 'make run'..."
+                    log "⚠️ Restart encountered issues. Attempting recovery with safe pull and 'make run'..."
+                    RUN/scripts/safe_pull.sh "$BRANCH" >> "$LOG_FILE" 2>&1 || true
                     make run >> "$LOG_FILE" 2>&1 || true
                 fi
             fi

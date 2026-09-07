@@ -6,10 +6,10 @@ gp:
 	git push
 
 pull:
-	git pull --autostash || git pull
+	@scripts/safe_pull.sh
 
 pull-safe:
-	@git pull --autostash || git pull || true
+	@scripts/safe_pull.sh
 
 # 24/7 Background execution modes
 dry:

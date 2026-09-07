@@ -30,6 +30,8 @@ htmlcov/
 **/bot_state*.json*
 **/fast_forward_state*.json*
 logs/
+backups/
+**/backups/
 *.log
 *.bak
 

@@ -1193,26 +1193,24 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         try:
             import subprocess
             project_dir = Path(__file__).resolve().parent.parent.parent.parent
+            script_path = project_dir / "RUN" / "scripts" / "safe_pull.sh"
+            if script_path.exists():
+                cmd = [str(script_path), "main"]
+            else:
+                cmd = ["bash", "-c", "git stash push --include-untracked -m 'Auto-save before manual pull' && git pull origin main && (git stash pop || git reset --hard HEAD)"]
+            
             res = subprocess.run(
-                ["git", "pull", "origin", "main", "--autostash"],
+                cmd,
                 cwd=str(project_dir),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
-            if res.returncode != 0:
-                res = subprocess.run(
-                    ["git", "pull", "origin", "main"],
-                    cwd=str(project_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
             stdout = res.stdout.strip() if res.stdout else ""
             stderr = res.stderr.strip() if res.stderr else ""
             output_msg = stdout or stderr
 
-            updated = "Already up to date" not in stdout and "Already up-to-date" not in stdout
+            updated = "Already up to date" not in output_msg and "Already up-to-date" not in output_msg
             
             logger.info("Manual Git Pull executed via API: %s (Output: %s)", "Success" if res.returncode == 0 else "Failed", output_msg)
 
