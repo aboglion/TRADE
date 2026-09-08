@@ -1522,65 +1522,122 @@ function initBinaryTreeControls() {
         });
     }
 
-    // Dynamic Popover Tooltip Positioning (prevents clipping on desktop and mobile)
-    function positionPipelinePopover(wrapper) {
+    // Global Floating Tooltip attached directly to document.body (prevents parent clipping & transform offset)
+    let pipelineTooltipEl = null;
+    let tooltipHideTimeout = null;
+
+    function getOrCreatePipelineTooltip() {
+        if (!pipelineTooltipEl) {
+            pipelineTooltipEl = document.getElementById("pipelineGlobalTooltip");
+            if (!pipelineTooltipEl) {
+                pipelineTooltipEl = document.createElement("div");
+                pipelineTooltipEl.id = "pipelineGlobalTooltip";
+                pipelineTooltipEl.className = "pipeline-floating-tooltip";
+                document.body.appendChild(pipelineTooltipEl);
+
+                pipelineTooltipEl.addEventListener("mouseenter", () => {
+                    if (tooltipHideTimeout) {
+                        clearTimeout(tooltipHideTimeout);
+                        tooltipHideTimeout = null;
+                    }
+                });
+
+                pipelineTooltipEl.addEventListener("mouseleave", () => {
+                    hidePipelineTooltip();
+                });
+            }
+        }
+        return pipelineTooltipEl;
+    }
+
+    function showPipelineTooltip(wrapper) {
         if (!wrapper) return;
-        const popover = wrapper.querySelector(".pipeline-popover");
-        if (!popover) return;
+        const dataEl = wrapper.querySelector(".pipeline-popover-content") || wrapper.querySelector(".pipeline-popover");
+        if (!dataEl) return;
 
-        const rect = wrapper.getBoundingClientRect();
-        const popoverWidth = Math.min(285, window.innerWidth - 24);
-        popover.style.width = `${popoverWidth}px`;
+        if (tooltipHideTimeout) {
+            clearTimeout(tooltipHideTimeout);
+            tooltipHideTimeout = null;
+        }
 
-        const popoverHeight = popover.offsetHeight || 160;
+        const tooltip = getOrCreatePipelineTooltip();
+        tooltip.innerHTML = dataEl.innerHTML;
 
-        let left = rect.left + (rect.width / 2);
-        const minLeft = (popoverWidth / 2) + 12;
-        const maxLeft = window.innerWidth - (popoverWidth / 2) - 12;
-        left = Math.max(minLeft, Math.min(maxLeft, left));
+        const circle = wrapper.querySelector(".pipeline-node-circle") || wrapper;
+        const rect = circle.getBoundingClientRect();
 
-        popover.style.left = `${left}px`;
+        tooltip.style.display = "block";
+        tooltip.style.visibility = "hidden";
+        tooltip.style.opacity = "0";
 
-        const spaceAbove = rect.top;
-        if (spaceAbove >= popoverHeight + 15) {
-            popover.style.bottom = `${window.innerHeight - rect.top + 10}px`;
-            popover.style.top = "auto";
-            popover.classList.remove("popover-bottom");
-            popover.classList.add("popover-top");
+        const tooltipWidth = Math.min(285, window.innerWidth - 24);
+        tooltip.style.width = `${tooltipWidth}px`;
+
+        const tooltipHeight = tooltip.offsetHeight || 150;
+
+        const circleCenterX = rect.left + (rect.width / 2);
+        const minLeft = (tooltipWidth / 2) + 12;
+        const maxLeft = window.innerWidth - (tooltipWidth / 2) - 12;
+        const left = Math.max(minLeft, Math.min(maxLeft, circleCenterX));
+
+        tooltip.style.left = `${left}px`;
+        tooltip.style.transform = "translateX(-50%)";
+
+        // Dynamic arrow position pointing directly to circle center
+        const arrowOffset = circleCenterX - (left - tooltipWidth / 2);
+        tooltip.style.setProperty("--arrow-left", `${Math.max(16, Math.min(tooltipWidth - 16, arrowOffset))}px`);
+
+        if (rect.top >= tooltipHeight + 16) {
+            tooltip.style.top = `${rect.top - tooltipHeight - 12}px`;
+            tooltip.className = "pipeline-floating-tooltip popover-top visible";
         } else {
-            popover.style.top = `${rect.bottom + 10}px`;
-            popover.style.bottom = "auto";
-            popover.classList.remove("popover-top");
-            popover.classList.add("popover-bottom");
+            tooltip.style.top = `${rect.bottom + 12}px`;
+            tooltip.className = "pipeline-floating-tooltip popover-bottom visible";
+        }
+
+        tooltip.style.visibility = "visible";
+        tooltip.style.opacity = "1";
+    }
+
+    function hidePipelineTooltip() {
+        if (pipelineTooltipEl) {
+            pipelineTooltipEl.classList.remove("visible");
+            pipelineTooltipEl.style.opacity = "0";
+            pipelineTooltipEl.style.visibility = "hidden";
         }
     }
 
     document.addEventListener("mouseover", (e) => {
         const wrapper = e.target.closest(".pipeline-node-wrapper");
         if (wrapper) {
-            positionPipelinePopover(wrapper);
+            showPipelineTooltip(wrapper);
         }
     });
 
-    // Touch & Click popover toggle handler for mobile/desktop
+    document.addEventListener("mouseout", (e) => {
+        const wrapper = e.target.closest(".pipeline-node-wrapper");
+        if (wrapper) {
+            const related = e.relatedTarget;
+            if (related && (wrapper.contains(related) || (pipelineTooltipEl && pipelineTooltipEl.contains(related)))) {
+                return;
+            }
+            tooltipHideTimeout = setTimeout(() => {
+                hidePipelineTooltip();
+            }, 80);
+        }
+    });
+
     document.addEventListener("click", (e) => {
         const wrapper = e.target.closest(".pipeline-node-wrapper");
         if (wrapper) {
-            document.querySelectorAll(".pipeline-node-wrapper.active").forEach(w => {
-                if (w !== wrapper) w.classList.remove("active");
-            });
-            wrapper.classList.toggle("active");
-            if (wrapper.classList.contains("active")) {
-                positionPipelinePopover(wrapper);
-            }
-        } else {
-            document.querySelectorAll(".pipeline-node-wrapper.active").forEach(w => w.classList.remove("active"));
+            showPipelineTooltip(wrapper);
+        } else if (pipelineTooltipEl && !pipelineTooltipEl.contains(e.target)) {
+            hidePipelineTooltip();
         }
     });
 
     window.addEventListener("scroll", () => {
-        const active = document.querySelector(".pipeline-node-wrapper.active");
-        if (active) positionPipelinePopover(active);
+        hidePipelineTooltip();
     }, { passive: true });
 }
 
@@ -1957,7 +2014,7 @@ function renderBinaryTree(data) {
 
             let allPassed = true;
             nodes.forEach((node, index) => {
-                const isMet = isBuyMode ? node.met : !node.triggered;
+                const isMet = isBuyMode ? !!node.met : !!node.triggered;
                 if (!isMet) allPassed = false;
 
                 const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
@@ -2204,7 +2261,7 @@ function renderDashboardPipeline(data) {
                     <span class="pipeline-node-label">${node.shortTitle}</span>
                     <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
                     
-                    <div class="pipeline-popover">
+                    <div class="pipeline-popover-content" style="display:none;">
                         <div class="popover-header">
                             <span class="popover-title">${node.fullTitle}</span>
                             <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
@@ -2344,7 +2401,7 @@ function renderDashboardPipeline(data) {
                         <span class="pipeline-node-label">${node.shortTitle}</span>
                         <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
                         
-                        <div class="pipeline-popover">
+                        <div class="pipeline-popover-content" style="display:none;">
                             <div class="popover-header">
                                 <span class="popover-title">${node.fullTitle}</span>
                                 <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
@@ -2463,8 +2520,8 @@ function renderDashboardPipeline(data) {
             `;
 
             sellNodes.forEach((node, idx) => {
-                const isTriggered = node.triggered;
-                const isPass = !isTriggered;
+                const isTriggered = !!node.triggered;
+                const isPass = isTriggered;
                 const circleClass = isPass ? "pass" : "fail";
                 const icon = isPass ? "✓" : "✗";
                 const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
@@ -2475,7 +2532,7 @@ function renderDashboardPipeline(data) {
                         <span class="pipeline-node-label">${node.shortTitle}</span>
                         <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
                         
-                        <div class="pipeline-popover">
+                        <div class="pipeline-popover-content" style="display:none;">
                             <div class="popover-header">
                                 <span class="popover-title">${node.fullTitle}</span>
                                 <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
@@ -2495,11 +2552,11 @@ function renderDashboardPipeline(data) {
             });
 
             html += `
-                    <div class="pipeline-connector ${!sellTriggered ? 'pass' : 'fail'}"></div>
+                    <div class="pipeline-connector ${sellTriggered ? 'pass' : 'fail'}"></div>
                     <div class="pipeline-node-wrapper">
-                        <div class="pipeline-node-circle ${!sellTriggered ? 'pass' : 'fail'}">${outcomeIcon}</div>
+                        <div class="pipeline-node-circle ${sellTriggered ? 'pass' : 'fail'}">${sellTriggered ? '🚨' : '🛡️'}</div>
                         <span class="pipeline-node-label">תוצאת מכירה</span>
-                        <span class="pipeline-node-sub ${!sellTriggered ? 'pass' : 'fail'}">${!sellTriggered ? 'אין טריגר מכירה' : 'טריגר מכירה פעיל!'}</span>
+                        <span class="pipeline-node-sub ${sellTriggered ? 'pass' : 'fail'}">${sellTriggered ? 'טריגר מכירה פעיל!' : 'אין טריגר מכירה'}</span>
                     </div>
                 </div>
             </div>

@@ -2706,9 +2706,9 @@ body {
 .pipeline-node-sub.pass { color: #34d399; }
 .pipeline-node-sub.fail { color: #fca5a5; }
 
-/* Interactive Popover Tooltip */
-.pipeline-popover {
-    position: fixed !important;
+/* Global Floating Tooltip outside cards (attached directly to document.body) */
+.pipeline-floating-tooltip {
+    position: fixed;
     width: 285px;
     max-width: calc(100vw - 24px);
     background: #0b1329 !important;
@@ -2720,41 +2720,44 @@ body {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.15s ease, visibility 0.15s ease;
-    z-index: 9999999 !important;
+    transition: opacity 0.12s ease, visibility 0.12s ease;
+    z-index: 999999999 !important;
     direction: rtl;
     text-align: right;
     box-sizing: border-box;
-    transform: translateX(-50%);
 }
 
-.pipeline-popover.popover-top::after {
+.pipeline-floating-tooltip.visible {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+}
+
+.pipeline-floating-tooltip.popover-top::after {
     content: '';
     position: absolute;
     top: 100%;
-    left: 50%;
+    left: var(--arrow-left, 50%);
     transform: translateX(-50%);
     border-width: 7px;
     border-style: solid;
     border-color: #0b1329 transparent transparent transparent;
 }
 
-.pipeline-popover.popover-bottom::after {
+.pipeline-floating-tooltip.popover-bottom::after {
     content: '';
     position: absolute;
     bottom: 100%;
-    left: 50%;
+    left: var(--arrow-left, 50%);
     transform: translateX(-50%);
     border-width: 7px;
     border-style: solid;
     border-color: transparent transparent #0b1329 transparent;
 }
 
-.pipeline-node-wrapper:hover .pipeline-popover,
-.pipeline-node-wrapper.active .pipeline-popover {
-    opacity: 1 !important;
-    visibility: visible !important;
-    pointer-events: auto !important;
+.pipeline-popover,
+.pipeline-popover-content {
+    display: none !important;
 }
 
 .popover-header {
@@ -2986,18 +2989,10 @@ body {
         white-space: nowrap !important;
     }
 
-    /* Fixed floating popover on mobile to prevent edge clipping */
-    .pipeline-popover {
-        position: fixed !important;
-        z-index: 9999999 !important;
+    /* Floating tooltip mobile optimizations */
+    .pipeline-floating-tooltip {
+        max-width: calc(100vw - 16px) !important;
         box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95), 0 0 25px rgba(56, 189, 248, 0.35) !important;
-    }
-
-    .pipeline-node-wrapper:hover .pipeline-popover,
-    .pipeline-node-wrapper.active .pipeline-popover {
-        opacity: 1 !important;
-        visibility: visible !important;
-        pointer-events: auto !important;
     }
 
     /* Conditions Modal Mobile Overhaul */
