@@ -1522,6 +1522,46 @@ function initBinaryTreeControls() {
         });
     }
 
+    // Dynamic Popover Tooltip Positioning (prevents clipping on desktop and mobile)
+    function positionPipelinePopover(wrapper) {
+        if (!wrapper) return;
+        const popover = wrapper.querySelector(".pipeline-popover");
+        if (!popover) return;
+
+        const rect = wrapper.getBoundingClientRect();
+        const popoverWidth = Math.min(285, window.innerWidth - 24);
+        popover.style.width = `${popoverWidth}px`;
+
+        const popoverHeight = popover.offsetHeight || 160;
+
+        let left = rect.left + (rect.width / 2);
+        const minLeft = (popoverWidth / 2) + 12;
+        const maxLeft = window.innerWidth - (popoverWidth / 2) - 12;
+        left = Math.max(minLeft, Math.min(maxLeft, left));
+
+        popover.style.left = `${left}px`;
+
+        const spaceAbove = rect.top;
+        if (spaceAbove >= popoverHeight + 15) {
+            popover.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+            popover.style.top = "auto";
+            popover.classList.remove("popover-bottom");
+            popover.classList.add("popover-top");
+        } else {
+            popover.style.top = `${rect.bottom + 10}px`;
+            popover.style.bottom = "auto";
+            popover.classList.remove("popover-top");
+            popover.classList.add("popover-bottom");
+        }
+    }
+
+    document.addEventListener("mouseover", (e) => {
+        const wrapper = e.target.closest(".pipeline-node-wrapper");
+        if (wrapper) {
+            positionPipelinePopover(wrapper);
+        }
+    });
+
     // Touch & Click popover toggle handler for mobile/desktop
     document.addEventListener("click", (e) => {
         const wrapper = e.target.closest(".pipeline-node-wrapper");
@@ -1530,10 +1570,18 @@ function initBinaryTreeControls() {
                 if (w !== wrapper) w.classList.remove("active");
             });
             wrapper.classList.toggle("active");
+            if (wrapper.classList.contains("active")) {
+                positionPipelinePopover(wrapper);
+            }
         } else {
             document.querySelectorAll(".pipeline-node-wrapper.active").forEach(w => w.classList.remove("active"));
         }
     });
+
+    window.addEventListener("scroll", () => {
+        const active = document.querySelector(".pipeline-node-wrapper.active");
+        if (active) positionPipelinePopover(active);
+    }, { passive: true });
 }
 
 window.openDryRunModal = openDryRunModal;
@@ -1787,7 +1835,7 @@ function renderBinaryTree(data) {
 
             const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
             const badgeClass = isMet ? "badge-pass" : "badge-fail";
-            const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ מופעל / מוגבל (GUARDED)";
+            const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
             const icon = isMet ? "🟢" : "🔴";
             const stepNum = index + 1;
             const totalSteps = nodes.length;
@@ -2148,7 +2196,7 @@ function renderDashboardPipeline(data) {
             const isPass = node.met;
             const circleClass = isPass ? "pass" : "fail";
             const icon = isPass ? "✓" : "✗";
-            const statusText = isPass ? "✓ תקין" : "✗ מוגבל";
+            const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
 
             html += `
                 <div class="pipeline-node-wrapper" data-node-id="${node.id}">
@@ -2159,7 +2207,7 @@ function renderDashboardPipeline(data) {
                     <div class="pipeline-popover">
                         <div class="popover-header">
                             <span class="popover-title">${node.fullTitle}</span>
-                            <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ MET' : '✗ GUARDED'}</span>
+                            <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
                         </div>
                         <div class="popover-grid">
                             <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
@@ -2288,7 +2336,7 @@ function renderDashboardPipeline(data) {
                 const isPass = node.met;
                 const circleClass = isPass ? "pass" : "fail";
                 const icon = isPass ? "✓" : "✗";
-                const statusText = isPass ? "✓ מתקיים" : "✗ ממתין";
+                const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
 
                 html += `
                     <div class="pipeline-node-wrapper" data-node-id="${node.id}">
@@ -2299,7 +2347,7 @@ function renderDashboardPipeline(data) {
                         <div class="pipeline-popover">
                             <div class="popover-header">
                                 <span class="popover-title">${node.fullTitle}</span>
-                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ MET' : '✗ UNMET'}</span>
+                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
                             </div>
                             <div class="popover-grid">
                                 <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
@@ -2418,8 +2466,8 @@ function renderDashboardPipeline(data) {
                 const isTriggered = node.triggered;
                 const isPass = !isTriggered;
                 const circleClass = isPass ? "pass" : "fail";
-                const icon = isPass ? "🛡️" : "🚨";
-                const statusText = isPass ? "✓ בטוח" : "🚨 הופעל!";
+                const icon = isPass ? "✓" : "✗";
+                const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
 
                 html += `
                     <div class="pipeline-node-wrapper" data-node-id="${node.id}">
@@ -2430,7 +2478,7 @@ function renderDashboardPipeline(data) {
                         <div class="pipeline-popover">
                             <div class="popover-header">
                                 <span class="popover-title">${node.fullTitle}</span>
-                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ SAFE (לא הופעל)' : '🚨 TRIGGERED (הופעל!)'}</span>
+                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
                             </div>
                             <div class="popover-grid">
                                 <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
