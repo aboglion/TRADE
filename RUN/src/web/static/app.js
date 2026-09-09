@@ -12,6 +12,303 @@ let latestOrdersList = [];
 let regimePointsData = [];
 let regimeChartPoints = [];
 
+// ── Server Connection & Downtime Monitoring State ───────────────
+let consecutiveConnectionFailures = 0;
+let isServerOffline = false;
+let isServerCrashed = false;
+let offlineSinceTimestamp = 0;
+let offlineCountdownSeconds = 3;
+let offlineCountdownTimer = null;
+let offlineProbeInterval = null;
+let lastOfflineError = "";
+let crashDataCached = null;
+
+function updateConnectionBadge(online, textOverride = "") {
+    const badge = document.getElementById("connBadge");
+    const dot = document.getElementById("connDot");
+    const text = document.getElementById("connText");
+    if (!badge || !dot || !text) return;
+
+    if (online) {
+        badge.className = "status-badge conn-badge";
+        text.textContent = textOverride || "ONLINE";
+        dot.className = "dot pulse";
+    } else {
+        badge.className = "status-badge conn-badge conn-badge-offline";
+        text.textContent = textOverride || "OFFLINE";
+        dot.className = "dot";
+    }
+}
+
+function handleConnectionSuccess() {
+    consecutiveConnectionFailures = 0;
+    if (isServerOffline) {
+        setServerOfflineState(false);
+    } else {
+        updateConnectionBadge(true);
+    }
+}
+
+function handleConnectionFailure(err, endpoint = "") {
+    consecutiveConnectionFailures++;
+    lastOfflineError = err ? (err.message || String(err)) : "Network connection failed";
+    updateConnectionBadge(false, "DISCONNECTED");
+
+    // If 2 failures occur, or if /api/status failed
+    if (consecutiveConnectionFailures >= 2 || endpoint.includes("/api/status")) {
+        setServerOfflineState(true, err);
+    }
+}
+
+function setServerOfflineState(offline, err = null) {
+    const modal = document.getElementById("serverOfflineModal");
+    const sinceEl = document.getElementById("offlineSinceText");
+    const attemptsEl = document.getElementById("offlineAttemptsText");
+    const errorEl = document.getElementById("offlineErrorText");
+
+    if (offline) {
+        if (!isServerOffline) {
+            isServerOffline = true;
+            offlineSinceTimestamp = Date.now();
+            if (sinceEl) sinceEl.textContent = new Date(offlineSinceTimestamp).toLocaleTimeString();
+        }
+        updateConnectionBadge(false, "SERVER DOWN");
+
+        if (attemptsEl) attemptsEl.textContent = consecutiveConnectionFailures;
+        if (errorEl) errorEl.textContent = lastOfflineError || (err ? err.message : "Failed to reach server (ERR_CONNECTION_REFUSED)");
+
+        // Show offline modal if crash modal is not already open
+        if (modal && !isServerCrashed) {
+            modal.style.display = "flex";
+        }
+
+        startOfflineReconnectCycle();
+    } else {
+        isServerOffline = false;
+        offlineSinceTimestamp = 0;
+        updateConnectionBadge(true, "ONLINE");
+
+        if (modal) modal.style.display = "none";
+        stopOfflineReconnectCycle();
+
+        showToast("✅ החיבור לשרת שוחזר בהצלחה! הדאשבורד פעיל.", "success");
+        if (typeof updateAll === "function") {
+            updateAll();
+        }
+    }
+}
+
+function startOfflineReconnectCycle() {
+    stopOfflineReconnectCycle();
+
+    offlineCountdownSeconds = 3;
+    updateOfflineCountdownDisplay();
+
+    offlineCountdownTimer = setInterval(() => {
+        offlineCountdownSeconds--;
+        if (offlineCountdownSeconds <= 0) {
+            offlineCountdownSeconds = 3;
+            probeServerStatus();
+        }
+        updateOfflineCountdownDisplay();
+    }, 1000);
+}
+
+function stopOfflineReconnectCycle() {
+    if (offlineCountdownTimer) {
+        clearInterval(offlineCountdownTimer);
+        offlineCountdownTimer = null;
+    }
+    if (offlineProbeInterval) {
+        clearInterval(offlineProbeInterval);
+        offlineProbeInterval = null;
+    }
+}
+
+function updateOfflineCountdownDisplay() {
+    const countdownEl = document.getElementById("offlineCountdownText");
+    if (countdownEl) {
+        countdownEl.textContent = `${offlineCountdownSeconds} שניות...`;
+    }
+}
+
+async function probeServerStatus() {
+    try {
+        const res = await fetch("/api/status", {
+            headers: getAuthHeaders(),
+            cache: "no-store"
+        });
+
+        if (res.status === 401 || res.status === 429) {
+            setServerOfflineState(false);
+            showLoginModal();
+            return;
+        }
+
+        if (res.ok) {
+            const data = await res.json();
+            if (data.status === "CRASHED" || data.is_crashed) {
+                setServerOfflineState(false);
+                showServerCrashModal(data);
+                return;
+            }
+
+            setServerOfflineState(false);
+            hideServerCrashModal();
+            return;
+        } else if (res.status === 503) {
+            try {
+                const data = await res.json();
+                if (data.status === "CRASHED" || data.is_crashed) {
+                    setServerOfflineState(false);
+                    showServerCrashModal(data);
+                    return;
+                }
+            } catch (_) {}
+        }
+    } catch (err) {
+        consecutiveConnectionFailures++;
+        const attemptsEl = document.getElementById("offlineAttemptsText");
+        if (attemptsEl) attemptsEl.textContent = consecutiveConnectionFailures;
+        updateConnectionBadge(false, "RECONNECTING...");
+    }
+}
+
+function showServerCrashModal(data) {
+    isServerCrashed = true;
+    crashDataCached = data;
+    updateConnectionBadge(false, "CRASHED");
+
+    const offlineModal = document.getElementById("serverOfflineModal");
+    if (offlineModal) offlineModal.style.display = "none";
+
+    const crashModal = document.getElementById("serverCrashModal");
+    const exitCodeEl = document.getElementById("crashModalExitCode");
+    const timeEl = document.getElementById("crashModalTime");
+    const tracebackEl = document.getElementById("crashModalTraceback");
+
+    if (exitCodeEl) exitCodeEl.textContent = data.exit_code != null ? data.exit_code : "1";
+    if (timeEl) timeEl.textContent = data.crash_time || new Date().toLocaleTimeString();
+    if (tracebackEl) {
+        tracebackEl.textContent = data.error_summary || data.message || "Trading engine stopped or crashed unexpectedly.";
+    }
+
+    if (crashModal) crashModal.style.display = "flex";
+    fetchCrashModalLogs();
+}
+
+function hideServerCrashModal() {
+    isServerCrashed = false;
+    const crashModal = document.getElementById("serverCrashModal");
+    if (crashModal) crashModal.style.display = "none";
+}
+
+async function fetchCrashModalLogs() {
+    try {
+        const res = await fetch("/api/logs", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const container = document.getElementById("crashModalLogsConsole");
+        if (!container) return;
+
+        if (data.error_summary) {
+            const tbEl = document.getElementById("crashModalTraceback");
+            if (tbEl) tbEl.textContent = data.error_summary;
+        }
+
+        if (data.logs && data.logs.length > 0) {
+            const lines = data.logs.map(l => {
+                let cls = "";
+                if (l.includes("ERROR") || l.includes("CRITICAL") || l.includes("Traceback") || l.includes("Exception")) cls = "color: #f87171;";
+                else if (l.includes("WARNING")) cls = "color: #fbbf24;";
+                else if (l.includes("INFO")) cls = "color: #94a3b8;";
+                return `<div style="${cls}">${escapeHtml(l)}</div>`;
+            });
+            container.innerHTML = lines.join("");
+            container.scrollTop = container.scrollHeight;
+        } else {
+            container.textContent = "No log lines recorded yet.";
+        }
+    } catch (e) {
+        console.error("Error fetching crash logs:", e);
+    }
+}
+
+async function triggerCrashModalRestart() {
+    if (!confirm("האם להפעיל מחדש את מנוע המסחר כעת? / Restart trading engine now?")) return;
+    showToast("שולח פקודת הפעלה מחדש... / Sending restart command...", "info");
+    try {
+        const res = await fetch("/api/restart", { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast("✅ פקודת הפעלה מחדש התקבלה! המנוע עולה כעת... הדף יתרענן בעוד מספר שניות.", "success");
+            setTimeout(() => {
+                hideServerCrashModal();
+                probeServerStatus();
+            }, 3500);
+        } else {
+            showToast("שגיאה בהפעלה מחדש: " + (data.error || "Unknown"), "error");
+        }
+    } catch (e) {
+        showToast("פקודת הפעלה נשלחה! ממתין לעליית השרת...", "info");
+        setTimeout(() => {
+            hideServerCrashModal();
+            probeServerStatus();
+        }, 3000);
+    }
+}
+
+function manualReconnectAttempt() {
+    showToast("בודק חיבור לשרת... (Checking connection)", "info");
+    probeServerStatus();
+}
+
+function closeOfflineModal() {
+    const modal = document.getElementById("serverOfflineModal");
+    if (modal) modal.style.display = "none";
+}
+
+function closeCrashModal() {
+    const modal = document.getElementById("serverCrashModal");
+    if (modal) modal.style.display = "none";
+}
+
+function showConnectionStatusDetails() {
+    if (isServerOffline) {
+        const modal = document.getElementById("serverOfflineModal");
+        if (modal) modal.style.display = "flex";
+    } else if (isServerCrashed) {
+        const modal = document.getElementById("serverCrashModal");
+        if (modal) modal.style.display = "flex";
+    } else {
+        showToast("🟢 שרת המסחר מקוון ופעיל בפורט 8090 (Online & Healthy)", "success");
+    }
+}
+
+function openEmergencyServerPage() {
+    window.location.reload();
+}
+
+async function copyCrashModalTraceback() {
+    const el = document.getElementById("crashModalTraceback");
+    if (!el) return;
+    const txt = el.innerText || el.textContent;
+    if (!txt) return;
+    const copied = await copyTextToClipboard(txt);
+    if (copied) showToast("📋 סיבת התקלה הועתקה ללוח בהצלחה!", "success");
+    else showToast("⚠️ לא ניתן להעתיק אוטומטית. לחץ Ctrl+C", "error");
+}
+
+async function copyCrashModalLogs() {
+    const el = document.getElementById("crashModalLogsConsole");
+    if (!el) return;
+    const txt = el.innerText || el.textContent;
+    if (!txt) return;
+    const copied = await copyTextToClipboard(txt);
+    if (copied) showToast("📋 לוגים הועתקו ללוח בהצלחה!", "success");
+    else showToast("⚠️ לא ניתן להעתיק אוטומטית. לחץ Ctrl+C", "error");
+}
+
 function getAuthHeaders() {
     const headers = {};
     if (authToken) {
@@ -26,13 +323,20 @@ async function apiFetch(url, options = {}) {
         ...(options.headers || {})
     };
 
-    const res = await fetch(url, options);
-    if (res.status === 401 || res.status === 429) {
-        authToken = "";
-        sessionStorage.removeItem("dash_password");
-        showLoginModal();
+    try {
+        const res = await fetch(url, options);
+        if (res.status === 401 || res.status === 429) {
+            authToken = "";
+            sessionStorage.removeItem("dash_password");
+            showLoginModal();
+        } else {
+            handleConnectionSuccess();
+        }
+        return res;
+    } catch (err) {
+        handleConnectionFailure(err, url);
+        throw err;
     }
-    return res;
 }
 
 async function parseJsonResponse(res) {
@@ -421,6 +725,14 @@ async function fetchStatus() {
             recordHealthPoint(latencyMs);
         }
         const data = await res.json();
+
+        // Detect if server is reporting CRASHED state from fallback server
+        if (data.status === "CRASHED" || data.is_crashed) {
+            showServerCrashModal(data);
+            return;
+        } else if (isServerCrashed) {
+            hideServerCrashModal();
+        }
 
         // Mode badge
         currentRunMode = data.run_mode || "DRY_RUN";
@@ -3654,4 +3966,15 @@ function handleRegimeHover(e, canvas, tooltip) {
         tooltip.style.display = "none";
     }
 }
+
+// ── Global Window Exports for Connection & Crash Modals ──────────
+window.manualReconnectAttempt = manualReconnectAttempt;
+window.closeOfflineModal = closeOfflineModal;
+window.closeCrashModal = closeCrashModal;
+window.showConnectionStatusDetails = showConnectionStatusDetails;
+window.openEmergencyServerPage = openEmergencyServerPage;
+window.copyCrashModalTraceback = copyCrashModalTraceback;
+window.copyCrashModalLogs = copyCrashModalLogs;
+window.triggerCrashModalRestart = triggerCrashModalRestart;
+
 

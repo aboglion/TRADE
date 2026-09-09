@@ -28,6 +28,11 @@
                 </div>
 
                 <div class="header-badges">
+                    <div class="status-badge conn-badge" id="connBadge" title="Server Connection Status (Click to inspect)" onclick="showConnectionStatusDetails()">
+                        <span class="dot pulse" id="connDot"></span>
+                        <span id="connText">ONLINE</span>
+                    </div>
+
                     <div class="status-badge mode-badge" id="modeBadge" title="Execution Mode: DRY_RUN (live simulation), TESTNET or LIVE">
                         <span class="dot pulse"></span>
                         <span id="modeText">DRY_RUN</span>
@@ -549,6 +554,119 @@
                 <button class="btn btn-outline" id="cancelClearLogsBtn">Cancel</button>
                 <button class="btn btn-outline" id="clearDisplayOnlyBtn" title="Clear only the current console display without deleting server log files">Display Only</button>
                 <button class="btn btn-danger" id="confirmClearLogsBtn">Confirm & Purge Logs 🧹</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server Offline & Downtime Diagnostics Modal -->
+    <div class="modal-backdrop" id="serverOfflineModal" style="display: none; z-index: 100000;">
+        <div class="modal-content glass modal-offline" style="max-width: 580px; border: 2px solid var(--accent-danger, #ef4444); box-shadow: 0 0 35px rgba(239, 68, 68, 0.35);">
+            <div class="modal-header" style="border-bottom: 1px solid rgba(239, 68, 68, 0.3);">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.8rem; animation: pulse-ring 1.5s infinite;">🚨</span>
+                    <div>
+                        <h3 style="color: var(--accent-danger, #ef4444); margin: 0; font-size: 1.25rem;">השרת מושבת / אין תקשורת (Server Offline)</h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 2px 0 0 0;">Connection lost or server is down / restarting</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="closeOfflineModal" onclick="closeOfflineModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1.2rem 1rem;">
+                <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <span style="font-weight: 700; color: #fecdd3; font-size: 0.95rem;">⚠️ הקשר עם שרת המסחר בפורט 8090 נותק</span>
+                        <span class="status-badge" style="background: rgba(239, 68, 68, 0.3); color: #fca5a5; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; font-weight: 700;">OFFLINE</span>
+                    </div>
+                    <p style="font-size: 0.88rem; color: #e2e8f0; line-height: 1.45; margin: 0;">
+                        השרת אינו מגיב לבקשות תקשורת. ייתכן שהמערכת בתהליך הפעלה מחדש לאחר עדכון Git, או שמנוע המסחר קרס/נעצר.
+                    </p>
+                </div>
+
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.85rem; font-size: 0.85rem; margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: var(--text-muted);">ניסיון חיבור אוטומטי בעוד:</span>
+                        <strong id="offlineCountdownText" style="color: var(--accent-success, #10b981); font-size: 1.05rem;">3 שניות...</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span style="color: var(--text-muted);">זמן ניתוק ראשוני:</span>
+                        <span id="offlineSinceText" style="color: var(--text-main); font-weight: 600;">--:--:--</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span style="color: var(--text-muted);">מספר ניסיונות שנכשלו:</span>
+                        <span id="offlineAttemptsText" style="color: var(--accent-danger, #f43f5e); font-weight: 600;">0</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-muted);">שגיאת תקשורת:</span>
+                        <span id="offlineErrorText" style="color: #fca5a5; font-family: monospace; font-size: 0.8rem;">Failed to fetch / Connection refused</span>
+                    </div>
+                </div>
+
+                <div id="offlineFallbackNotice" style="display: none; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem;">
+                    <div style="font-weight: 600; color: #fbbf24; margin-bottom: 4px; font-size: 0.85rem;">⚡ שרת החירום זוהה בפורט 8090:</div>
+                    <p style="font-size: 0.82rem; color: #fde68a; margin: 0 0 8px 0;">שרת חירום לאבחון תקלות פעיל. ניתן לפתוח אותו ישירות או לשלוח פקודת הפעלה מחדש.</p>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding: 0.85rem 1rem;">
+                <button class="btn btn-outline" id="forceCheckServerBtn" onclick="manualReconnectAttempt()" style="flex: 1;">
+                    <span>🔄</span> נסה להתחבר כעת (Reconnect)
+                </button>
+                <button class="btn btn-danger" id="openEmergencyServerBtn" onclick="openEmergencyServerPage()" style="flex: 1;">
+                    <span>🚨</span> פתח שרת חירום ולוגים
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trading Engine Crash Alert & Diagnosis Modal -->
+    <div class="modal-backdrop" id="serverCrashModal" style="display: none; z-index: 100001;">
+        <div class="modal-content glass modal-crash" style="max-width: 820px; border: 2px solid var(--accent-danger, #ef4444); box-shadow: 0 0 45px rgba(239, 68, 68, 0.4);">
+            <div class="modal-header" style="border-bottom: 1px solid rgba(239, 68, 68, 0.3);">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 2rem; animation: pulse-ring 1.5s infinite;">💥</span>
+                    <div>
+                        <h3 style="color: var(--accent-danger, #ef4444); margin: 0; font-size: 1.35rem;">התרעת מערכת: מנוע המסחר קרס / הושבת</h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin: 2px 0 0 0;">Trading Engine Crash Detected &bull; Emergency Diagnostics Active</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="closeCrashModal" onclick="closeCrashModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1.2rem 1rem;">
+                <div class="info-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 1rem;">
+                    <div class="info-box" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; text-align: center;">
+                        <div class="info-label" style="font-size: 0.75rem; color: var(--text-muted);">סטטוס מנוע</div>
+                        <div class="info-val text-danger" style="font-weight: 700; font-size: 1.05rem;">CRASHED</div>
+                    </div>
+                    <div class="info-box" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; text-align: center;">
+                        <div class="info-label" style="font-size: 0.75rem; color: var(--text-muted);">קוד יציאה (Exit Code)</div>
+                        <div class="info-val" id="crashModalExitCode" style="font-weight: 700; font-size: 1.05rem; color: #fca5a5;">1</div>
+                    </div>
+                    <div class="info-box" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; text-align: center;">
+                        <div class="info-label" style="font-size: 0.75rem; color: var(--text-muted);">זמן התקלה</div>
+                        <div class="info-val" id="crashModalTime" style="font-weight: 600; font-size: 0.95rem; color: var(--text-main);">--:--:--</div>
+                    </div>
+                </div>
+
+                <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 700; color: #fecdd3; font-size: 0.95rem;">⚠️ סיבת התקלה שזוהתה / Error Traceback:</span>
+                        <button class="btn btn-outline" onclick="copyCrashModalTraceback()" style="padding: 4px 10px; font-size: 0.75rem;">📋 העתק שגיאה</button>
+                    </div>
+                    <pre id="crashModalTraceback" style="background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #fda4af; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto;">אין מידע על שגיאה</pre>
+                </div>
+
+                <div class="log-section" style="margin-top: 0.5rem;">
+                    <div class="log-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main);">📋 לוגים אחרונים מהמערכת (logs/bot.log):</h4>
+                        <button class="btn btn-outline" onclick="copyCrashModalLogs()" style="padding: 4px 10px; font-size: 0.75rem;">📋 העתק לוגים</button>
+                    </div>
+                    <div class="log-console" id="crashModalLogsConsole" style="max-height: 190px; overflow-y: auto; font-size: 0.78rem; background: rgba(0,0,0,0.6); border-radius: 8px; padding: 8px;">טוען לוגים...</div>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; gap: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding: 0.85rem 1rem;">
+                <button class="btn btn-outline" onclick="closeCrashModal()" style="flex: 1;">סגור חלון (Close)</button>
+                <button class="btn btn-danger" onclick="triggerCrashModalRestart()" style="flex: 1.5;">
+                    <span>🔄</span> הפעל מחדש את מנוע המסחר (Restart Engine)
+                </button>
             </div>
         </div>
     </div>

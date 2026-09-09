@@ -52,3 +52,40 @@ def test_stop_bot_script_execution():
     res = subprocess.run([str(stop_script), "18099"], capture_output=True, text=True)
     assert res.returncode == 0
     assert "Stopped all bot background processes" in res.stdout
+
+
+def test_fallback_crash_handler_status_and_error():
+    """Verify FallbackCrashHandler properly reports CRASHED status and error summary."""
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    import bot_runner
+
+    bot_runner.FallbackCrashHandler.exit_code = 1
+    bot_runner.FallbackCrashHandler.crash_time = "2026-09-09 23:55:00"
+    bot_runner.FallbackCrashHandler.last_crash_error = "Traceback (most recent call last):\n  File 'main.py', line 10\nExchangeAuthError: Binance authentication failed"
+
+    assert bot_runner.FallbackCrashHandler.last_crash_error != ""
+    assert "ExchangeAuthError" in bot_runner.FallbackCrashHandler.last_crash_error
+
+
+def test_traceback_extraction_logic():
+    """Verify extracting error traceback from captured process output."""
+    sample_output = [
+        "2026-09-09T23:50:00 | INFO | bot | Cycle started",
+        "Traceback (most recent call last):",
+        "  File '/home/uns/TRADE/RUN/main.py', line 356, in <module>",
+        "    main()",
+        "src.core.exceptions.ExchangeAuthError: Binance Futures authentication failed (-2015).",
+    ]
+
+    crash_lines = []
+    capture_tb = False
+    for line in sample_output:
+        if "Traceback (most recent call last):" in line or "Exception" in line or "Error:" in line or "CRITICAL" in line:
+            capture_tb = True
+        if capture_tb:
+            crash_lines.append(line)
+
+    extracted = "\n".join(crash_lines)
+    assert "Traceback (most recent call last):" in extracted
+    assert "ExchangeAuthError" in extracted

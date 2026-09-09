@@ -14,6 +14,7 @@ The Fallback Web Server displays:
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import socket
@@ -21,7 +22,9 @@ import sys
 import time
 import signal
 import subprocess
+import threading
 import urllib.request
+from collections import deque
 from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -158,6 +161,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
     port: int = 8090
     restart_requested: bool = False
     server_instance: Optional[ThreadedHTTPServer] = None
+    last_crash_error: str = ""
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -179,9 +183,11 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         elif clean_path == "/api/status":
             self._send_json({
                 "status": "CRASHED",
+                "is_crashed": True,
                 "exit_code": FallbackCrashHandler.exit_code,
                 "crash_time": FallbackCrashHandler.crash_time,
-                "message": "Main bot process crashed. Emergency Log Server is active."
+                "error_summary": FallbackCrashHandler.last_crash_error,
+                "message": "Trading engine is currently stopped/crashed. Emergency Fallback Server is active."
             })
         elif clean_path == "/api/logs":
             self._handle_logs()
@@ -189,8 +195,10 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             self._send_json({
                 "error": "Trading engine is currently stopped/crashed. Emergency Fallback Server active.",
                 "status": "CRASHED",
+                "is_crashed": True,
                 "exit_code": FallbackCrashHandler.exit_code,
-                "crash_time": FallbackCrashHandler.crash_time
+                "crash_time": FallbackCrashHandler.crash_time,
+                "error_summary": FallbackCrashHandler.last_crash_error
             }, status=503)
         else:
             self._serve_crash_page()
@@ -257,7 +265,12 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                 lines = [f"Error reading log file: {e}"]
         else:
             lines = ["No log file generated yet."]
-        self._send_json({"logs": lines, "exit_code": FallbackCrashHandler.exit_code, "crash_time": FallbackCrashHandler.crash_time})
+        self._send_json({
+            "logs": lines,
+            "exit_code": FallbackCrashHandler.exit_code,
+            "crash_time": FallbackCrashHandler.crash_time,
+            "error_summary": FallbackCrashHandler.last_crash_error
+        })
 
     def _send_json(self, data: Dict[str, Any], status: int = 200) -> None:
         try:
@@ -481,12 +494,12 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             <div class="title-area">
                 <div class="alert-icon">🚨</div>
                 <div>
-                    <h1>System Alert: Trading Engine Stopped / Crashed</h1>
-                    <p class="subtitle">Emergency diagnostic log server active on port 8090</p>
+                    <h1>התרעת מערכת: מנוע המסחר קרס / הושבת</h1>
+                    <p class="subtitle">System Alert: Trading Engine Stopped / Crashed &bull; Emergency Diagnostic Server (Port 8090)</p>
                 </div>
             </div>
             <button class="restart-btn" onclick="restartBot()">
-                <span>🔄</span> Restart Trading Engine Now
+                <span>🔄</span> הפעל מחדש עכשיו (Restart Bot)
             </button>
         </div>
 
@@ -505,16 +518,27 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             </div>
         </div>
 
+        <div class="error-summary-card" id="errorSummaryCard" style="background: rgba(239, 68, 68, 0.12); border: 2px solid var(--red-alert); border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                <div style="font-weight: 700; color: #fecdd3; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
+                    <span>⚠️</span>
+                    <span>סיבת התקלה שזוהתה / Identified Failure Cause:</span>
+                </div>
+                <button class="btn-copy" onclick="copyCrashTraceback()" style="padding: 6px 14px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(239, 68, 68, 0.5); color: #fff; border-radius: 6px; cursor: pointer;">📋 העתק סיבת תקלה</button>
+            </div>
+            <pre id="crashTracebackBox" style="background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #fda4af; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto;">{html.escape(FallbackCrashHandler.last_crash_error or 'Trading engine stopped or crashed (non-zero exit code). Review the logs below for specific exceptions.')}</pre>
+        </div>
+
         <div class="log-section">
             <div class="log-header">
-                <h2>📋 Error Log & Detailed Traceback (logs/bot.log)</h2>
+                <h2>📋 לוגים מפורטים ועקבות שגיאה (logs/bot.log)</h2>
                 <div class="log-actions">
                     <button class="btn-copy" onclick="copyLogsToClipboard()">📋 Copy Traceback</button>
                     <button class="btn-select" onclick="selectAllLogs()">🔍 Select All</button>
-                    <div class="live-tag">Auto Refresh (5s)</div>
+                    <div class="live-tag">Auto Refresh (3s)</div>
                 </div>
             </div>
-            <div class="log-console" id="logConsole">Loading logs...</div>
+            <div class="log-console" id="logConsole">טוען לוגים...</div>
         </div>
     </div>
 
@@ -609,6 +633,19 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             }}
         }}
 
+        async function copyCrashTraceback() {{
+            const box = document.getElementById("crashTracebackBox");
+            if (!box) return;
+            const text = (box.innerText || box.textContent || "").trim();
+            if (!text) return;
+            const copied = await copyTextToClipboard(text);
+            if (copied) {{
+                showToast("📋 סיבת התקלה הועתקה ללוח בהצלחה!");
+            }} else {{
+                showToast("⚠️ לא ניתן היה להעתיק אוטומטית. לחץ Ctrl+C", true);
+            }}
+        }}
+
         function selectAllLogs() {{
             const container = document.getElementById("logConsole");
             if (!container) return;
@@ -626,6 +663,10 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                 if (!res.ok) return;
                 const data = await res.json();
                 const container = document.getElementById("logConsole");
+                if (data.error_summary) {{
+                    const tbBox = document.getElementById("crashTracebackBox");
+                    if (tbBox) tbBox.innerText = data.error_summary;
+                }}
                 if (data.logs && data.logs.length > 0) {{
                     const htmlLines = data.logs.map(line => {{
                         let cls = "log-line";
@@ -645,27 +686,27 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         }}
 
         async function restartBot() {{
-            if (!confirm("Restart the trading engine now?")) return;
-            showToast("Sending restart command to engine...");
+            if (!confirm("האם להפעיל מחדש את מנוע המסחר כעת? / Restart trading engine now?")) return;
+            showToast("שולח פקודת הפעלה מחדש למנוע... / Sending restart command...");
             try {{
                 const res = await fetch("/api/restart", {{ method: "POST" }});
                 const data = await res.json();
                 if (data.success) {{
-                    showToast("Restart command received! Engine is starting up... Please wait for page refresh.");
+                    showToast("פקודת הפעלה מחדש התקבלה! המנוע עולה כעת... הדף יתרענן בעוד מספר שניות.");
                     setTimeout(() => {{
                         window.location.reload();
                     }}, 4000);
                 }} else {{
-                    alert("Error restarting engine: " + (data.error || "Unknown error"));
+                    alert("שגיאה בהפעלה מחדש: " + (data.error || "Unknown error"));
                 }}
             }} catch (err) {{
-                showToast("Trading engine restarted! Reloading page...");
+                showToast("מנוע המסחר מופעל מחדש! מרענן את הדף...");
                 setTimeout(() => {{ window.location.reload(); }}, 3000);
             }}
         }}
 
         fetchLogs();
-        setInterval(fetchLogs, 5000);
+        setInterval(fetchLogs, 3000);
     </script>
 </body>
 </html>"""
@@ -833,14 +874,39 @@ def main() -> None:
             active_python = find_python_executable()
             log_runner(f"Launching main.py process: {active_python} {main_py_path} {' '.join(cli_args)}")
             
+            recent_output_lines: deque[str] = deque(maxlen=250)
+
             proc = subprocess.Popen(
                 [active_python, str(main_py_path)] + cli_args,
-                cwd=str(RUN_DIR)
+                cwd=str(RUN_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
             )
             try:
                 bot_pid_file.write_text(str(proc.pid))
             except Exception:
                 pass
+
+            def stream_output() -> None:
+                try:
+                    if proc.stdout:
+                        for line in iter(proc.stdout.readline, ''):
+                            stripped = line.rstrip('\r\n')
+                            recent_output_lines.append(stripped)
+                            print(line, end='', flush=True)
+                            for lp in (PROJECT_DIR / "logs" / "bot.log", RUN_DIR / "logs" / "bot.log"):
+                                try:
+                                    with open(lp, "a", encoding="utf-8", errors="replace") as f:
+                                        f.write(f"{stripped}\n")
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+            stream_thread = threading.Thread(target=stream_output, daemon=True)
+            stream_thread.start()
 
             # Wait for child process
             try:
@@ -856,13 +922,28 @@ def main() -> None:
                 cleanup_pids()
                 break
 
+            stream_thread.join(timeout=2.0)
             log_runner(f"main.py exited with code: {exit_code}")
+
+            if exit_code != 0:
+                crash_lines = []
+                capture_tb = False
+                for line in recent_output_lines:
+                    if "Traceback (most recent call last):" in line or "Exception" in line or "Error:" in line or "CRITICAL" in line:
+                        capture_tb = True
+                    if capture_tb:
+                        crash_lines.append(line)
+                if not crash_lines:
+                    crash_lines = list(recent_output_lines)[-20:]
+                FallbackCrashHandler.last_crash_error = "\n".join(crash_lines)
+            else:
+                FallbackCrashHandler.last_crash_error = ""
 
             # Check if this was an intentional shutdown or restart
             is_intentional = (
                 shutdown_flag
                 or stop_flag_file.exists()
-                or exit_code in (0, -15, 143)
+                or exit_code == 0
             )
 
             # Consume stop flag if present
@@ -877,15 +958,18 @@ def main() -> None:
                 cleanup_pids()
                 break
 
-            # Read last 50 lines of logs/bot.log for Telegram crash alert
-            log_path = PROJECT_DIR / "logs" / "bot.log"
-            last_logs = []
-            if log_path.exists():
-                try:
-                    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                        last_logs = [line.strip() for line in f.readlines()[-50:] if line.strip()]
-                except Exception:
-                    pass
+            # Read last 50 lines of logs/bot.log or recent output for Telegram crash alert
+            last_logs = list(recent_output_lines)[-50:]
+            if not last_logs:
+                for lp in (PROJECT_DIR / "logs" / "bot.log", RUN_DIR / "logs" / "bot.log"):
+                    if lp.exists():
+                        try:
+                            with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                                last_logs = [line.strip() for line in f.readlines()[-50:] if line.strip()]
+                                if last_logs:
+                                    break
+                        except Exception:
+                            pass
 
             # Send Telegram Crash Notification
             send_telegram_crash_alert(exit_code, last_logs)

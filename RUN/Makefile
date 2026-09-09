@@ -27,13 +27,13 @@ pull-safe:
 dry:
 	@mkdir -p logs
 	@scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
-	@nohup $(PYTHON) scripts/bot_runner.py --mode DRY_RUN --dashboard --port 8090 > logs/bot.log 2>&1 &
+	@nohup $(PYTHON) scripts/bot_runner.py --mode DRY_RUN --dashboard --port 8090 >> logs/bot.log 2>&1 &
 	@echo "⚡ Bot started in DRY_RUN mode with Emergency Crash Fallback Server (24/7 on port 8090)"
 
 run:
 	@mkdir -p logs
 	@scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
-	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup $(PYTHON) scripts/bot_runner.py --mode LIVE --dashboard --port 8090 > logs/bot.log 2>&1 &
+	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup $(PYTHON) scripts/bot_runner.py --mode LIVE --dashboard --port 8090 >> logs/bot.log 2>&1 &
 	@echo "🔥 Bot started in LIVE mode with Emergency Crash Fallback Server (24/7 on port 8090)"
 
 # Management and Diagnostics
@@ -64,6 +64,13 @@ check:
 balance:
 	$(PYTHON) scripts/show_balances.py
 
-restart: stop pull-safe run
+restart: stop pull-safe
+	@MODE=$$(grep -E '^\s*run_mode:' config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'"); \
+	echo "🔄 Detected configured run_mode: $${MODE:-DRY_RUN}"; \
+	if [ "$$MODE" = "LIVE" ]; then \
+		$(MAKE) run; \
+	else \
+		$(MAKE) dry; \
+	fi
 
 restart-dry: stop pull-safe dry

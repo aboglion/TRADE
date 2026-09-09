@@ -217,6 +217,26 @@ body {
     border-color: rgba(148, 163, 184, 0.25) !important;
 }
 
+.conn-badge {
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--accent-success);
+    border-color: rgba(16, 185, 129, 0.3);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.conn-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+.conn-badge-offline {
+    background: rgba(239, 68, 68, 0.2) !important;
+    color: var(--accent-danger, #ef4444) !important;
+    border-color: rgba(239, 68, 68, 0.6) !important;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.3) !important;
+}
+
 .dot {
     width: 8px;
     height: 8px;
