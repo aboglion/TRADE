@@ -14,7 +14,7 @@ The Fallback Web Server displays:
 
 from __future__ import annotations
 
-import html
+from html import escape as html_escape
 import json
 import os
 import socket
@@ -285,7 +285,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             pass
 
     def _serve_crash_page(self) -> None:
-        html = f"""<!DOCTYPE html>
+        page_html = f"""<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
@@ -526,7 +526,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                 </div>
                 <button class="btn-copy" onclick="copyCrashTraceback()" style="padding: 6px 14px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(239, 68, 68, 0.5); color: #fff; border-radius: 6px; cursor: pointer;">📋 העתק סיבת תקלה</button>
             </div>
-            <pre id="crashTracebackBox" style="background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #fda4af; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto;">{html.escape(FallbackCrashHandler.last_crash_error or 'Trading engine stopped or crashed (non-zero exit code). Review the logs below for specific exceptions.')}</pre>
+            <pre id="crashTracebackBox" style="background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #fda4af; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto;">{html_escape(FallbackCrashHandler.last_crash_error or 'Trading engine stopped or crashed (non-zero exit code). Review the logs below for specific exceptions.')}</pre>
         </div>
 
         <div class="log-section">
@@ -710,7 +710,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
     </script>
 </body>
 </html>"""
-        encoded = html.encode("utf-8")
+        encoded = page_html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
