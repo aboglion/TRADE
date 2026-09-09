@@ -865,8 +865,10 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+    # SIGHUP = terminal closed. Ignore it so nohup works correctly
+    # and the fallback crash server stays alive even after terminal disconnect.
     if hasattr(signal, "SIGHUP"):
-        signal.signal(signal.SIGHUP, handle_signal)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
     try:
         while not shutdown_flag:
