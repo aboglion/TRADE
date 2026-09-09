@@ -22,6 +22,7 @@ let offlineCountdownTimer = null;
 let offlineProbeInterval = null;
 let lastOfflineError = "";
 let crashDataCached = null;
+let mainPollInterval = null;
 
 function updateConnectionBadge(online, textOverride = "") {
     const badge = document.getElementById("connBadge");
@@ -60,6 +61,18 @@ function handleConnectionFailure(err, endpoint = "") {
     }
 }
 
+function stopMainPolling() {
+    if (mainPollInterval) {
+        clearInterval(mainPollInterval);
+        mainPollInterval = null;
+    }
+}
+
+function startMainPolling() {
+    stopMainPolling();
+    mainPollInterval = setInterval(fetchDashboardData, 5000);
+}
+
 function setServerOfflineState(offline, err = null) {
     const modal = document.getElementById("serverOfflineModal");
     const sinceEl = document.getElementById("offlineSinceText");
@@ -73,6 +86,28 @@ function setServerOfflineState(offline, err = null) {
             if (sinceEl) sinceEl.textContent = new Date(offlineSinceTimestamp).toLocaleTimeString();
         }
         updateConnectionBadge(false, "SERVER DOWN");
+
+        // Stop main polling — reconnect cycle handles probing
+        stopMainPolling();
+
+        // Update health card to reflect offline state
+        const healthVal = document.getElementById("systemHealthVal");
+        const healthDetail = document.getElementById("systemHealthDetail");
+        if (healthVal) {
+            healthVal.textContent = "OFFLINE";
+            healthVal.className = "metric-value text-danger";
+        }
+        if (healthDetail) {
+            healthDetail.textContent = "אין תקשורת עם שרת המסחר";
+            healthDetail.className = "metric-value text-danger-subtle";
+            healthDetail.style.fontSize = "0.8rem";
+        }
+
+        // Update last cycle to show offline instead of stale "Never"
+        const lastCycleEl = document.getElementById("lastCycleTime");
+        if (lastCycleEl && lastCycleEl.textContent === "Never") {
+            lastCycleEl.textContent = "Server offline";
+        }
 
         if (attemptsEl) attemptsEl.textContent = consecutiveConnectionFailures;
         if (errorEl) errorEl.textContent = lastOfflineError || (err ? err.message : "Failed to reach server (ERR_CONNECTION_REFUSED)");
@@ -91,10 +126,11 @@ function setServerOfflineState(offline, err = null) {
         if (modal) modal.style.display = "none";
         stopOfflineReconnectCycle();
 
+        // Resume main polling now that server is back
+        startMainPolling();
+
         showToast("✅ החיבור לשרת שוחזר בהצלחה! הדאשבורד פעיל.", "success");
-        if (typeof updateAll === "function") {
-            updateAll();
-        }
+        fetchDashboardData();
     }
 }
 
@@ -479,12 +515,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         fetchDashboardData();
         loadTelegramConfig();
     }
-    setInterval(fetchDashboardData, 5000);
+    startMainPolling();
 });
 
 async function checkAuthStatus() {
     try {
-        const res = await fetch("/api/auth_check", { headers: getAuthHeaders() });
+        const res = await apiFetch("/api/auth_check");
         if (res.ok) {
             const data = await res.json();
             if (data.auth_required && !data.authenticated) {
@@ -502,6 +538,8 @@ async function checkAuthStatus() {
             }
         }
     } catch (e) {
+        // apiFetch already triggered handleConnectionFailure for network errors,
+        // so offline detection is handled. Just log and continue.
         console.error("Auth check failed:", e);
     }
     return true;
