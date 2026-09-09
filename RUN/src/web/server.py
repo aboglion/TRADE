@@ -279,6 +279,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_orders()
         elif clean_api_path == "/api/logs":
             self._handle_logs()
+        elif clean_api_path == "/api/logs/download":
+            self._handle_download_logs()
         elif clean_api_path == "/api/dry_run/balances":
             self._handle_get_dry_run_balances()
         elif clean_api_path == "/api/updater":
@@ -580,6 +582,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "Portfolio snapshot:",
             "No state file found at",
             "No new closed candles",
+            "Starting reconciliation...",
+            "Reconciliation complete — state is consistent",
         )
         if os.path.exists(log_path):
             try:
@@ -596,6 +600,38 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             lines = ["No log file generated yet."]
 
         self._send_json({"logs": lines})
+
+    def _handle_download_logs(self) -> None:
+        log_path = self.log_file_path or (self.config.logging.file if self.config else "logs/bot.log")
+        if not os.path.exists(log_path):
+            self._send_json({"error": "Log file not found"}, status=404)
+            return
+
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.readlines()
+
+            ignored_patterns = (
+                "Loaded state:",
+                "Portfolio snapshot:",
+                "No state file found at",
+                "No new closed candles",
+                "Starting reconciliation...",
+                "Reconciliation complete — state is consistent",
+            )
+            filtered = [
+                line for line in all_lines
+                if line.strip() and not any(pat in line for pat in ignored_patterns)
+            ]
+            content = "".join(filtered).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="bot_logs.log"')
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            self._send_json({"error": f"Failed to download logs: {e}"}, status=500)
 
     @staticmethod
     def _fetch_ohlcv_safe(exchange: Any, symbol: str, timeframe: str = "4h", limit: int = 120) -> list:
@@ -636,8 +672,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
             state = self.state_store.load_state() if self.state_store else None
             strat_state = state.strategy_state if state else {}
-            positions_state = strat_state.get("positions", {}) if isinstance(strat_state, dict) else {}
             macro_state = strat_state.get("macro_state", {}) if isinstance(strat_state, dict) else {}
+            positions_state = (
+                macro_state.get("positions")
+                or (strat_state.get("positions") if isinstance(strat_state, dict) else {})
+                or {}
+            )
             bull_peak = float(macro_state.get("bull_peak") or strat_state.get("bull_peak", 0.0) or 0.0)
             bars_since_circuit_trip = int(macro_state.get("bars_since_circuit_trip") or strat_state.get("bars_since_circuit_trip", 999))
 

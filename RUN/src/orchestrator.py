@@ -94,6 +94,7 @@ class BotOrchestrator:
         self._reconciliation = ReconciliationService(gateway, state)
 
         self._consecutive_errors = 0
+        self._last_scan_time: Optional[float] = None
 
     def clear_critical_errors(self) -> None:
         """Clear critical errors both in memory and persist state."""
@@ -116,8 +117,21 @@ class BotOrchestrator:
         cycle_start = time.time()
         now_ms = self._clock.now_ms()
 
-        logger.info("=" * 60)
-        logger.info("CYCLE START | %s | Mode: %s%s", ms_to_iso(now_ms), self._config.run_mode.name, " | FORCED" if force else "")
+        # Timing check: Alert if cycle was triggered in less than 5 minutes (300s)
+        # Note: on bot startup (self._last_scan_time is None) or manual forced trigger, do not alert.
+        now = time.time()
+        if self._last_scan_time is not None and not force:
+            elapsed_seconds = now - self._last_scan_time
+            expected_interval = getattr(self._config.scheduler, "poll_interval_seconds", 300)
+            min_threshold = max(60, expected_interval - 15)  # e.g. 285s
+            if elapsed_seconds < min_threshold:
+                logger.warning(
+                    "⚠️ SCAN TIMING ALERT: Cycle ran after only %.1fs (< 5m)! Expected interval >= %ds. Possible rapid cycle loop or duplicate runner.",
+                    elapsed_seconds, expected_interval,
+                )
+        self._last_scan_time = now
+
+        logger.debug("Routine cycle check | %s | Mode: %s", ms_to_iso(now_ms), self._config.run_mode.name)
 
         try:
             # 0. Kill switch check
@@ -170,6 +184,10 @@ class BotOrchestrator:
                 logger.debug("No new closed candles — cycle idle")
                 self._save_state(success=True)
                 return True
+
+            # Only log cycle banner when meaningful work is about to be executed (new candles or forced)
+            logger.info("=" * 60)
+            logger.info("CYCLE START | %s | Mode: %s%s", ms_to_iso(now_ms), self._config.run_mode.name, " | FORCED" if force else "")
 
             # 4. Fetch full history for indicator computation
             candles_by_asset: Dict[str, list] = {}

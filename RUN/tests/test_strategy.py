@@ -386,3 +386,43 @@ class TestRegimeAdaptiveStrategyParity:
         mult_3 = 1.0 + cfg.get("add1_frac", 0.50) + cfg.get("add2_frac", 0.30)
         assert mult_3 == 1.8
 
+    def test_micro_entry_signal_action_and_enums(self):
+        from unittest.mock import patch
+        from src.strategy.micro_satellite_strategy import MicroSatelliteStrategy
+        from src.core.enums import AssetRegime, PositionAction
+        import pandas as pd
+
+        assert PositionAction.ENTER == PositionAction.OPEN
+        assert PositionAction.IN == PositionAction.OPEN
+        assert PositionAction.EXIT == PositionAction.CLOSE
+        assert PositionAction.OUT == PositionAction.CLOSE
+
+        micro = MicroSatelliteStrategy(asset_weights={"BTC/USDT": 1.0})
+        candles = make_candle_series(1_600_000_000_000, count=220, base_price=50000.0, trend=100.0)
+        portfolio = PortfolioSnapshot(
+            timestamp_ms=candles[-1].timestamp_ms,
+            holdings={"USDT": AssetHolding("USDT", 1000.0, 0.0, 1000.0, 1000.0)},
+            total_value_usd=1000.0,
+        )
+
+        mock_df = pd.DataFrame([{
+            "Open": 70000.0,
+            "High": 71000.0,
+            "Low": 69000.0,
+            "Close": 70500.0,
+            "Volume": 10000.0,
+            "ATR": 1000.0,
+            "MicroRegime": "HIGH_CONVICTION_MICRO",
+        }])
+
+        with patch.object(micro, "_add_indicators", return_value=mock_df):
+            decision = micro.compute_signals({"BTC/USDT": candles}, portfolio)
+            assert len(decision.signals) == 1
+            sig = decision.signals[0]
+            assert sig.action == PositionAction.OPEN
+            assert sig.action == PositionAction.ENTER
+            assert sig.action == PositionAction.IN
+            assert sig.asset_regime == AssetRegime.HIGH_CONVICTION_MICRO
+            assert sig.target_weight > 0.0
+
+

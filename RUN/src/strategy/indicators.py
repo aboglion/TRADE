@@ -11,7 +11,7 @@ strategy parity with the backtest.
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -120,6 +120,28 @@ def add_indicators(df: pd.DataFrame, vol_q: float = 0.70) -> pd.DataFrame:
     return x.dropna(subset=["ATR", "RSI", "ADX", "EMA200"])
 
 
+# ── Default micro config (from engine.py lines 94-112) ───────
+DEFAULT_MICRO_CFG = dict(
+    ema_fast=9,
+    ema_med=21,
+    ema_slow=50,
+    ema_macro=200,
+    rsi_period=9,
+    rsi_surge_min=56.0,
+    vol_surge_mult=1.6,
+    donchian_micro_bars=24,
+    min_edge_to_fee_ratio=6.0,
+    init_stop_atr=1.8,
+    trail_atr=3.2,
+    tp1_atr=3.5,
+    tp1_fraction=0.50,
+    be_trigger_atr=1.5,
+    max_hold_bars=42,
+    base_alloc=0.85,
+    strong_alloc=0.95,
+)
+
+
 def add_micro_indicators(
     df: pd.DataFrame,
     cfg: Optional[Dict] = None,
@@ -208,26 +230,3 @@ def add_micro_indicators(
     return x.dropna(subset=["ATR", "RSI", "EMA200"])
 
 
-# ── Default micro config (from engine.py lines 94-112) ───────
-
-from typing import Optional
-
-DEFAULT_MICRO_CFG = dict(
-    ema_fast=9,
-    ema_med=21,
-    ema_slow=50,
-    ema_macro=200,
-    rsi_period=9,
-    rsi_surge_min=56.0,
-    vol_surge_mult=1.6,
-    donchian_micro_bars=24,
-    min_edge_to_fee_ratio=6.0,
-    init_stop_atr=1.8,
-    trail_atr=3.2,
-    tp1_atr=3.5,
-    tp1_fraction=0.50,
-    be_trigger_atr=1.5,
-    max_hold_bars=42,
-    base_alloc=0.85,
-    strong_alloc=0.95,
-)

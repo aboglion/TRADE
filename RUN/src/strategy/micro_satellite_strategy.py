@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Tuple, Optional
 import numpy as np
 import pandas as pd
 
-from src.core.enums import OrderSide, PositionAction
-from src.core.models import Candle, PortfolioSnapshot, StrategySignal
+from src.core.enums import AssetRegime, OrderSide, PositionAction, Regime
+from src.core.models import Candle, PortfolioSnapshot, StrategyDecision, StrategySignal, TargetAllocation
 from src.strategy.regime_adaptive_strategy import candles_to_dataframe
 
 logger = logging.getLogger("bot.strategy.micro")
@@ -48,10 +48,19 @@ class MicroSatelliteStrategy:
         config: Optional[Dict[str, Any]] = None,
     ):
         self._weights = asset_weights or {}
-        self._cfg = config or DEFAULT_MICRO_CFG
-
-        # Active position tracking state per asset symbol
+        self._cfg = {**DEFAULT_MICRO_CFG, **(config or {})}
         self._positions: Dict[str, Dict[str, Any]] = {}
+
+    @staticmethod
+    def _to_asset_regime(mode_val: Any) -> AssetRegime:
+        if isinstance(mode_val, AssetRegime):
+            return mode_val
+        if isinstance(mode_val, str):
+            try:
+                return AssetRegime(mode_val)
+            except ValueError:
+                pass
+        return AssetRegime.MICRO_NEUTRAL
 
     def export_state(self) -> Dict[str, Any]:
         return {"positions": self._positions}
@@ -124,8 +133,8 @@ class MicroSatelliteStrategy:
                     target_weights[symbol] = alloc * self._weights.get(symbol, 0.0)
                     signals.append(StrategySignal(
                         symbol=symbol,
-                        action=PositionAction.ENTER,
-                        asset_regime=regime,
+                        action=PositionAction.OPEN,
+                        asset_regime=self._to_asset_regime(regime),
                         target_weight=target_weights[symbol],
                         reason=f"Micro Entry: {regime}",
                     ))
@@ -165,7 +174,7 @@ class MicroSatelliteStrategy:
                     signals.append(StrategySignal(
                         symbol=symbol,
                         action=PositionAction.CLOSE,
-                        asset_regime=pos_state["mode"],
+                        asset_regime=self._to_asset_regime(pos_state.get("mode")),
                         target_weight=0.0,
                         reason=exit_reason,
                     ))
@@ -185,16 +194,22 @@ class MicroSatelliteStrategy:
                         signals.append(StrategySignal(
                             symbol=symbol,
                             action=PositionAction.REDUCE,
-                            asset_regime=pos_state["mode"],
+                            asset_regime=self._to_asset_regime(pos_state.get("mode")),
                             target_weight=target_weights[symbol],
                             reason=f"Micro TP1 Hit (+{high_profit_atr:.1f} ATR)",
+                        ))
+                    else:
+                        signals.append(StrategySignal(
+                            symbol=symbol,
+                            action=PositionAction.HOLD,
+                            asset_regime=self._to_asset_regime(pos_state.get("mode")),
+                            target_weight=target_weights[symbol],
+                            reason=f"Micro Hold (Hold {bars_held}b, PnL {open_profit_atr:.2f} ATR)",
                         ))
 
         # Residual USDT weight for Micro Layer
         total_crypto = sum(abs(w) for w in target_weights.values())
         target_weights["USDT"] = max(0.0, 1.0 - total_crypto)
-        
-        from src.core.models import StrategyDecision, TargetAllocation, AssetRegime, Regime
         
         return StrategyDecision(
             regime=Regime.BULL,  # Micro doesn't have a global macro regime, just assume Bull or leave neutral

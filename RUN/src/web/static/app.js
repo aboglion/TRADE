@@ -85,6 +85,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Logs & Orders toolbar listeners
     safeAddListener("copyLogsBtn", "click", copyLogsToClipboard);
+    safeAddListener("downloadLogsBtn", "click", downloadLogsAsFile);
     safeAddListener("clearLogsBtn", "click", clearLogsConsole);
     safeAddListener("copyOrdersBtn", "click", copyOrdersToClipboard);
     safeAddListener("clearOrdersBtn", "click", clearOrdersTable);
@@ -950,6 +951,81 @@ async function copyLogsToClipboard() {
         } catch (e) {
             showToast("❌ Failed to copy system logs", "error");
         }
+    }
+}
+
+async function downloadLogsAsFile() {
+    const nowStr = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const fileName = `bot_logs_${nowStr}.log`;
+
+    // Try downloading full clean log file directly from server
+    try {
+        const response = await fetch("/api/logs/download");
+        if (response.ok) {
+            const blob = await response.blob();
+            if (blob && blob.size > 0) {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.style.display = "none";
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showToast("📥 System logs downloaded successfully!", "success");
+                return;
+            }
+        }
+    } catch (e) {
+        console.warn("Direct /api/logs/download failed, falling back to UI console logs", e);
+    }
+
+    // Fallback: extract rendered logs from console
+    const logConsole = document.getElementById("logConsole");
+    if (!logConsole) {
+        showToast("⚠️ Log console not found", "error");
+        return;
+    }
+
+    const rows = logConsole.querySelectorAll(".log-row");
+    let text = "";
+    if (rows && rows.length > 0) {
+        const textLines = Array.from(rows).map(r => {
+            const time = r.querySelector(".log-time")?.innerText || "";
+            const badge = r.querySelector(".log-badge")?.innerText || "";
+            const module = r.querySelector(".log-module")?.innerText || "";
+            const msg = r.querySelector(".log-msg")?.innerText || "";
+            if (time || badge || module || msg) {
+                return `${time} | ${badge.padEnd(5)} | ${module} | ${msg}`.trim();
+            }
+            return r.innerText.trim();
+        });
+        text = textLines.join("\n");
+    } else {
+        text = (logConsole.innerText || logConsole.textContent || "").trim();
+    }
+
+    if (!text || text === "No logs recorded yet" || text === "Initializing dashboard stream..." || text === "Logs console cleared by user") {
+        showToast("⚠️ No log content available to download", "info");
+        return;
+    }
+
+    try {
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        showToast("📥 System logs downloaded as file!", "success");
+    } catch (err) {
+        console.error("Failed to download logs file:", err);
+        showToast("❌ Failed to download logs file", "error");
     }
 }
 

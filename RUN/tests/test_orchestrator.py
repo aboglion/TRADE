@@ -97,3 +97,49 @@ class TestOrchestratorCycle:
         loaded_state = orchestrator._state_store.load_state()
         assert loaded_state.last_run_ts is not None
         assert loaded_state.last_cycle_success is True
+
+    def test_timing_check_on_startup_does_not_warn(self, orchestrator_setup, caplog):
+        orchestrator, gateway, candle_dict = orchestrator_setup
+        import logging
+        caplog.set_level(logging.WARNING)
+        success = orchestrator.run_once()
+        assert success is True
+        # First run must never report timing anomaly
+        assert "SCAN TIMING ALERT" not in caplog.text
+
+    def test_timing_check_rapid_cycle_emits_warning(self, orchestrator_setup, caplog):
+        orchestrator, gateway, candle_dict = orchestrator_setup
+        import logging
+        caplog.set_level(logging.WARNING)
+        orchestrator.run_once()
+        caplog.clear()
+
+        # Second run immediately (< 5 minutes)
+        orchestrator.run_once()
+        assert "SCAN TIMING ALERT" in caplog.text
+        assert "< 5m" in caplog.text
+
+    def test_timing_check_forced_cycle_does_not_warn(self, orchestrator_setup, caplog):
+        orchestrator, gateway, candle_dict = orchestrator_setup
+        import logging
+        caplog.set_level(logging.WARNING)
+        orchestrator.run_once()
+        caplog.clear()
+
+        # Forced run immediately should NOT trigger timing warning
+        orchestrator.run_once(force=True)
+        assert "SCAN TIMING ALERT" not in caplog.text
+
+    def test_idle_cycle_clean_execution(self, orchestrator_setup, caplog):
+        orchestrator, gateway, candle_dict = orchestrator_setup
+        import logging
+        # First run processes available candles
+        orchestrator.run_once()
+        caplog.clear()
+
+        # Second run has no new candles
+        caplog.set_level(logging.INFO)
+        success = orchestrator.run_once()
+        assert success is True
+        # Should not spam CYCLE START banner when no new closed candles
+        assert "CYCLE START" not in caplog.text

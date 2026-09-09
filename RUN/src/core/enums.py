@@ -40,6 +40,9 @@ class OrderStatus(Enum):
     UNKNOWN = "unknown"         # Network error — status uncertain
     EXPIRED = "expired"         # Order expired on exchange
 
+    # Alias for single-L spelling
+    CANCELED = CANCELLED
+
 
 class Regime(Enum):
     """Macro market regime classification from BTC SMA-150."""
@@ -53,6 +56,9 @@ class AssetRegime(Enum):
     TREND = "TREND"
     BEAR = "BEAR"
     SIDEWAYS = "SIDEWAYS"
+    HIGH_CONVICTION_MICRO = "HIGH_CONVICTION_MICRO"
+    MICRO_TREND_ACCELERATION = "MICRO_TREND_ACCELERATION"
+    MICRO_NEUTRAL = "MICRO_NEUTRAL"
 
 
 class MicroRegime(Enum):
@@ -70,3 +76,11 @@ class PositionAction(Enum):
     REDUCE = auto()     # Partial take-profit
     HOLD = auto()
     NO_ACTION = auto()
+
+    # Aliases for flexibility and backward compatibility
+    ENTER = OPEN
+    IN = OPEN
+    EXIT = CLOSE
+    OUT = CLOSE
+
+

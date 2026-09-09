@@ -39,7 +39,7 @@ class ReconciliationService:
 
         Returns True if reconciliation succeeded cleanly.
         """
-        logger.info("Starting reconciliation...")
+        logger.debug("Starting reconciliation...")
         clean = True
 
         # 1. Check exchange for open orders
@@ -141,7 +141,7 @@ class ReconciliationService:
         ]
 
         if clean:
-            logger.info("Reconciliation complete — state is consistent")
+            logger.debug("Reconciliation complete — state is consistent")
         else:
             logger.warning("Reconciliation found discrepancies (resolved)")
 
