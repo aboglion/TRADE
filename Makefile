@@ -20,6 +20,7 @@ gp:
 # 24/7 Background execution modes
 dry:
 	@mkdir -p logs
+	@echo "DRY_RUN" > logs/last_mode
 	@RUN/scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
 	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
 	@nohup $(PYTHON) RUN/scripts/bot_runner.py --mode DRY_RUN --dashboard --port 8090 >> logs/bot.log 2>&1 &
@@ -27,6 +28,7 @@ dry:
 
 run:
 	@mkdir -p logs
+	@echo "LIVE" > logs/last_mode
 	@RUN/scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
 	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
 	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup $(PYTHON) RUN/scripts/bot_runner.py --mode LIVE --dashboard --port 8090 >> logs/bot.log 2>&1 &
@@ -62,8 +64,9 @@ pull-safe:
 	@RUN/scripts/safe_pull.sh
 
 restart: stop pull-safe
-	@MODE=$$(grep -E '^\s*run_mode:' RUN/config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'"); \
-	echo "🔄 Detected configured run_mode: $${MODE:-DRY_RUN}"; \
+	@MODE=$$(cat logs/last_mode 2>/dev/null || grep -E '^\s*run_mode:' RUN/config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'"); \
+	MODE=$${MODE:-DRY_RUN}; \
+	echo "🔄 Detected run mode: $$MODE"; \
 	if [ "$$MODE" = "LIVE" ]; then \
 		$(MAKE) run; \
 	else \
