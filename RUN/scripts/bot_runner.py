@@ -212,11 +212,31 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                 # Schedule server shutdown in separate thread so HTTP response finishes first
                 import threading
                 threading.Thread(target=FallbackCrashHandler.server_instance.shutdown).start()
+        elif clean_path in ("/api/logs/clear", "/api/clear_logs"):
+            self._handle_clear_logs()
         else:
             self._send_json({"error": "Unknown endpoint"}, status=404)
 
+    def _handle_clear_logs(self) -> None:
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cleared_line = f"[{timestamp}] [RUNNER] System logs cleared by user\n"
+            for log_path in (PROJECT_DIR / "logs" / "bot.log", RUN_DIR / "logs" / "bot.log"):
+                if log_path.exists():
+                    try:
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            f.write(cleared_line)
+                    except Exception as ex:
+                        log_runner(f"Failed to clear {log_path}: {ex}")
+            log_runner("System logs cleared by user via Emergency Fallback Server")
+            self._send_json({"success": True, "message": "System logs cleared successfully"})
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=500)
+
     def _handle_logs(self) -> None:
         log_path = PROJECT_DIR / "logs" / "bot.log"
+        if not log_path.exists() and (RUN_DIR / "logs" / "bot.log").exists():
+            log_path = RUN_DIR / "logs" / "bot.log"
         lines = []
         ignored_patterns = (
             "Loaded state:",

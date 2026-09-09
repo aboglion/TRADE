@@ -425,4 +425,89 @@ class TestRegimeAdaptiveStrategyParity:
             assert sig.asset_regime == AssetRegime.HIGH_CONVICTION_MICRO
             assert sig.target_weight > 0.0
 
+    def test_institutional_crash_shield_safe_haven_activation(self):
+        strategy = RegimeAdaptiveStrategy(
+            sma_regime_period=50,
+            conviction_leverage=10.0,
+            bull_leverage=10.0,
+            mid_leverage=5.0,
+            base_leverage=2.5,
+            min_leverage=1.0,
+            momentum_cutoff_pct=-0.02,
+            safe_cash_weight=0.60,
+            safe_spot_weight=0.30,
+            safe_micro_weight=0.10,
+        )
+        btc_candles = make_candle_series(1_600_000_000_000, count=999, base_price=60000.0, trend=0.0)
+        last_ts = btc_candles[-1].timestamp_ms + 86_400_000
+        # Peak at 70,000
+        peak_candle = make_candle(last_ts, open=69500.0, high=70000.0, low=69000.0, close=70000.0)
+        btc_candles.append(peak_candle)
+        portfolio = PortfolioSnapshot(
+            timestamp_ms=last_ts,
+            holdings={"USDT": AssetHolding("USDT", 1000.0, 0.0, 1000.0, 1000.0)},
+            total_value_usd=1000.0,
+        )
+        strategy.compute_signals({"BTC/USDT": btc_candles}, portfolio)
+
+        # 3% pullback from 5-day high (70,000 -> 67,900), breaches -2% cutoff!
+        last_ts += 86_400_000
+        pullback_candle = make_candle(last_ts, open=69000.0, high=69200.0, low=67800.0, close=67900.0)
+        btc_candles.append(pullback_candle)
+        decision = strategy.compute_signals({"BTC/USDT": btc_candles}, portfolio)
+
+        assert decision.regime == Regime.BULL
+        assert strategy._safe_haven_active is True
+        assert strategy._effective_leverage == 1.0
+        # Safe Haven targets 30% spot, 70% USDT (60% cash + 10% micro)
+        assert decision.target_allocation.weights.get("USDT", 0.0) >= 0.70
+
+    def test_conviction_rocket_10x_activation(self):
+        strategy = RegimeAdaptiveStrategy(
+            sma_regime_period=50,
+            conviction_leverage=10.0,
+            bull_leverage=10.0,
+            momentum_cutoff_pct=-0.02,
+        )
+        # Strong bull trend
+        btc_candles = make_candle_series(1_600_000_000_000, count=999, base_price=20000.0, trend=50.0)
+        last_ts = btc_candles[-1].timestamp_ms + 86_400_000
+        # New high candle: zero pullback from 5d high, well above EMA9
+        rocket_candle = make_candle(last_ts, open=69800.0, high=70500.0, low=69700.0, close=70400.0)
+        btc_candles.append(rocket_candle)
+        portfolio = PortfolioSnapshot(
+            timestamp_ms=last_ts,
+            holdings={"USDT": AssetHolding("USDT", 1000.0, 0.0, 1000.0, 1000.0)},
+            total_value_usd=1000.0,
+        )
+        decision = strategy.compute_signals({"BTC/USDT": btc_candles}, portfolio)
+        assert decision.regime == Regime.BULL
+        assert strategy._in_momentum is True
+        assert strategy._safe_haven_active is False
+        assert strategy._effective_leverage == 10.0
+
+    def test_bear_regime_short_hedge_20x_with_core_ratio(self):
+        from src.strategy.hybrid_strategy import HybridStrategy
+        macro = RegimeAdaptiveStrategy(
+            sma_regime_period=150,
+            bear_short_hedge_weight=0.35,
+            short_leverage=2.0,
+            core_ratio=0.80
+        )
+        micro = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.0, core_ratio=0.20)
+        hybrid = HybridStrategy(macro_strategy=macro, micro_strategy=micro, core_ratio=0.80)
+
+        btc_candles = make_candle_series(1_600_000_000_000, count=1000, base_price=60000.0, trend=-20.0)
+        candles_by_asset = {"BTC/USDT": btc_candles}
+        portfolio = PortfolioSnapshot(
+            timestamp_ms=1_600_000_000_000,
+            holdings={"USDT": AssetHolding("USDT", 1000.0, 0.0, 1000.0, 1000.0)},
+            total_value_usd=1000.0,
+        )
+
+        decision = hybrid.compute_signals(candles_by_asset, portfolio)
+        assert decision.regime == Regime.BEAR
+        # 35% margin @ 2.0x short = -70% net notional BTC short
+        assert pytest.approx(decision.target_allocation.weights["BTC/USDT"], abs=1e-4) == -0.70
+
 

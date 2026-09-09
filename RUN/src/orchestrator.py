@@ -293,10 +293,14 @@ class BotOrchestrator:
             self._consecutive_errors = 0
 
             elapsed = time.time() - cycle_start
+            lev_str = f" | Lev: {decision.metadata.get('effective_leverage', 1.0):.1f}x" if decision.metadata else ""
+            shield_str = " | 🛡️ SAFE_HAVEN" if decision.metadata and decision.metadata.get("safe_haven_active") else (" | 🚀 IN_MOMENTUM" if decision.metadata and decision.metadata.get("in_momentum") else "")
             logger.info(
-                "CYCLE COMPLETE | %.1fs | Regime: %s | Orders: %d/%d executed",
+                "CYCLE COMPLETE | %.1fs | Regime: %s%s%s | Orders: %d/%d executed",
                 elapsed,
                 decision.regime.value,
+                lev_str,
+                shield_str,
                 executed_count,
                 len(plan.orders),
             )

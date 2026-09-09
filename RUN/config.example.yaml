@@ -16,13 +16,19 @@ exchange:
 strategy:
   timeframe: "4h"
   warmup_candles: 1000
-  bull_leverage: 3.5
-  mid_leverage: 2.4
-  min_leverage: 1.4
-  flash_wick_limit: -0.04
-  ladder_steps: [1.0, 1.8, 2.5]
-  bear_short_hedge_weight: 0.15    # 0.15 = 15% BTC short hedge in bear regime
-  cash_apr: 0.0                   # Set > 0 if using Binance Earn
+  conviction_leverage: 10.0
+  bull_leverage: 10.0
+  mid_leverage: 5.0
+  base_leverage: 2.5
+  min_leverage: 1.0
+  momentum_cutoff_pct: -0.02
+  safe_cash_weight: 0.60
+  safe_spot_weight: 0.30
+  safe_micro_weight: 0.10
+  flash_wick_limit: -0.038
+  ladder_steps: [1.0, 2.0, 4.0, 10.0]
+  bear_short_hedge_weight: 0.35    # 0.35 = 35% margin @ 2.0x short hedge on BTC
+  cash_apr: 0.04                   # 4.0% APY for cash parked in yield / earn
 
   assets:
     BTC:

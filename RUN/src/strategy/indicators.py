@@ -43,6 +43,7 @@ def add_indicators(df: pd.DataFrame, vol_q: float = 0.70) -> pd.DataFrame:
     EXACT PORT of engine.py add_indicators() (lines 144-209).
     """
     x = df.copy()
+    x["EMA9"] = x.Close.ewm(span=9, adjust=False).mean()
     x["EMA20"] = x.Close.ewm(span=20, adjust=False).mean()
     x["EMA50"] = x.Close.ewm(span=50, adjust=False).mean()
     x["EMA200"] = x.Close.ewm(span=200, adjust=False).mean()

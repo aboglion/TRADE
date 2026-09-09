@@ -121,9 +121,18 @@ def make_cfg(**overrides):
 # ═══════════════════════════════════════════════════════════
 def load_real_data(filepath='data/BTC_USD_4h.csv'):
     if not os.path.exists(filepath):
-        alt = os.path.join('data', os.path.basename(filepath))
-        if os.path.exists(alt):
-            filepath = alt
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        cand = os.path.join(module_dir, filepath)
+        if os.path.exists(cand):
+            filepath = cand
+        else:
+            alt = os.path.join('data', os.path.basename(filepath))
+            if os.path.exists(alt):
+                filepath = alt
+            else:
+                alt2 = os.path.join(module_dir, 'data', os.path.basename(filepath))
+                if os.path.exists(alt2):
+                    filepath = alt2
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Data file not found: {filepath}")
 
@@ -741,16 +750,28 @@ def run_hybrid_engine(initial_capital=1000.0, core_ratio=0.80, weights=None):
 def run_dynamic_adaptive_engine(
     initial_capital=1000.0,
     weights=None,
+    conviction_leverage=None,
     bull_leverage=3.5,
     mid_leverage=2.4,
+    base_leverage=None,
     min_leverage=1.4,
+    momentum_cutoff_pct=None,
+    safe_cash_weight=0.60,
+    safe_spot_weight=0.30,
+    safe_micro_weight=0.10,
     bear_short_hedge=0.15,
+    short_leverage=1.0,
     cash_apr=0.04,
     flash_wick_limit=-0.04,
     ladder_steps=(1.0, 1.8, 2.5)
 ):
     if weights is None:
         weights = DEFAULT_WEIGHTS
+
+    if conviction_leverage is None:
+        conviction_leverage = bull_leverage
+    if base_leverage is None:
+        base_leverage = min_leverage
 
     hybrid_base, macro_base, micro_base = run_rebalanced_hybrid_engine(initial_capital=initial_capital, core_ratio=0.80, weights=weights)
 
@@ -770,9 +791,14 @@ def run_dynamic_adaptive_engine(
     btc_low_daily = btc_df['Low'].resample('D').min().dropna()
     btc_open_daily = btc_df['Open'].resample('D').first().dropna()
 
+    ema9_daily = btc_daily.ewm(span=9, adjust=False).mean()
     ema20_daily = btc_daily.ewm(span=20, adjust=False).mean()
+    ema50_daily = btc_daily.ewm(span=50, adjust=False).mean()
     sma150 = btc_daily.rolling(150).mean()
-    is_bull = (btc_daily > sma150).fillna(False)
+
+    # 5-day rolling high
+    btc_5d_high = btc_high_daily.rolling(5).max()
+    btc_pb_from_5d = (btc_daily - btc_5d_high) / btc_5d_high
 
     # Intraday Flash Shock Wick calculation
     tr1 = btc_high_daily - btc_low_daily
@@ -783,13 +809,36 @@ def run_dynamic_adaptive_engine(
     atr_pct = atr14 / btc_daily
     intraday_max_dip = (btc_low_daily - btc_open_daily) / btc_open_daily
 
+    # ADX daily for trend strength conviction
+    delta = btc_daily.diff()
+    high_diff = btc_high_daily.diff()
+    low_diff = -btc_low_daily.diff()
+    pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
+    neg_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0)
+    atr_safe = atr14.replace(0, np.nan)
+    pos_di = (100 * pd.Series(pos_dm, index=btc_daily.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+    neg_di = (100 * pd.Series(neg_dm, index=btc_daily.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+    denom = (pos_di + neg_di).replace(0, np.nan)
+    dx = (100 * (pos_di - neg_di).abs() / denom).fillna(0.0)
+    adx_daily = dx.ewm(alpha=1/14, min_periods=14).mean()
+
+    # Regime detection
+    if momentum_cutoff_pct is not None:
+        is_bear_trend = (btc_daily < ema20_daily) & ((ema20_daily < ema50_daily) | (btc_daily < sma150))
+        is_bull = ~is_bear_trend & (btc_daily >= sma150)
+    else:
+        is_bull = (btc_daily > sma150).fillna(False)
+
     common_idx = hybrid_base.index.intersection(bh_comb.index).intersection(is_bull.index)
     hy_aligned = hybrid_base.loc[common_idx]
     bh_aligned = bh_comb.loc[common_idx]
     is_bull_aligned = is_bull.loc[common_idx]
     btc_daily_aligned = btc_daily.loc[common_idx]
+    ema9_aligned = ema9_daily.loc[common_idx]
     ema20_aligned = ema20_daily.loc[common_idx]
     atr_pct_aligned = atr_pct.loc[common_idx]
+    adx_aligned = adx_daily.loc[common_idx]
+    pb_5d_aligned = btc_pb_from_5d.loc[common_idx]
     intraday_dip_aligned = intraday_max_dip.loc[common_idx]
 
     cap = initial_capital
@@ -811,55 +860,102 @@ def run_dynamic_adaptive_engine(
             if bh_aligned.loc[d_prev] > bull_peak:
                 bull_peak = bh_aligned.loc[d_prev]
 
-            bh_pullback = (bh_aligned.loc[d_prev] - bull_peak) / bull_peak if bull_peak > 0 else 0.0
-            under_ema = btc_daily_aligned.loc[d_prev] < ema20_aligned.loc[d_prev]
+            pb_5d = pb_5d_aligned.loc[d_prev] if pd.notna(pb_5d_aligned.loc[d_prev]) else 0.0
+            close_prev = btc_daily_aligned.loc[d_prev]
+            ema9_prev = ema9_aligned.loc[d_prev] if pd.notna(ema9_aligned.loc[d_prev]) else close_prev
             atr_p = atr_pct_aligned.loc[d_prev] if pd.notna(atr_pct_aligned.loc[d_prev]) else 0.035
+            adx_v = adx_aligned.loc[d_prev] if pd.notna(adx_aligned.loc[d_prev]) else 20.0
             intraday_dip = intraday_dip_aligned.loc[d_curr] if pd.notna(intraday_dip_aligned.loc[d_curr]) else 0.0
 
-            # 1. Hard Risk Guard (Pullback > 8% or price broke EMA20)
-            if bh_pullback < -0.08 or under_ema:
-                selected_lev = 1.0
-            # 2. Pre-emptive Stepped Pullback Guard (Pullback between 4% and 8%)
-            elif bh_pullback < -0.04:
-                selected_lev = min_leverage
-            # 3. Smart ATR Volatility Tiers
-            elif atr_p < 0.024:
-                selected_lev = bull_leverage
-            elif atr_p < 0.036:
-                selected_lev = mid_leverage
+            if momentum_cutoff_pct is not None:
+                # ── MOMENTUM VALIDATION GATE (Institutional Crash Shield) ──
+                in_momentum = (pb_5d >= momentum_cutoff_pct) and (close_prev >= ema9_prev)
+
+                if not in_momentum:
+                    # 🛡️ Safe Haven: 1.0x Spot, 60% Cash Yield @ 4% APY, 30% Spot, 10% Micro
+                    port_r = (safe_cash_weight * (1.0 + daily_cash_yield)) + (safe_spot_weight * r_bh) + (safe_micro_weight * r_hy)
+                else:
+                    # 🚀 Conviction Engine Active
+                    if atr_p < 0.022 and adx_v >= 24.0:
+                        selected_lev = conviction_leverage
+                    elif atr_p < 0.028:
+                        selected_lev = mid_leverage
+                    else:
+                        selected_lev = base_leverage
+
+                    # Controlled Re-Entry Ladder after circuit trip
+                    if ladder_steps is not None and len(ladder_steps) > 0:
+                        if 1 <= bars_since_circuit_trip <= len(ladder_steps):
+                            ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
+                            selected_lev = min(selected_lev, ladder_cap)
+
+                    # Intraday Flash Circuit Breaker
+                    if selected_lev > 1.0 and intraday_dip < flash_wick_limit:
+                        bars_since_circuit_trip = 1
+                        excess = min(0.0, (r_bh - 1.0) - flash_wick_limit)
+                        r_bh_lev = 1.0 + (flash_wick_limit * selected_lev) + excess
+                    else:
+                        bars_since_circuit_trip += 1
+                        r_bh_lev = 1.0 + (r_bh - 1.0) * selected_lev
+
+                    # Borrowing fee for leverage (>1.0x) ~0.03% daily
+                    daily_funding_cost = 0.0003 * max(0.0, selected_lev - 1.0)
+                    r_bh_lev -= daily_funding_cost
+
+                    w_bh = 0.70
+                    w_hy = 0.30
+                    port_r = w_bh * r_bh_lev + w_hy * r_hy
             else:
-                selected_lev = min_leverage
+                # ── LEGACY STEPPED GUARD & ATR TIERS ──
+                bh_pullback = (bh_aligned.loc[d_prev] - bull_peak) / bull_peak if bull_peak > 0 else 0.0
+                under_ema = close_prev < ema20_aligned.loc[d_prev]
 
-            # 4. Controlled Re-Entry Ladder after circuit trip
-            if ladder_steps is not None and len(ladder_steps) > 0:
-                if 1 <= bars_since_circuit_trip <= len(ladder_steps):
-                    ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
-                    selected_lev = min(selected_lev, ladder_cap)
+                if bh_pullback < -0.08 or under_ema:
+                    selected_lev = 1.0
+                elif bh_pullback < -0.04:
+                    selected_lev = min_leverage
+                elif atr_p < 0.024:
+                    selected_lev = bull_leverage
+                elif atr_p < 0.036:
+                    selected_lev = mid_leverage
+                else:
+                    selected_lev = min_leverage
 
-            # 5. Intraday Flash Circuit Breaker
-            if selected_lev > 1.0 and intraday_dip < flash_wick_limit:
-                bars_since_circuit_trip = 1
-                excess = min(0.0, (r_bh - 1.0) - flash_wick_limit)
-                r_bh_lev = 1.0 + (flash_wick_limit * selected_lev) + excess
-            else:
-                bars_since_circuit_trip += 1
-                r_bh_lev = 1.0 + (r_bh - 1.0) * selected_lev
+                if ladder_steps is not None and len(ladder_steps) > 0:
+                    if 1 <= bars_since_circuit_trip <= len(ladder_steps):
+                        ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
+                        selected_lev = min(selected_lev, ladder_cap)
 
-            # Deduct funding cost for leveraged portion (~0.03% daily on borrowed margin)
-            daily_funding_cost = 0.0003 * max(0.0, selected_lev - 1.0)
-            r_bh_lev -= daily_funding_cost
-            r_hy_lev = r_hy
+                if selected_lev > 1.0 and intraday_dip < flash_wick_limit:
+                    bars_since_circuit_trip = 1
+                    excess = min(0.0, (r_bh - 1.0) - flash_wick_limit)
+                    r_bh_lev = 1.0 + (flash_wick_limit * selected_lev) + excess
+                else:
+                    bars_since_circuit_trip += 1
+                    r_bh_lev = 1.0 + (r_bh - 1.0) * selected_lev
 
-            w_bh = 0.70
-            w_hy = 0.30
-            port_r = w_bh * r_bh_lev + w_hy * r_hy_lev
+                daily_funding_cost = 0.0003 * max(0.0, selected_lev - 1.0)
+                r_bh_lev -= daily_funding_cost
+
+                w_bh = 0.70
+                w_hy = 0.30
+                port_r = w_bh * r_bh_lev + w_hy * r_hy
         else:
+            # 🐻 BEAR REGIME
             bull_peak = bh_aligned.loc[d_curr]
             bars_since_circuit_trip = 999
-            w_hy = max(0.0, 0.85 - bear_short_hedge)
-            w_short = bear_short_hedge
-            r_short = 1.0 - (r_bh - 1.0)
-            port_r = (w_hy * r_hy) + (w_short * r_short) + (0.15 * (1.0 + daily_cash_yield))
+            if momentum_cutoff_pct is not None:
+                # Systematic Short Hedge (35% @ 2.0x short + 65% Cash Yield)
+                short_funding = 0.0003 * max(0.0, short_leverage - 1.0)
+                r_short = 1.0 - ((r_bh - 1.0) * short_leverage) - short_funding
+                cash_weight = max(0.0, 1.0 - bear_short_hedge)
+                port_r = (bear_short_hedge * r_short) + (cash_weight * (1.0 + daily_cash_yield))
+            else:
+                # Legacy Bear Hedge (hybrid + 1.0x short + cash)
+                w_hy = max(0.0, 0.85 - bear_short_hedge)
+                w_short = bear_short_hedge
+                r_short = 1.0 - (r_bh - 1.0)
+                port_r = (w_hy * r_hy) + (w_short * r_short) + (0.15 * (1.0 + daily_cash_yield))
 
         cap = max(0.0, cap * port_r)
         vals.append(cap)
@@ -867,14 +963,42 @@ def run_dynamic_adaptive_engine(
     dyn_eq = pd.Series(vals, index=common_idx)
     return dyn_eq, hy_aligned, bh_aligned
 
-def run_dynamic_adaptive_20x_engine(initial_capital=1000.0, weights=None, bull_leverage=3.5, bear_short_hedge=0.15, cash_apr=0.04):
-    """Production alias maintaining full backward compatibility with upgraded 3.5x Flash & Ladder engine."""
+def run_dynamic_adaptive_20x_engine(
+    initial_capital=1000.0,
+    weights=None,
+    conviction_leverage=10.0,
+    bull_leverage=10.0,
+    mid_leverage=5.0,
+    base_leverage=2.5,
+    min_leverage=1.0,
+    momentum_cutoff_pct=-0.02,
+    safe_cash_weight=0.60,
+    safe_spot_weight=0.30,
+    safe_micro_weight=0.10,
+    bear_short_hedge=0.35,
+    short_leverage=2.0,
+    cash_apr=0.04,
+    flash_wick_limit=-0.038,
+    ladder_steps=(1.0, 2.0, 4.0, 10.0)
+):
+    """Institutional Crash Shield & 10x Conviction Rocket production engine with 100% Live Strategy parity."""
     return run_dynamic_adaptive_engine(
         initial_capital=initial_capital,
         weights=weights,
+        conviction_leverage=conviction_leverage,
         bull_leverage=bull_leverage,
+        mid_leverage=mid_leverage,
+        base_leverage=base_leverage,
+        min_leverage=min_leverage,
+        momentum_cutoff_pct=momentum_cutoff_pct,
+        safe_cash_weight=safe_cash_weight,
+        safe_spot_weight=safe_spot_weight,
+        safe_micro_weight=safe_micro_weight,
         bear_short_hedge=bear_short_hedge,
-        cash_apr=cash_apr
+        short_leverage=short_leverage,
+        cash_apr=cash_apr,
+        flash_wick_limit=flash_wick_limit,
+        ladder_steps=ladder_steps
     )
 
 
@@ -1003,7 +1127,7 @@ def build_dashboard_data():
     weights = DEFAULT_WEIGHTS
     files = FILES
 
-    dyn_eq, hybrid_base, bh_comb = run_dynamic_adaptive_engine(initial_capital=capital, weights=weights, bull_leverage=3.5)
+    dyn_eq, hybrid_base, bh_comb = run_dynamic_adaptive_20x_engine(initial_capital=capital, weights=weights)
 
     dfs = {name: load_real_data(path) for name, path in files.items()}
     micro_eqs, micro_asset_trades = {}, {}
@@ -1098,7 +1222,7 @@ def build_dashboard_data():
     }
 
 def generate_dashboard_html():
-    print("⚡ Building Production Dynamic Adaptive 2.0x Dashboard...")
+    print("⚡ Building Production Dynamic Adaptive 10x Dashboard (Crash Shield & Conviction Rocket)...")
     payload = build_dashboard_data()
     json_data = json.dumps(payload, ensure_ascii=False)
 
@@ -1107,7 +1231,7 @@ def generate_dashboard_html():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Regime-Adaptive 2.0x Quantitative Dashboard</title>
+    <title>Dynamic Regime-Adaptive 10x Quantitative Dashboard (Crash Shield & Conviction Rocket)</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
@@ -1174,10 +1298,10 @@ def generate_dashboard_html():
     <div class="container">
         <header>
             <div class="title-group">
-                <h1>🏆 Dynamic Regime-Adaptive 3.5x Flash-Guarded (with Re-Entry Ladder)</h1>
-                <p>מנוע מסחר כמותי מוסדי: מינוף מדורג 3.5x בשוק עולה עם הגנות בזק תוך-יומיות וסולם חזרה | הגנת מזומן ושורט גידור בשוק דובי</p>
+                <h1>🏆 Dynamic Regime-Adaptive 10x (Crash Shield & Conviction Rocket)</h1>
+                <p>מנוע מסחר כמותי מוסדי: שער אימות מומנטום, מגן Safe Haven (60% מזומן 4% APY), רקטת שכנוע 10x, סולם חזרה וגידור שורט 2.0x בדובים</p>
             </div>
-            <span class="badge">INSTITUTIONAL QUANT PRODUCTION STRATEGY</span>
+            <span class="badge">🚀 10x CONVICTION & CRASH SHIELD</span>
         </header>
 
         <div class="controls-bar">
@@ -1192,7 +1316,7 @@ def generate_dashboard_html():
             
             <div style="margin-right: auto; display: flex; gap: 8px; align-items: center;">
                 <span style="font-size: 13px; color: var(--text-secondary); font-weight: 600;">תצוגת נכס:</span>
-                <button class="btn active" id="btn-asset-PORT" onclick="selectAsset('PORT')">תיק משולב (3.5x Flash-Guarded)</button>
+                <button class="btn active" id="btn-asset-PORT" onclick="selectAsset('PORT')">תיק משולב (10x Rocket & Crash Shield)</button>
                 <button class="btn" id="btn-asset-BTC" onclick="selectAsset('BTC')">BTC / USD</button>
                 <button class="btn" id="btn-asset-ETH" onclick="selectAsset('ETH')">ETH / USD</button>
                 <button class="btn" id="btn-asset-SOL" onclick="selectAsset('SOL')">SOL / USD</button>
@@ -1229,24 +1353,24 @@ def generate_dashboard_html():
 
         <div class="chart-card">
             <div class="chart-header">
-                <div class="chart-title" id="chart-title">גרף תשואה מצטברת (Dynamic Adaptive 2.0x Equity vs Buy & Hold)</div>
+                <div class="chart-title" id="chart-title">גרף תשואה מצטברת (Dynamic Adaptive 10x Rocket & Crash Shield vs Buy & Hold)</div>
             </div>
             <div id="chart-equity" style="min-height: 400px;"></div>
         </div>
 
         <div class="table-card">
             <div class="chart-header">
-                <div class="chart-title">📊 ביקורת ביצועים - Dynamic Regime-Adaptive 2.0x (2023 - היום)</div>
+                <div class="chart-title">📊 ביקורת ביצועים - Dynamic Regime-Adaptive 10x (2023 - היום)</div>
             </div>
             <table>
                 <thead>
                     <tr>
                         <th>משטר שוק</th>
                         <th>טווח תאריכים</th>
-                        <th>תשואת Dynamic 2.0x</th>
+                        <th>תשואת Dynamic 10x</th>
                         <th>תשואת Buy & Hold</th>
                         <th>אלפא מול Hold</th>
-                        <th>MaxDD Dynamic 2.0x</th>
+                        <th>MaxDD Dynamic 10x</th>
                         <th>MaxDD Buy & Hold</th>
                         <th>אבחון כמותי וניצחון אסטרטגי</th>
                     </tr>

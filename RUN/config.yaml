@@ -11,16 +11,23 @@ strategy:
   timeframe: 4h
   warmup_candles: 1200
   sma_regime_period: 150
-  bull_leverage: 3.5
-  mid_leverage: 2.4
-  min_leverage: 1.4
-  flash_wick_limit: -0.04
+  conviction_leverage: 10.0
+  bull_leverage: 10.0
+  mid_leverage: 5.0
+  base_leverage: 2.5
+  min_leverage: 1.0
+  momentum_cutoff_pct: -0.02
+  safe_cash_weight: 0.6
+  safe_spot_weight: 0.3
+  safe_micro_weight: 0.1
+  flash_wick_limit: -0.038
   ladder_steps:
   - 1.0
-  - 1.8
-  - 2.5
-  bear_short_hedge_weight: 0.15
-  cash_apr: 0.0
+  - 2.0
+  - 4.0
+  - 10.0
+  bear_short_hedge_weight: 0.35
+  cash_apr: 0.04
   assets:
     BTC:
       weight: 0.4
@@ -56,7 +63,7 @@ scheduler:
   max_consecutive_errors: 10
 dry_run:
   initial_balances:
-    USDT: 412.86948043
+    USDT: 418.8910877
     BTC: 0.0148827
     ETH: 0.5506405
     SOL: 0.0

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Quant 3.5x Engine — Live Trading Dashboard</title>
+    <title>Quant 10x Engine (Crash Shield) — Live Trading Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -22,8 +22,8 @@
                         <span>⚡</span>
                     </div>
                     <div class="brand-text">
-                        <h1>QUANT 3.5x ENGINE</h1>
-                        <span class="sub-logo">Dynamic Regime-Adaptive Trading System</span>
+                        <h1>QUANT 10x ENGINE</h1>
+                        <span class="sub-logo">Institutional Crash Shield & Conviction Rocket</span>
                     </div>
                 </div>
 
@@ -159,7 +159,7 @@
                             <span class="mini-chart-title">MACRO TREND & SMA GAP</span>
                             <div class="pnl-summary-pills mini-pnl-pills">
                                 <span class="pnl-pill pnl-pill-high" id="regimeGapPill" title="BTC Distance to SMA-150">+0.00%</span>
-                                <span class="pnl-pill pnl-pill-high" id="regimeLevPill" title="Target Leverage Strategy">3.5x BULL</span>
+                                <span class="pnl-pill pnl-pill-high" id="regimeLevPill" title="Target Leverage Strategy">10x BULL</span>
                             </div>
                         </div>
                         <div class="chart-wrapper mini-chart-wrapper regime-chart-wrapper">
@@ -302,7 +302,7 @@
                     <div class="card-header-right" style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <button class="btn btn-sm btn-outline" id="copyLogsBtn" title="Copy all system logs to clipboard">📋 Copy Logs</button>
                         <button class="btn btn-sm btn-outline" id="downloadLogsBtn" title="Download system logs as file">📥 Download Logs</button>
-                        <button class="btn btn-sm btn-outline" id="clearLogsBtn" title="Clear logs console display">🧹 Clear Logs</button>
+                        <button class="btn btn-sm btn-outline" id="clearLogsBtn" title="Clear and purge system logs">🧹 Clear Logs</button>
                         <span class="badge-count" id="logCount">0 / 1000</span>
                         <div class="pulse-indicator">
                             <span class="dot pulse"></span>
@@ -530,6 +530,29 @@
         </div>
     </div>
 
+    <!-- Clear System Logs Safety Confirmation Modal -->
+    <div class="modal-backdrop" id="clearLogsConfirmModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 style="color: var(--accent-danger, #f43f5e);">🧹 Clear System Logs</h3>
+                <button class="modal-close" id="closeClearLogsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
+                    Are you sure you want to clear system logs from the server and console?
+                </p>
+                <div style="background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fecdd3; line-height: 1.4;">
+                    ⚠️ <strong>Warning:</strong> Purging will truncate the log file on the server and reset the console display. A fresh log session will start immediately.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelClearLogsBtn">Cancel</button>
+                <button class="btn btn-outline" id="clearDisplayOnlyBtn" title="Clear only the current console display without deleting server log files">Display Only</button>
+                <button class="btn btn-danger" id="confirmClearLogsBtn">Confirm & Purge Logs 🧹</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Password Protection Auth Modal -->
     <div class="modal-backdrop" id="loginModal">
         <div class="modal-content glass modal-auth">
@@ -595,8 +618,8 @@
                             <span class="macro-banner-title">BTC vs SMA-150: <strong id="macroBannerSmaGap">+0.00%</strong></span>
                         </div>
                         <div class="macro-banner-right">
-                            <span class="macro-banner-pill" id="macroBannerRiskGuard">Risk Guard: INACTIVE</span>
-                            <span class="macro-banner-pill pill-lev" id="macroBannerLev">Leverage: 3.5x</span>
+                            <span class="macro-banner-pill" id="macroBannerRiskGuard">🛡️ Crash Shield: MOMENTUM ACTIVE</span>
+                            <span class="macro-banner-pill pill-lev" id="macroBannerLev">Leverage: 10.0x / 1.0x</span>
                         </div>
                     </div>
 
@@ -641,7 +664,7 @@
                                 </li>
                                 <li>
                                     <span class="step-num">5</span>
-                                    <div><strong>פירמידינג (Pyramiding Scaling):</strong> ב-STRONG_BULL_TREND, כשרווח פתוח >= 0.6 ATR ותיקון >= 1.5 ATR מעל EMA20 → הוספת כניסה 2 (+50%) וכניסה 3 (+30%).</div>
+                                    <div><strong>פירמידינג (Pyramiding Scaling):</strong> ב-STRONG_BULL_TREND, כשרווח פתוח >= 0.6 ATR ותיקון >= 1.5 ATR מעל EMA20 → הוספת כניסה 2 (+50%) וכניסה 3 (+30%). <strong>נעול לחלוטין בנסיגה מ-5d-high!</strong></div>
                                 </li>
                             </ul>
                         </div>
@@ -654,7 +677,7 @@
                             <ul class="rule-steps">
                                 <li>
                                     <span class="step-num">1</span>
-                                    <div><strong>משטר דובים ושורט 15% (Bear Short Hedge):</strong> BTC מתחת ל-SMA150 -> סגירת כל הלונגים + פתיחת <strong>15% שורט על BTC</strong> לצד 85% מזומן USDT.</div>
+                                    <div><strong>משטר דובים ושורט שיטתי (Bear Short Hedge 35% @ 2.0x):</strong> מעבר לדובים (שבירת EMA20/EMA50 או שבירת SMA150) -> סגירת כל הלונגים + פתיחת <strong>35% שורט במינוף 2.0x על BTC (חשיפה של -70%)</strong> לצד 65% מזומן USDT צובר תשואה (4% APY).</div>
                                 </li>
                                 <li>
                                     <span class="step-num">2</span>
@@ -678,15 +701,17 @@
                         <div class="rule-card full-width-rule">
                             <div class="rule-card-header">
                                 <span class="rule-icon">⚡</span>
-                                <h4>מנגנון ניהול סיכונים, מינוף מדורג (עד 3.5x) וסולם חזרה (Flash & Ladder Guard)</h4>
+                                <h4>מגן קריסות מוסדי, רקטת שכנוע 10x וסולם חזרה מדורג (Institutional Crash Shield & 10x Rocket)</h4>
                             </div>
                             <div class="rule-body-text">
-                                כשהשוק ב-Bull Regime, המערכת פועלת במינוף מורשה דינמי של עד <strong>3.5x</strong> בהתאם לתנודתיות ATR יומית: 
-                                <strong>3.5x</strong> בשוק שקט (ATR &lt; 2.8%), <strong>2.8x</strong> בתנודתיות רגילה (2.8%–4.2%), ו-<strong>1.6x</strong> בתנודתיות גבוהה (ATR &gt; 4.2%).
+                                כשהשוק ב-Bull Regime ומוכח מומנטום שוורי חי (נסיגה משיא 5 ימים עד 2%- ומחיר מעל EMA9 יומית), מנוע השכנוע פועל במינוף מורשה דינמי: 
+                                <strong>10.0x Conviction Rocket</strong> ברגיעה ומומנטום מובהק (ATR &lt; 2.2% & ADX &ge; 24), <strong>5.0x</strong> בתנודתיות רגילה (ATR &lt; 2.8%), ו-<strong>2.5x</strong> בבסיס שוורי.
                                 <br><br>
-                                <strong>הגנות בזק ונסיגה:</strong> נסיגה משיא מעל <strong>4.2%</strong> מורידה מינוף ל-<strong>2.0x</strong>. נסיגה מעל <strong>8%</strong> או ירידה מתחת ל-EMA20 יומית מפעילה <strong>Hard Risk Guard (1.0x)</strong>. ירידת בזק תוך-יומית מעל <strong>4.0%-</strong> מפעילה <strong>מפסק ביטחון מיידי (Flash Circuit Breaker)</strong>.
+                                <strong>🛡️ מגן Safe Haven מיידי בנסיגה:</strong> בכל נסיגה של מעל <strong>2.0%-</strong> משיא 5 ימים או שבירת EMA9 יומית, המערכת קוטעת מיד כל מינוף ל-<strong>1.0x ספוט</strong>, מקצה <strong>60% למזומן דולרי צובר ריבית (4% APY)</strong>, 30% ספוט סולידי ו-10% מיקרו לוויין, ונועלת הוספות פירמידינג.
                                 <br><br>
-                                <strong>סולם חזרה מדורג (Re-Entry Ladder):</strong> ביציאה ממצב חירום, המערכת חוזרת לשוק בהדרגה על פני 3 נרות (נר 1: 1.5x, נר 2: 2.2x, נר 3: שחרור מלא) למניעת מלכודות שוורים (Bull Traps). בשוק דובי (BEAR), מופעל <strong>15% Short Hedge על BTC</strong>.
+                                <strong>מפסק פלאש תוך-יומי (Flash Circuit Breaker):</strong> צניחה תוך-יומית מעל <strong>3.8%-</strong> מנר הפתיחה חותכת מיד ל-1.0x ספוט.
+                                <br><br>
+                                <strong>סולם חזרה מדורג (4-Step Re-Entry Ladder):</strong> חזרה מבוקרת ב-4 שלבים (1.0x &rarr; 2.0x &rarr; 4.0x &rarr; 10.0x) למניעת מלכודות שוורים. בשוק דובי (BEAR), מופעל <strong>35% Short Hedge במינוף 2.0x על BTC</strong> לצד 65% מזומן תשואה.
                             </div>
                         </div>
                     </div>

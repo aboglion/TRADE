@@ -111,23 +111,37 @@ class RegimeAdaptiveStrategy(IStrategy):
         self,
         asset_weights: Optional[Dict[str, float]] = None,
         sma_regime_period: int = 150,
-        bull_leverage: float = 3.5,
-        mid_leverage: float = 2.4,
-        min_leverage: float = 1.4,
-        flash_wick_limit: float = -0.04,
+        conviction_leverage: Optional[float] = None,
+        bull_leverage: float = 10.0,
+        mid_leverage: float = 5.0,
+        base_leverage: float = 2.5,
+        min_leverage: float = 1.0,
+        momentum_cutoff_pct: Optional[float] = None,
+        safe_cash_weight: float = 0.60,
+        safe_spot_weight: float = 0.30,
+        safe_micro_weight: float = 0.10,
+        flash_wick_limit: float = -0.038,
         ladder_steps: Optional[List[float]] = None,
-        bear_short_hedge_weight: float = 0.15,
+        bear_short_hedge_weight: float = 0.35,
+        short_leverage: Optional[float] = None,
         asset_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         core_ratio: float = 0.80,
     ):
         self._weights = asset_weights or DEFAULT_WEIGHTS
         self._sma_period = sma_regime_period
         self._bull_leverage = bull_leverage
+        self._conviction_leverage = conviction_leverage if conviction_leverage is not None else bull_leverage
         self._mid_leverage = mid_leverage
+        self._base_leverage = base_leverage
         self._min_leverage = min_leverage
+        self._momentum_cutoff_pct = momentum_cutoff_pct
+        self._safe_cash_weight = safe_cash_weight
+        self._safe_spot_weight = safe_spot_weight
+        self._safe_micro_weight = safe_micro_weight
         self._flash_wick_limit = flash_wick_limit
-        self._ladder_steps = ladder_steps if ladder_steps is not None else [1.0, 1.8, 2.5]
+        self._ladder_steps = ladder_steps if ladder_steps is not None else [1.0, 2.0, 4.0, 10.0]
         self._bear_short_hedge = bear_short_hedge_weight
+        self._short_leverage = short_leverage if short_leverage is not None else 1.0
         self._asset_configs = asset_configs or ASSET_CONFIGS
         self._trail_overrides = TRAIL_OVERRIDES
         self._core_ratio = max(0.01, min(1.0, core_ratio))
@@ -138,6 +152,9 @@ class RegimeAdaptiveStrategy(IStrategy):
         self._bull_peak: float = 0.0
         self._bars_since_circuit_trip: int = 999
         self._effective_leverage: float = 1.0
+        self._in_momentum: bool = False
+        self._safe_haven_active: bool = False
+        self._dist_from_5d_high_pct: float = 0.0
 
     def export_state(self) -> Dict[str, Any]:
         """Export state for persistence in BotState.strategy_state."""
@@ -146,6 +163,9 @@ class RegimeAdaptiveStrategy(IStrategy):
             "bull_peak": self._bull_peak,
             "bars_since_circuit_trip": self._bars_since_circuit_trip,
             "effective_leverage": self._effective_leverage,
+            "in_momentum": self._in_momentum,
+            "safe_haven_active": self._safe_haven_active,
+            "dist_from_5d_high_pct": self._dist_from_5d_high_pct,
         }
 
     def import_state(self, state_dict: Dict[str, Any]) -> None:
@@ -160,6 +180,9 @@ class RegimeAdaptiveStrategy(IStrategy):
         self._bull_peak = state_dict.get("bull_peak", 0.0)
         self._bars_since_circuit_trip = state_dict.get("bars_since_circuit_trip", 999)
         self._effective_leverage = state_dict.get("effective_leverage", 1.0)
+        self._in_momentum = state_dict.get("in_momentum", False)
+        self._safe_haven_active = state_dict.get("safe_haven_active", False)
+        self._dist_from_5d_high_pct = state_dict.get("dist_from_5d_high_pct", 0.0)
 
     def compute_signals(
         self,
@@ -196,18 +219,30 @@ class RegimeAdaptiveStrategy(IStrategy):
             timestamp_ms=now_ms,
             metadata={
                 "sma_period": self._sma_period,
+                "conviction_leverage": self._conviction_leverage,
                 "bull_leverage": self._bull_leverage,
                 "mid_leverage": self._mid_leverage,
+                "base_leverage": self._base_leverage,
                 "min_leverage": self._min_leverage,
                 "effective_leverage": self._effective_leverage,
+                "in_momentum": self._in_momentum,
+                "safe_haven_active": self._safe_haven_active,
+                "dist_from_5d_high_pct": self._dist_from_5d_high_pct,
+                "momentum_cutoff_pct": self._momentum_cutoff_pct,
+                "safe_cash_weight": self._safe_cash_weight,
+                "safe_spot_weight": self._safe_spot_weight,
                 "bars_since_circuit_trip": self._bars_since_circuit_trip,
                 "active_positions": {k: v for k, v in self._positions.items() if v.get("active")},
             },
         )
 
         logger.info(
-            "Strategy decision: regime=%s, targets=%s",
+            "Strategy decision: regime=%s | Lev: %.1fx | Momentum: %s | SafeHaven: %s (5d_PB: %.2f%%) | targets=%s",
             regime.value,
+            self._effective_leverage,
+            self._in_momentum,
+            self._safe_haven_active,
+            self._dist_from_5d_high_pct,
             {k: f"{v:.2%}" for k, v in target_weights.items()},
         )
 
@@ -270,18 +305,77 @@ class RegimeAdaptiveStrategy(IStrategy):
         target_weights: Dict[str, float] = {}
         signals: List[StrategySignal] = []
 
-        if regime == Regime.BEAR:
-            # Bear mode: Short hedge + Cash protection
-            logger.info("Bear regime active: resetting all long positions to inactive")
+        # 1. Indicators for Macro / Tactical Regime & Crash Shield
+        btc_key = self._find_btc_key(candles_by_asset)
+        df_btc = candles_to_dataframe(candles_by_asset[btc_key])
+        btc_daily = df_btc["Close"].resample("D").last().dropna()
+        btc_high = df_btc["High"].resample("D").max().dropna()
+        btc_low = df_btc["Low"].resample("D").min().dropna()
+        btc_open = df_btc["Open"].resample("D").first().dropna()
+
+        ema9_daily = btc_daily.ewm(span=9, adjust=False).mean()
+        ema20_daily = btc_daily.ewm(span=20, adjust=False).mean()
+        ema50_daily = btc_daily.ewm(span=50, adjust=False).mean()
+        sma150_daily = btc_daily.rolling(self._sma_period).mean()
+
+        latest_btc = btc_daily.iloc[-1]
+        latest_ema9 = ema9_daily.dropna().iloc[-1] if not ema9_daily.dropna().empty else latest_btc
+        latest_ema20 = ema20_daily.dropna().iloc[-1] if not ema20_daily.dropna().empty else latest_btc
+        latest_ema50 = ema50_daily.dropna().iloc[-1] if not ema50_daily.dropna().empty else latest_btc
+        latest_sma150 = sma150_daily.dropna().iloc[-1] if not sma150_daily.dropna().empty else latest_btc
+
+        # 5-day rolling high of BTC
+        btc_5d_high = btc_high.iloc[-5:].max() if len(btc_high) >= 5 else latest_btc
+        btc_pb_from_5d = (latest_btc - btc_5d_high) / btc_5d_high if btc_5d_high > 0 else 0.0
+        self._dist_from_5d_high_pct = btc_pb_from_5d * 100.0
+
+        # Daily ATR% for volatility-scaled leverage
+        tr1 = btc_high - btc_low
+        tr2 = (btc_high - btc_daily.shift(1)).abs()
+        tr3 = (btc_low - btc_daily.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr14 = tr.rolling(window=14).mean()
+        atr_pct = atr14 / btc_daily
+        latest_atr_pct = atr_pct.dropna().iloc[-1] if not atr_pct.dropna().empty else 0.035
+
+        # Intraday drop from open (flash dip)
+        intraday_max_dip = (btc_low - btc_open) / btc_open
+        latest_dip = intraday_max_dip.dropna().iloc[-1] if not intraday_max_dip.dropna().empty else 0.0
+
+        # Daily ADX on BTC for trend strength conviction
+        delta = btc_daily.diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
+        high_diff = btc_high.diff()
+        low_diff = -btc_low.diff()
+        pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
+        neg_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0)
+        atr_safe = atr14.replace(0, np.nan)
+        pos_di = (100 * pd.Series(pos_dm, index=btc_daily.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+        neg_di = (100 * pd.Series(neg_dm, index=btc_daily.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+        denom = (pos_di + neg_di).replace(0, np.nan)
+        dx = (100 * (pos_di - neg_di).abs() / denom).fillna(0.0)
+        adx_daily = dx.ewm(alpha=1/14, min_periods=14).mean()
+        latest_adx = adx_daily.dropna().iloc[-1] if not adx_daily.dropna().empty else 20.0
+
+        # Tactical classification
+        is_bear_trend = (latest_btc < latest_ema20) and (latest_ema20 < latest_ema50 or latest_btc < latest_sma150 or regime == Regime.BEAR)
+        is_pullback = (latest_btc < latest_ema20) and not is_bear_trend
+        is_bullish = (latest_btc >= latest_ema20) and not is_bear_trend
+
+        # ── 1. BEAR REGIME (Systematic Short Hedge) ───────────
+        if is_bear_trend:
+            logger.info("🐻 BEAR REGIME ACTIVE: Fast Breakdown (BTC < EMA20 & EMA20 < EMA50). 35%% @ 2.0x Short BTC hedge active.")
             self._bull_peak = 0.0
             self._bars_since_circuit_trip = 999
             self._effective_leverage = 0.0
+            self._in_momentum = False
+            self._safe_haven_active = False
             for base in list(self._positions.keys()):
                 self._positions[base]["active"] = False
 
-            # Assign short hedge to BTC (or default btc_key)
-            btc_key = self._find_btc_key(candles_by_asset)
-            target_short = -self._bear_short_hedge / max(0.01, self._core_ratio)
+            # Assign 35% margin @ 2.0x short = 70% notional short hedge on BTC
+            target_short = -(self._bear_short_hedge * self._short_leverage) / max(0.01, self._core_ratio)
             
             for symbol in candles_by_asset:
                 if symbol == btc_key and self._bear_short_hedge > 0:
@@ -291,7 +385,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                         action=PositionAction.OPEN,
                         asset_regime=AssetRegime.BEAR,
                         target_weight=target_short,
-                        reason=f"Bear regime — {self._bear_short_hedge * 100:.0f}% short hedge on BTC",
+                        reason=f"Bear regime — {self._bear_short_hedge*100:.0f}% @ {self._short_leverage:.1f}x short hedge on BTC",
                     ))
                 else:
                     target_weights[symbol] = 0.0
@@ -303,94 +397,104 @@ class RegimeAdaptiveStrategy(IStrategy):
                         reason="Bear regime — 100% USDT protection",
                     ))
             
-            # Residual USDT weight
-            total_short = sum(abs(w) for w in target_weights.values() if w < 0)
-            target_weights["USDT"] = 1.0  # USDT margin handles collateral
-            
+            target_weights["USDT"] = 1.0
             return target_weights, signals
 
-        # ── BULL REGIME ───────────────────────────────────────
-        # Indicators for Bullish Risk Guard & Leverage Sizing (engine.py lines 790-850)
-        btc_key = self._find_btc_key(candles_by_asset)
-        df_btc = candles_to_dataframe(candles_by_asset[btc_key])
-        btc_daily = df_btc["Close"].resample("D").last().dropna()
-        btc_high = df_btc["High"].resample("D").max().dropna()
-        btc_low = df_btc["Low"].resample("D").min().dropna()
-        btc_open = df_btc["Open"].resample("D").first().dropna()
-
-        ema20_daily = btc_daily.ewm(span=20, adjust=False).mean()
-
-        # Daily ATR% for volatility-scaled leverage
-        tr1 = btc_high - btc_low
-        tr2 = (btc_high - btc_daily.shift(1)).abs()
-        tr3 = (btc_low - btc_daily.shift(1)).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr14 = tr.rolling(window=14).mean()
-        atr_pct = atr14 / btc_daily
-
-        # Intraday drop from open (flash dip)
-        intraday_max_dip = (btc_low - btc_open) / btc_open
-
-        latest_btc = btc_daily.iloc[-1]
-        latest_ema20 = ema20_daily.dropna().iloc[-1] if not ema20_daily.dropna().empty else latest_btc
-        latest_atr_pct = atr_pct.dropna().iloc[-1] if not atr_pct.dropna().empty else 0.035
-        latest_dip = intraday_max_dip.dropna().iloc[-1] if not intraday_max_dip.dropna().empty else 0.0
-        
+        # ── 2. BULL / PULLBACK REGIME ────────────────────────
         # Update persistent bull peak
-        if regime == Regime.BULL and latest_btc > self._bull_peak:
+        if latest_btc > self._bull_peak:
             self._bull_peak = latest_btc
             
         peak_btc = self._bull_peak if self._bull_peak > 0 else latest_btc
-        btc_pullback = (latest_btc - peak_btc) / peak_btc if peak_btc > 0 else 0.0
-        under_ema = latest_btc < latest_ema20
 
-        # 1. Hard Risk Guard (Pullback > 8% or price broke EMA20)
-        if btc_pullback < -0.08 or under_ema:
-            selected_lev = 1.0
-            lev_reason = f"Hard Risk Guard (pullback={btc_pullback*100:.1f}%, under_ema={under_ema})"
-        # 2. Pre-emptive Stepped Pullback Guard (Pullback between 4% and 8%)
-        elif btc_pullback < -0.04:
-            selected_lev = self._min_leverage
-            lev_reason = f"Stepped Pullback Guard (pullback={btc_pullback*100:.1f}%)"
-        # 3. Smart ATR Volatility Tiers
-        elif latest_atr_pct < 0.024:
-            selected_lev = self._bull_leverage
-            lev_reason = f"Low Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
-        elif latest_atr_pct < 0.036:
-            selected_lev = self._mid_leverage
-            lev_reason = f"Mid Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
+        # Pullback from persistent ATH
+        pullback_from_peak = (latest_btc - peak_btc) / peak_btc if peak_btc > 0 else 0.0
+
+        # MOMENTUM VALIDATION GATE (Institutional Crash Shield)
+        if self._momentum_cutoff_pct is not None:
+            in_momentum = bool(is_bullish and (btc_pb_from_5d >= self._momentum_cutoff_pct) and (latest_btc >= latest_ema9))
+            self._in_momentum = in_momentum
+
+            if not in_momentum:
+                # 🛡️ SAFE HAVEN CRASH SHIELD ACTIVE!
+                self._safe_haven_active = True
+                selected_lev = 1.0
+                lev_reason = f"🛡️ Crash Shield Safe Haven (5d_pb={btc_pb_from_5d*100:.2f}%, BTC=${latest_btc:,.0f} vs EMA9=${latest_ema9:,.0f})"
+                logger.info(
+                    "🛡️ CRASH SHIELD ACTIVE: BTC pullback %.2f%% (cutoff=%.2f%%) or Close < EMA9 ($%.2f < $%.2f). De-leveraging to Safe Haven (60%% Cash, 30%% Spot, 10%% Micro). Capital 100%% protected!",
+                    btc_pb_from_5d * 100, self._momentum_cutoff_pct * 100, latest_btc, latest_ema9,
+                )
+                total_crypto_weight = self._safe_spot_weight
+            else:
+                # 🚀 FULL CONVICTION LEVERAGE ENGINE ACTIVE!
+                self._safe_haven_active = False
+                if latest_atr_pct < 0.022 and latest_adx >= 24.0:
+                    selected_lev = self._conviction_leverage # 10.0x Conviction Rocket!
+                    lev_reason = f"🚀 Conviction Rocket 10x (ATR%={latest_atr_pct*100:.2f}%, ADX={latest_adx:.1f})"
+                elif latest_atr_pct < 0.028:
+                    selected_lev = self._mid_leverage # 5.0x
+                    lev_reason = f"Mid Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
+                else:
+                    selected_lev = self._base_leverage # 2.5x
+                    lev_reason = f"Base Bull Tier (ATR%={latest_atr_pct*100:.2f}%)"
+                total_crypto_weight = 0.70 * selected_lev + 0.30
         else:
-            selected_lev = self._min_leverage
-            lev_reason = f"High Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
+            # Legacy stepped guard if momentum cutoff not configured
+            hard_risk = (pullback_from_peak < -0.08 or latest_btc < latest_ema20)
+            stepped_pullback = (-0.08 <= pullback_from_peak < -0.04)
+            if hard_risk:
+                self._safe_haven_active = True
+                selected_lev = 1.0
+                lev_reason = f"Hard Risk Guard (1.0x, pb={pullback_from_peak*100:.1f}%)"
+                total_crypto_weight = self._safe_spot_weight
+            elif stepped_pullback:
+                self._safe_haven_active = False
+                selected_lev = self._min_leverage
+                lev_reason = f"Stepped Pullback Guard ({selected_lev:.1f}x, pb={pullback_from_peak*100:.1f}%)"
+                total_crypto_weight = 0.70 * selected_lev + 0.30
+            else:
+                self._safe_haven_active = False
+                if latest_atr_pct < 0.024:
+                    selected_lev = self._bull_leverage
+                    lev_reason = f"Low Vol Tier ({selected_lev:.1f}x)"
+                elif latest_atr_pct < 0.036:
+                    selected_lev = self._mid_leverage
+                    lev_reason = f"Mid Vol Tier ({selected_lev:.1f}x)"
+                else:
+                    selected_lev = self._min_leverage
+                    lev_reason = f"High Vol Tier ({selected_lev:.1f}x)"
+                total_crypto_weight = 0.70 * selected_lev + 0.30
+            self._in_momentum = (selected_lev > 1.0)
 
-        # 4. Controlled Re-Entry Ladder after circuit trip
-        if self._ladder_steps and len(self._ladder_steps) > 0:
+        # Re-entry ladder capping after circuit trip
+        if self._ladder_steps and len(self._ladder_steps) > 0 and not self._safe_haven_active:
             if 1 <= self._bars_since_circuit_trip <= len(self._ladder_steps):
                 ladder_cap = self._ladder_steps[self._bars_since_circuit_trip - 1]
                 if selected_lev > ladder_cap:
                     selected_lev = ladder_cap
                     lev_reason += f" | Re-Entry Ladder step {self._bars_since_circuit_trip} (cap={ladder_cap:.1f}x)"
 
-        # 5. Intraday Flash Circuit Breaker
-        if selected_lev > 1.0 and latest_dip < self._flash_wick_limit:
-            self._bars_since_circuit_trip = 1
-            selected_lev = 1.0
-            logger.warning(
-                "FLASH CIRCUIT BREAKER TRIGGERED: intraday dip=%.2f%% < limit=%.2f%% → Cut to 1.0x",
-                latest_dip * 100, self._flash_wick_limit * 100,
-            )
-            lev_reason = f"Flash Circuit Breaker (intraday dip={latest_dip*100:.1f}%)"
-        else:
-            self._bars_since_circuit_trip += 1
+        # Flash circuit breaker override
+        if not self._safe_haven_active:
+            if selected_lev > 1.0 and latest_dip < self._flash_wick_limit:
+                self._bars_since_circuit_trip = 1
+                selected_lev = 1.0
+                logger.warning(
+                    "⚡ FLASH CIRCUIT BREAKER TRIGGERED: intraday dip=%.2f%% < limit=%.2f%% → Cut to 1.0x Spot",
+                    latest_dip * 100, self._flash_wick_limit * 100,
+                )
+                lev_reason = f"Flash Circuit Breaker (dip={latest_dip*100:.1f}%)"
+            else:
+                self._bars_since_circuit_trip += 1
+
+            total_crypto_weight = 0.70 * selected_lev + 0.30
 
         effective_leverage = selected_lev
         self._effective_leverage = effective_leverage
         logger.info(
-            "Regime leverage evaluation: effective=%.1fx (%s)",
-            effective_leverage, lev_reason,
+            "Tactical leverage evaluation: effective=%.1fx | safe_haven=%s | in_momentum=%s (%s)",
+            effective_leverage, self._safe_haven_active, self._in_momentum, lev_reason,
         )
-
-        total_crypto_weight = 0.70 * effective_leverage + 0.30
 
         assigned_crypto_weight = 0.0
 
@@ -457,7 +561,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                 pyramid_profit_r = cfg.get("pyramid_profit_r", 0.6)
                 pyramid_pullback_atr = cfg.get("pyramid_pullback_atr", 1.5)
 
-                if len(entries) < max_adds + 1 and entry_mode == "STRONG_BULL_TREND":
+                if not self._safe_haven_active and len(entries) < max_adds + 1 and entry_mode == "STRONG_BULL_TREND":
                     if open_r >= pyramid_profit_r:
                         last_px = entries[-1]["px"]
                         pullback = (last_px - c_low) / max(c_atr, 1e-6)
@@ -473,10 +577,11 @@ class RegimeAdaptiveStrategy(IStrategy):
                 add1_frac = cfg.get("add1_frac", 0.50)
                 add2_frac = cfg.get("add2_frac", 0.30)
                 pyramid_mult = 1.0
-                if len(entries) == 2:
-                    pyramid_mult = 1.0 + add1_frac
-                elif len(entries) >= 3:
-                    pyramid_mult = 1.0 + add1_frac + add2_frac
+                if not self._safe_haven_active:
+                    if len(entries) == 2:
+                        pyramid_mult = 1.0 + add1_frac
+                    elif len(entries) >= 3:
+                        pyramid_mult = 1.0 + add1_frac + add2_frac
 
                 # Compute dynamic trailing stop
                 tb = trail_override[0] if entry_mode == "STRONG_BULL_TREND" else trail_override[1]

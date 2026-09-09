@@ -191,7 +191,7 @@ def main() -> None:
     )
 
     logger.info("=" * 60)
-    logger.info("Dynamic Regime-Adaptive 3.5x Trading Bot (Flash-Guarded & Ladder)")
+    logger.info("Dynamic Regime-Adaptive 10x Trading Bot (Institutional Crash Shield & Conviction Rocket)")
     logger.info("Mode: %s", config.run_mode.name)
     logger.info("=" * 60)
 
@@ -268,12 +268,20 @@ def main() -> None:
     macro_strategy = RegimeAdaptiveStrategy(
         asset_weights=asset_weights,
         sma_regime_period=config.strategy.sma_regime_period,
+        conviction_leverage=getattr(config.strategy, "conviction_leverage", 10.0),
         bull_leverage=config.strategy.bull_leverage,
         mid_leverage=config.strategy.mid_leverage,
+        base_leverage=getattr(config.strategy, "base_leverage", 2.5),
         min_leverage=config.strategy.min_leverage,
+        momentum_cutoff_pct=getattr(config.strategy, "momentum_cutoff_pct", -0.02),
+        safe_cash_weight=getattr(config.strategy, "safe_cash_weight", 0.60),
+        safe_spot_weight=getattr(config.strategy, "safe_spot_weight", 0.30),
+        safe_micro_weight=getattr(config.strategy, "safe_micro_weight", 0.10),
         flash_wick_limit=config.strategy.flash_wick_limit,
         ladder_steps=config.strategy.ladder_steps,
         bear_short_hedge_weight=config.strategy.bear_short_hedge_weight,
+        short_leverage=getattr(config.strategy, "short_leverage", 2.0),
+        core_ratio=config.strategy.core_ratio,
     )
     
     micro_strategy = MicroSatelliteStrategy(

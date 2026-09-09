@@ -13,6 +13,7 @@ import logging
 import os
 import socket
 import time
+from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
@@ -317,6 +318,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_update_dry_run_balances()
         elif clean_path == "/api/errors/clear":
             self._handle_clear_errors()
+        elif clean_path in ("/api/logs/clear", "/api/clear_logs"):
+            self._handle_clear_logs()
         elif clean_path == "/api/reset_stats":
             self._handle_reset_stats()
         elif clean_path == "/api/updater/toggle":
@@ -574,8 +577,42 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         }
         self._send_json(data)
 
+    def _get_active_log_path(self) -> Path:
+        candidate_paths = []
+        if self.log_file_path:
+            candidate_paths.append(Path(self.log_file_path))
+        if self.config and getattr(self.config, "logging", None) and getattr(self.config.logging, "file", None):
+            candidate_paths.append(Path(self.config.logging.file))
+
+        project_dir = Path(__file__).resolve().parent.parent.parent.parent
+        candidate_paths.extend([
+            Path("logs/bot.log"),
+            project_dir / "RUN" / "logs" / "bot.log",
+            project_dir / "logs" / "bot.log",
+        ])
+
+        existing = []
+        seen = set()
+        for cand in candidate_paths:
+            try:
+                res = cand.resolve()
+                if res in seen:
+                    continue
+                seen.add(res)
+                if res.is_file():
+                    existing.append(res)
+            except Exception:
+                pass
+
+        if existing:
+            # Pick the log file that was most recently modified
+            existing.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return existing[0]
+
+        return candidate_paths[0].resolve() if candidate_paths else Path("logs/bot.log").resolve()
+
     def _handle_logs(self) -> None:
-        log_path = self.log_file_path or (self.config.logging.file if self.config else "logs/bot.log")
+        log_path = self._get_active_log_path()
         lines = []
         ignored_patterns = (
             "Loaded state:",
@@ -602,7 +639,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self._send_json({"logs": lines})
 
     def _handle_download_logs(self) -> None:
-        log_path = self.log_file_path or (self.config.logging.file if self.config else "logs/bot.log")
+        log_path = self._get_active_log_path()
         if not os.path.exists(log_path):
             self._send_json({"error": "Log file not found"}, status=404)
             return
@@ -632,6 +669,57 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(content)
         except Exception as e:
             self._send_json({"error": f"Failed to download logs: {e}"}, status=500)
+
+    def _handle_clear_logs(self) -> None:
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z")
+            cleared_line = f"{timestamp} | INFO     | bot.web.server | System logs cleared by user\n"
+
+            candidate_paths = []
+            if self.log_file_path:
+                candidate_paths.append(Path(self.log_file_path))
+            if self.config and getattr(self.config, "logging", None) and getattr(self.config.logging, "file", None):
+                candidate_paths.append(Path(self.config.logging.file))
+
+            project_dir = Path(__file__).resolve().parent.parent.parent.parent
+            candidate_paths.extend([
+                Path("logs/bot.log"),
+                project_dir / "RUN" / "logs" / "bot.log",
+                project_dir / "logs" / "bot.log",
+            ])
+
+            cleared_any = False
+            seen = set()
+            for cand in candidate_paths:
+                try:
+                    res = cand.resolve()
+                    if res in seen:
+                        continue
+                    seen.add(res)
+                    if res.is_file():
+                        with open(res, "w", encoding="utf-8") as f:
+                            f.write(cleared_line)
+                        cleared_any = True
+                except Exception as ex:
+                    logger.warning("Could not truncate candidate log file %s: %s", cand, ex)
+
+            if not cleared_any:
+                active_path = self._get_active_log_path()
+                active_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(active_path, "w", encoding="utf-8") as f:
+                    f.write(cleared_line)
+
+            for h in list(logging.getLogger().handlers) + list(logging.getLogger("bot").handlers):
+                try:
+                    h.flush()
+                except Exception:
+                    pass
+
+            logger.info("System logs cleared by user via API")
+            self._send_json({"success": True, "message": "System logs cleared successfully"})
+        except Exception as e:
+            logger.error("Failed to clear logs via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
 
     @staticmethod
     def _fetch_ohlcv_safe(exchange: Any, symbol: str, timeframe: str = "4h", limit: int = 120) -> list:
@@ -690,8 +778,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             assets_data = {}
             btc_daily_close = 0.0
             btc_sma150 = 0.0
+            btc_ema50_daily = 0.0
             btc_ema20_daily = 0.0
+            btc_ema9_daily = 0.0
+            btc_5d_high = 0.0
+            btc_pb_from_5d = 0.0
             btc_atr_pct = 0.035
+            btc_adx_daily = 20.0
             btc_intraday_dip_pct = 0.0
 
             import ccxt
@@ -704,7 +797,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 except Exception:
                     exchange = None
 
-            # 1. Fetch BTC daily first to establish Macro Regime parameters
+            # 1. Fetch BTC daily first to establish Macro Regime & Crash Shield parameters
             try:
                 btc_daily_ohlcv = self._fetch_ohlcv_safe(exchange, "BTC/USDT", timeframe="1d", limit=200)
                 if btc_daily_ohlcv:
@@ -712,8 +805,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     btc_daily_close = float(df_btc_daily["Close"].iloc[-1])
                     if len(df_btc_daily) >= 150:
                         btc_sma150 = float(df_btc_daily["Close"].rolling(150).mean().iloc[-1])
+                    if len(df_btc_daily) >= 50:
+                        btc_ema50_daily = float(df_btc_daily["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
                     if len(df_btc_daily) >= 20:
                         btc_ema20_daily = float(df_btc_daily["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
+                    if len(df_btc_daily) >= 9:
+                        btc_ema9_daily = float(df_btc_daily["Close"].ewm(span=9, adjust=False).mean().iloc[-1])
+                    if len(df_btc_daily) >= 5:
+                        btc_5d_high = float(df_btc_daily["High"].rolling(5).max().iloc[-1])
+                        if btc_5d_high > 0:
+                            btc_pb_from_5d = round(((btc_daily_close - btc_5d_high) / btc_5d_high) * 100.0, 2)
                     if len(df_btc_daily) >= 14:
                         tr1 = df_btc_daily["High"] - df_btc_daily["Low"]
                         tr2 = (df_btc_daily["High"] - df_btc_daily["Close"].shift(1)).abs()
@@ -722,6 +823,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         atr14 = tr.rolling(14).mean()
                         btc_atr_pct = float((atr14 / df_btc_daily["Close"]).iloc[-1])
 
+                        # ADX daily
+                        delta = df_btc_daily["Close"].diff()
+                        high_diff = df_btc_daily["High"].diff()
+                        low_diff = -df_btc_daily["Low"].diff()
+                        pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
+                        neg_dm = np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0.0)
+                        atr_safe = atr14.replace(0, np.nan)
+                        pos_di = (100 * pd.Series(pos_dm, index=df_btc_daily.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+                        neg_di = (100 * pd.Series(neg_dm, index=df_btc_daily.index).ewm(alpha=1/14, min_periods=14).mean() / atr_safe).fillna(0.0)
+                        denom = (pos_di + neg_di).replace(0, np.nan)
+                        dx = (100 * (pos_di - neg_di).abs() / denom).fillna(0.0)
+                        adx_daily = dx.ewm(alpha=1/14, min_periods=14).mean()
+                        if not adx_daily.dropna().empty:
+                            btc_adx_daily = float(adx_daily.dropna().iloc[-1])
+
                     c_open = float(df_btc_daily["Open"].iloc[-1])
                     c_low = float(df_btc_daily["Low"].iloc[-1])
                     if c_open > 0:
@@ -729,63 +845,74 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             except Exception as ex_btc:
                 logger.warning("Failed fetching BTC daily candles for macro regime: %s", ex_btc)
 
-            macro_regime = "BULL" if (btc_daily_close > btc_sma150 and btc_sma150 > 0) else "BEAR"
+            # Regime Determination: matches engine.py and regime_adaptive_strategy.py
+            is_bear_trend = (btc_daily_close < btc_ema20_daily) and (
+                (btc_ema20_daily < btc_ema50_daily) or (btc_daily_close < btc_sma150 and btc_sma150 > 0)
+            )
+            macro_regime = "BEAR" if is_bear_trend or (btc_daily_close < btc_sma150 and btc_sma150 > 0) else "BULL"
+
             peak = max(bull_peak, btc_daily_close)
             pullback_pct = round(((btc_daily_close - peak) / peak) * 100.0, 2) if peak > 0 else 0.0
             under_ema = (btc_daily_close < btc_ema20_daily) if btc_ema20_daily > 0 else False
 
-            # Dynamic Flash-Guarded 3.5x Model & Re-Entry Ladder Evaluation
-            flash_wick_limit_pct = -4.0
+            # Momentum Validation Gate (Institutional Crash Shield)
+            strat_cfg = getattr(self.config, "strategy", None) if self.config else None
+            cutoff_pct = getattr(strat_cfg, "momentum_cutoff_pct", -0.02) * 100.0 if strat_cfg else -2.0
+            flash_wick_limit_pct = getattr(strat_cfg, "flash_wick_limit", -0.038) * 100.0 if strat_cfg else -3.8
             flash_triggered = (btc_intraday_dip_pct < flash_wick_limit_pct)
+
+            in_momentum = (macro_regime == "BULL") and (btc_pb_from_5d >= cutoff_pct) and (btc_daily_close >= btc_ema9_daily)
+            safe_haven_active = (macro_regime == "BULL") and not in_momentum
+
+            conviction_lev = getattr(strat_cfg, "conviction_leverage", 10.0) if strat_cfg else 10.0
+            mid_lev = getattr(strat_cfg, "mid_leverage", 5.0) if strat_cfg else 5.0
+            base_lev = getattr(strat_cfg, "base_leverage", 2.5) if strat_cfg else 2.5
+            ladder_steps = getattr(strat_cfg, "ladder_steps", [1.0, 2.0, 4.0, 10.0]) if strat_cfg else [1.0, 2.0, 4.0, 10.0]
+            if not ladder_steps:
+                ladder_steps = [1.0, 2.0, 4.0, 10.0]
 
             if macro_regime == "BEAR":
                 leverage = 0.0
-                active_tier = "BEAR HEDGE (15% Short BTC + 85% USDT)"
-                stepped_pullback_active = False
-                hard_risk_active = False
+                active_tier = "BEAR SHORT HEDGE (35% @ 2.0x Short BTC + 65% Cash Yield)"
                 ladder_step = "N/A"
                 ladder_cap = 0.0
+                total_crypto_exposure = -70.0
+            elif safe_haven_active:
+                leverage = 1.0
+                active_tier = f"🛡️ Crash Shield Safe Haven (1.0x Spot | 60% Cash @ 4% APY, 5d_pb={btc_pb_from_5d:+.1f}%)"
+                ladder_step = "Safe Haven (Protected)"
+                ladder_cap = 1.0
+                total_crypto_exposure = 30.0
             else:
-                hard_risk_active = (pullback_pct < -8.0 or under_ema)
-                stepped_pullback_active = (-8.0 <= pullback_pct < -4.0)
-
-                # Base leverage selection
-                if hard_risk_active:
-                    selected_lev = 1.0
-                    active_tier = f"Hard Risk Guard (1.0x, pullback={pullback_pct:.1f}%, under_ema={under_ema})"
-                elif stepped_pullback_active:
-                    selected_lev = 1.4
-                    active_tier = f"Stepped Pullback Guard (1.4x, pullback={pullback_pct:.1f}%)"
-                elif btc_atr_pct < 0.024:
-                    selected_lev = 3.5
-                    active_tier = f"Low Volatility Tier (3.5x, ATR={btc_atr_pct*100:.2f}%)"
-                elif btc_atr_pct < 0.036:
-                    selected_lev = 2.4
-                    active_tier = f"Mid Volatility Tier (2.4x, ATR={btc_atr_pct*100:.2f}%)"
+                # Active in Momentum: Conviction Rocket & Volatility Tiers
+                if btc_atr_pct < 0.022 and btc_adx_daily >= 24.0:
+                    selected_lev = conviction_lev
+                    active_tier = f"🚀 Conviction Rocket 10x (ATR={btc_atr_pct*100:.2f}%, ADX={btc_adx_daily:.1f})"
+                elif btc_atr_pct < 0.028:
+                    selected_lev = mid_lev
+                    active_tier = f"⚡ Mid Volatility Tier ({mid_lev:.1f}x, ATR={btc_atr_pct*100:.2f}%)"
                 else:
-                    selected_lev = 1.4
-                    active_tier = f"High Volatility Tier (1.4x, ATR={btc_atr_pct*100:.2f}%)"
+                    selected_lev = base_lev
+                    active_tier = f"Base Bull Tier ({base_lev:.1f}x, ATR={btc_atr_pct*100:.2f}%)"
 
                 # Re-entry ladder capping
-                ladder_steps = [1.0, 1.8, 2.5]
                 if 1 <= bars_since_circuit_trip <= len(ladder_steps):
-                    ladder_step = f"Step {bars_since_circuit_trip}/3"
+                    ladder_step = f"Step {bars_since_circuit_trip}/{len(ladder_steps)}"
                     ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
                     if selected_lev > ladder_cap:
                         selected_lev = ladder_cap
                         active_tier += f" | Re-Entry Ladder ({ladder_cap:.1f}x Cap)"
                 else:
-                    ladder_step = "Completed (Full 3.5x Unlocked)"
-                    ladder_cap = 3.5
+                    ladder_step = f"Completed (Full {conviction_lev:.0f}x Unlocked)"
+                    ladder_cap = conviction_lev
 
                 # Flash circuit breaker override
                 if selected_lev > 1.0 and flash_triggered:
                     selected_lev = 1.0
-                    active_tier = f"Flash Breaker Triggered (1.0x Cut, dip={btc_intraday_dip_pct:.1f}%)"
+                    active_tier = f"⚡ Flash Breaker Triggered (1.0x Cut, dip={btc_intraday_dip_pct:.1f}%)"
 
                 leverage = selected_lev
-
-            total_crypto_exposure = round((0.70 * leverage + 0.30) * 100.0, 0) if macro_regime == "BULL" else 0.0
+                total_crypto_exposure = round((0.70 * leverage + 0.30) * 100.0, 0)
 
             # 2. Iterate each symbol and compute decision tree & indicator meters
             for pair in symbols:
@@ -857,16 +984,24 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "met": macro_regime == "BULL",
                         },
                         {
+                            "id": "node_crash_shield_momentum",
+                            "title": "2. מגן מפולת ושער מומנטום (Crash Shield Gate)",
+                            "subtitle": "נסיגה עד 2%- משיא 5 ימים ומחיר מעל EMA9 יומית לפתיחת מינוף מוגבר",
+                            "criteria": f"5d PB >= {cutoff_pct:.1f}% & Close >= EMA9 (${btc_ema9_daily:,.0f})",
+                            "actual": f"5d PB: {btc_pb_from_5d:+.2f}% | EMA9: ${btc_ema9_daily:,.0f} ({'🚀 In Momentum' if in_momentum else '🛡️ Safe Haven'})",
+                            "met": in_momentum,
+                        },
+                        {
                             "id": "node_leverage_tier",
-                            "title": "2. מדרגת מינוף שוורית (Dynamic Leverage Tier)",
-                            "subtitle": "קביעת מינוף דינמי (3.5x / 2.4x / 1.4x) לפי ATR% וסולם התאוששות",
+                            "title": "3. מדרג מינוף שוורית (Dynamic Conviction Tier)",
+                            "subtitle": "מינוף דינמי (10.0x / 5.0x / 2.5x) לפי ATR% ו-ADX וסולם התאוששות",
                             "criteria": f"Dynamic Leverage: {leverage:.1f}x (חשיפה {total_crypto_exposure:.0f}%)",
                             "actual": active_tier,
-                            "met": leverage > 1.0,
+                            "met": leverage >= 2.5,
                         },
                         {
                             "id": "node_ema_alignment",
-                            "title": "3. מבנה ממוצעים (EMA Trend)",
+                            "title": "4. מבנה ממוצעים (EMA Trend)",
                             "subtitle": "מגמת עלייה בנכס (Strong Bull / Trend)",
                             "criteria": "Regime in [STRONG_BULL, TREND]",
                             "actual": asset_regime,
@@ -874,7 +1009,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_donchian_breakout",
-                            "title": "4. פריצת דונצ'יאן 30 / כניסה חוזרת EMA20",
+                            "title": "5. פריצת דונצ'יאן 30 / כניסה חוזרת EMA20",
                             "subtitle": "סגירת 4H מעל שיא 30 נרות או תיקון ממוצע",
                             "criteria": f"Close >= Donchian30 (${donchian30:,.2f}) OR EMA20 Re-entry",
                             "actual": f"${c_close:,.2f} ({gap_pct:+.2f}%)",
@@ -882,7 +1017,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_adx_filter",
-                            "title": "5. עוצמת מגמה (ADX Filter)",
+                            "title": "6. עוצמת מגמה (ADX Filter)",
                             "subtitle": "מדד ADX מעל סף המינימום לעוצמה",
                             "criteria": f"ADX >= {min_adx}",
                             "actual": f"{c_adx:.1f}",
@@ -890,38 +1025,38 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         },
                         {
                             "id": "node_pyramiding",
-                            "title": "6. פירמידינג והגדלת פוזיציה (Pyramiding Additions)",
-                            "subtitle": "הוספת 50%+ / 30%+ בטרנד חזק מעל EMA20",
-                            "criteria": "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull)",
-                            "actual": "Active Position Pyramiding Ready" if is_active else "Initial Entry Mode",
-                            "met": True if (not is_active or asset_regime == "STRONG_BULL_TREND") else False,
+                            "title": "7. פירמידינג מוגן (Shielded Pyramiding Additions)",
+                            "subtitle": "הוספת 50%+ / 30%+ בטרנד חזק (נעול ומבוטל ב-Safe Haven)",
+                            "criteria": "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull & In Momentum)",
+                            "actual": "Active Position Pyramiding Ready" if (is_active and in_momentum) else ("Safe Haven Locked" if safe_haven_active else "Initial Entry Mode"),
+                            "met": True if (not is_active or (asset_regime == "STRONG_BULL_TREND" and in_momentum)) else False,
                         }
                     ]
 
                     sell_tree_nodes = [
                         {
                             "id": "node_bear_emergency",
-                            "title": "1. יציאת דובים ושורט 15% (Bear Exit & 15% Short Hedge)",
-                            "subtitle": "מעבר למשטר דובים (BTC < SMA150) ופתיחת 15% שורט על BTC",
-                            "criteria": "BTC < SMA150 -> Close Longs & Open 15% BTC Short (85% USDT)",
-                            "actual": "BEAR ACTIVE (15% Short BTC + 85% USDT)" if macro_regime == "BEAR" else "BULL ACTIVE (Safe)",
+                            "title": "1. יציאת דובים ושורט 35% (Bear Exit & 35% Short Hedge)",
+                            "subtitle": "מעבר למשטר דובים (BTC < SMA150) ופתיחת 35% שורט ממונף 2.0x על BTC (סה\"כ 70% שורט)",
+                            "criteria": "BTC < SMA150 or EMA20 < EMA50 -> Close Longs & Open 35% @ 2.0x BTC Short (65% Cash APY)",
+                            "actual": "BEAR ACTIVE (35% @ 2.0x Short BTC + 65% Cash APY)" if macro_regime == "BEAR" else "BULL ACTIVE (Safe)",
                             "triggered": macro_regime == "BEAR",
                         },
                         {
+                            "id": "node_crash_shield",
+                            "title": "2. מגן מפולת מוסדי (Institutional Crash Shield)",
+                            "subtitle": "נסיגה של 2%- משיא 5 ימים או שבירת EMA9 מורידה מיד ל-1.0x ספוט (60% מזומן בתשואה 4%)",
+                            "criteria": f"5d Pullback < {cutoff_pct:.1f}% OR Close < EMA9 (${btc_ema9_daily:,.0f})",
+                            "actual": f"5d PB: {btc_pb_from_5d:+.2f}%, Under EMA9: {btc_daily_close < btc_ema9_daily} ({'🛡️ TRIGGERED' if safe_haven_active else 'SAFE'})",
+                            "triggered": safe_haven_active,
+                        },
+                        {
                             "id": "node_flash_circuit_breaker",
-                            "title": "2. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
-                            "subtitle": "צניחה תוך-יומית מנר הפתיחה מעבר ל-4.0%- חותכת מיד ל-1.0x",
+                            "title": "3. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
+                            "subtitle": f"צניחה תוך-יומית מנר הפתיחה מעבר ל-{flash_wick_limit_pct:.1f}%- חותכת מיד ל-1.0x",
                             "criteria": f"Intraday Dip < {flash_wick_limit_pct:.1f}% -> Cut to 1.0x",
                             "actual": f"Intraday Dip: {btc_intraday_dip_pct:+.2f}% ({'TRIGGERED' if flash_triggered else 'SAFE'})",
                             "triggered": flash_triggered,
-                        },
-                        {
-                            "id": "node_stepped_pullback",
-                            "title": "3. מגן נסיגה משיא השוק (Stepped Pullback Guard)",
-                            "subtitle": "נסיגה של 4%-8% חותכת ל-1.4x, מעל 8% או מתחת EMA20 חותכת ל-1.0x",
-                            "criteria": "Pullback < -4.0% (Cut to 1.4x) / < -8.0% or < EMA20 (Cut to 1.0x)",
-                            "actual": f"Pullback: {pullback_pct:+.2f}%, Under EMA20: {under_ema}",
-                            "triggered": (stepped_pullback_active or hard_risk_active),
                         },
                         {
                             "id": "node_initial_risk_stop",
@@ -993,14 +1128,23 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "regime": macro_regime,
                     "btc_close": round(btc_daily_close, 2),
                     "btc_sma150": round(btc_sma150, 2),
+                    "btc_ema50_daily": round(btc_ema50_daily, 2),
+                    "btc_ema20_daily": round(btc_ema20_daily, 2),
+                    "btc_ema9_daily": round(btc_ema9_daily, 2),
+                    "btc_5d_high": round(btc_5d_high, 2),
+                    "dist_from_5d_high_pct": round(btc_pb_from_5d, 2),
+                    "in_momentum": in_momentum,
+                    "safe_haven_active": safe_haven_active,
+                    "conviction_rocket_active": (leverage >= 10.0),
                     "sma_gap_pct": round(((btc_daily_close - btc_sma150) / btc_sma150) * 100.0, 2) if btc_sma150 > 0 else 0.0,
                     "bull_peak": round(peak, 2),
                     "pullback_pct": pullback_pct,
                     "under_ema20_daily": under_ema,
-                    "risk_guard_active": hard_risk_active,
-                    "stepped_pullback_active": stepped_pullback_active,
+                    "risk_guard_active": safe_haven_active,
+                    "stepped_pullback_active": False,
                     "effective_leverage": round(leverage, 1),
                     "btc_atr_pct": round(btc_atr_pct * 100.0, 2),
+                    "btc_adx_daily": round(btc_adx_daily, 1),
                     "btc_intraday_dip_pct": btc_intraday_dip_pct,
                     "flash_wick_limit_pct": flash_wick_limit_pct,
                     "flash_circuit_triggered": flash_triggered,
@@ -1009,6 +1153,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "ladder_cap": round(ladder_cap, 1),
                     "active_tier": active_tier,
                     "total_crypto_weight_pct": total_crypto_exposure,
+                    "cash_weight_pct": 60.0 if safe_haven_active else (65.0 if macro_regime == "BEAR" else 0.0),
+                    "bear_short_hedge_pct": 35.0 if macro_regime == "BEAR" else 0.0,
                 },
                 "assets": assets_data,
             }

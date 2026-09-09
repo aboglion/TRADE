@@ -51,13 +51,19 @@ class StrategyConfig:
     assets: Dict[str, AssetConfig] = field(default_factory=dict)
     warmup_candles: int = 1200
     sma_regime_period: int = 150
-    bull_leverage: float = 3.5
-    mid_leverage: float = 2.4
-    min_leverage: float = 1.4
-    flash_wick_limit: float = -0.04
-    ladder_steps: List[float] = field(default_factory=lambda: [1.0, 1.8, 2.5])
-    bear_short_hedge_weight: float = 0.0   # 0 for spot-only (hold USDT)
-    cash_apr: float = 0.0
+    conviction_leverage: float = 10.0
+    bull_leverage: float = 10.0
+    mid_leverage: float = 5.0
+    base_leverage: float = 2.5
+    min_leverage: float = 1.0
+    momentum_cutoff_pct: float = -0.02
+    safe_cash_weight: float = 0.60
+    safe_spot_weight: float = 0.30
+    safe_micro_weight: float = 0.10
+    flash_wick_limit: float = -0.038
+    ladder_steps: List[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0])
+    bear_short_hedge_weight: float = 0.35   # 0.35 for 35% margin @ 2.0x short hedge on BTC
+    cash_apr: float = 0.04
     core_ratio: float = 0.80               # Macro/Micro allocation split
     # Macro per-asset configs are kept as dicts matching engine.py constants
     macro_configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -222,13 +228,19 @@ class ConfigManager:
             assets=assets,
             warmup_candles=s_raw.get("warmup_candles", 1200),
             sma_regime_period=s_raw.get("sma_regime_period", 150),
-            bull_leverage=s_raw.get("bull_leverage", 3.5),
-            mid_leverage=s_raw.get("mid_leverage", 2.4),
-            min_leverage=s_raw.get("min_leverage", 1.4),
-            flash_wick_limit=s_raw.get("flash_wick_limit", -0.04),
-            ladder_steps=s_raw.get("ladder_steps", [1.0, 1.8, 2.5]),
-            bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.0),
-            cash_apr=s_raw.get("cash_apr", 0.0),
+            conviction_leverage=s_raw.get("conviction_leverage", 10.0),
+            bull_leverage=s_raw.get("bull_leverage", 10.0),
+            mid_leverage=s_raw.get("mid_leverage", 5.0),
+            base_leverage=s_raw.get("base_leverage", 2.5),
+            min_leverage=s_raw.get("min_leverage", 1.0),
+            momentum_cutoff_pct=s_raw.get("momentum_cutoff_pct", -0.02),
+            safe_cash_weight=s_raw.get("safe_cash_weight", 0.60),
+            safe_spot_weight=s_raw.get("safe_spot_weight", 0.30),
+            safe_micro_weight=s_raw.get("safe_micro_weight", 0.10),
+            flash_wick_limit=s_raw.get("flash_wick_limit", -0.038),
+            ladder_steps=s_raw.get("ladder_steps", [1.0, 2.0, 4.0, 10.0]),
+            bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.35),
+            cash_apr=s_raw.get("cash_apr", 0.04),
             core_ratio=s_raw.get("core_ratio", 0.80),
             macro_configs=s_raw.get("macro_configs", {}),
             micro_config=s_raw.get("micro_config", {}),
