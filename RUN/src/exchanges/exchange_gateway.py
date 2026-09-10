@@ -324,6 +324,17 @@ class ExchangeGateway:
         try:
             positions = self._retry(lambda: self.exchange.fetch_positions())
             return [p for p in positions if abs(float(p.get("contracts", 0) or 0)) > 0]
+        except ExchangeAuthError as e:
+            if self._config.market_type == "future" and "-2015" in str(e):
+                curr_pm = bool(self.exchange.options.get("portfolioMargin", False))
+                self.exchange.options["portfolioMargin"] = not curr_pm
+                try:
+                    positions = self._retry(lambda: self.exchange.fetch_positions())
+                    return [p for p in positions if abs(float(p.get("contracts", 0) or 0)) > 0]
+                except Exception:
+                    self.exchange.options["portfolioMargin"] = curr_pm
+                    raise e
+            raise
         except AttributeError:
             # exchange doesn't support fetch_positions
             return []

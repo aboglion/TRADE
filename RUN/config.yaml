@@ -2,7 +2,7 @@ run_mode: DRY_RUN
 exchange:
   name: binance
   market_type: future
-  portfolio_margin: false
+  portfolio_margin: true
   timeout_ms: 30000
   rate_limit: true
   max_retries: 3
