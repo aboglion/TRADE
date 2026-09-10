@@ -1192,6 +1192,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     trail_tuple = trail_atr_map.get(coin, (10.0, 5.0))
                     tb = trail_tuple[0] if entry_mode == "STRONG_BULL_TREND" else trail_tuple[1]
                     init_risk_atr = init_risk_atr_map.get(coin, 4.0)
+                    trailing_stop = round(high_water - tb * c_atr, 2) if is_active and high_water > 0 else None
+                    initial_stop = round(entry_px - init_risk_atr * atr_at_entry, 2) if is_active and entry_px > 0 else None
 
                     # Active position metrics & true pyramiding check
                     open_r = round((c_close - entry_px) / max(atr_at_entry, 1e-6), 2) if (is_active and entry_px > 0) else 0.0
@@ -1396,8 +1398,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "criteria": f"Low <= Initial Stop (${initial_stop:,.2f})" if initial_stop else f"Initial Stop = ${c_close - init_risk_atr * c_atr:,.2f}",
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${initial_stop:,.2f}" if initial_stop else ""),
                             "live_val": f"${initial_stop:,.2f}" if initial_stop else "--",
-                            "badge": "🚨 נשבר!" if (c_low <= initial_stop and is_active and initial_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
-                            "triggered": (c_low <= initial_stop) if (is_active and initial_stop) else False,
+                            "badge": "🚨 נשבר!" if (is_active and initial_stop is not None and c_low <= initial_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
+                            "triggered": (c_low <= initial_stop) if (is_active and initial_stop is not None) else False,
                             "explanation": "יציאת חירום אם הנר שבר את רמת הסיכון הראשונית בכניסה."
                         },
                         {
@@ -1407,8 +1409,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "criteria": f"Low <= Trailing Stop (${trailing_stop:,.2f})" if trailing_stop else f"Trailing Stop = ${c_high - tb * c_atr:,.2f}",
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${trailing_stop:,.2f}" if trailing_stop else ""),
                             "live_val": f"${trailing_stop:,.2f}" if trailing_stop else "--",
-                            "badge": "🚨 נשבר!" if (c_low <= trailing_stop and is_active and trailing_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
-                            "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop) else False,
+                            "badge": "🚨 נשבר!" if (is_active and trailing_stop is not None and c_low <= trailing_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
+                            "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop is not None) else False,
                             "explanation": "נעילת רווחים: יציאה מיידית אם המחיר נסוג מתחת לסטופ הנגרר."
                         },
                         {
