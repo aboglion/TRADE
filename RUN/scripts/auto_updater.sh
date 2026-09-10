@@ -47,12 +47,16 @@ run_loop() {
                     log "✅ Restart completed successfully."
                 else
                     log "⚠️ Restart encountered issues. Attempting recovery with safe pull and 'make run'..."
-                    RUN/scripts/safe_pull.sh "$BRANCH" >> "$LOG_FILE" 2>&1 || true
-                    make run >> "$LOG_FILE" 2>&1 || true
                 fi
             fi
         else
             log "⚠️ Warning: Could not fetch from origin/$BRANCH (Network issue or permissions)"
+        fi
+
+        # Process watchdog: ensure bot stays alive 24/7
+        if ! pgrep -f "(bot_runner\.py|main\.py)" >/dev/null 2>&1; then
+            log "⚠️ Bot process not running — automatically starting bot..."
+            make restart >> "$LOG_FILE" 2>&1 || true
         fi
 
         sleep "$CHECK_INTERVAL"

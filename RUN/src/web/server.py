@@ -427,10 +427,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             import threading
             import subprocess
             def _reboot():
-                time.sleep(1.0)
+                time.sleep(0.5)
                 try:
                     proj_dir = Path(__file__).resolve().parent.parent.parent.parent
-                    subprocess.run(["make", "restart"], cwd=str(proj_dir), timeout=30)
+                    subprocess.Popen(
+                        ["bash", "-c", "sleep 1 && make restart"],
+                        cwd=str(proj_dir),
+                        start_new_session=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                 except Exception as ex:
                     logger.error("Error during mode restart: %s", ex)
 
