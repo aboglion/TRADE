@@ -183,7 +183,7 @@ async function probeServerStatus() {
 
         if (res.ok) {
             const data = await res.json();
-            if (data.status === "CRASHED" || data.is_crashed) {
+            if (data.status === "CRASHED" || data.is_crashed || data.status === "STOPPED" || data.status === "UPDATING") {
                 setServerOfflineState(false);
                 showServerCrashModal(data);
                 return;
@@ -195,7 +195,7 @@ async function probeServerStatus() {
         } else if (res.status === 503) {
             try {
                 const data = await res.json();
-                if (data.status === "CRASHED" || data.is_crashed) {
+                if (data.status === "CRASHED" || data.is_crashed || data.status === "STOPPED" || data.status === "UPDATING") {
                     setServerOfflineState(false);
                     showServerCrashModal(data);
                     return;
@@ -213,20 +213,50 @@ async function probeServerStatus() {
 function showServerCrashModal(data) {
     isServerCrashed = true;
     crashDataCached = data;
-    updateConnectionBadge(false, "CRASHED");
+    const status = data.status || (data.is_stopped ? "STOPPED" : (data.is_updating ? "UPDATING" : "CRASHED"));
+    updateConnectionBadge(false, status);
 
     const offlineModal = document.getElementById("serverOfflineModal");
     if (offlineModal) offlineModal.style.display = "none";
 
     const crashModal = document.getElementById("serverCrashModal");
+    const headerTitle = crashModal ? crashModal.querySelector("h3") : null;
+    const headerSub = crashModal ? crashModal.querySelector("p") : null;
+    const statusVal = crashModal ? crashModal.querySelector(".info-val") : null;
     const exitCodeEl = document.getElementById("crashModalExitCode");
     const timeEl = document.getElementById("crashModalTime");
     const tracebackEl = document.getElementById("crashModalTraceback");
 
-    if (exitCodeEl) exitCodeEl.textContent = data.exit_code != null ? data.exit_code : "1";
+    if (headerTitle) {
+        if (status === "STOPPED") {
+            headerTitle.textContent = "⏸️ מנוע המסחר מושבת (Trading Engine Stopped)";
+            headerTitle.style.color = "var(--accent-warning, #f59e0b)";
+        } else if (status === "UPDATING") {
+            headerTitle.textContent = "🔄 עדכון מערכת בפעולה (System Updating)";
+            headerTitle.style.color = "var(--accent-info, #38bdf8)";
+        } else {
+            headerTitle.textContent = "💥 התרעת מערכת: מנוע המסחר קרס / הושבת";
+            headerTitle.style.color = "var(--accent-danger, #ef4444)";
+        }
+    }
+    if (headerSub) {
+        if (status === "STOPPED") {
+            headerSub.textContent = "מנוע המסחר כבוי כעת. ניתן לצפות בלוגים או להפעיל מחדש.";
+        } else if (status === "UPDATING") {
+            headerSub.textContent = "מוריד עדכונים מ-GitHub ומאתחל מנוע... מתחבר אוטומטית.";
+        } else {
+            headerSub.textContent = "Trading Engine Crash Detected • Emergency Diagnostics Active";
+        }
+    }
+    if (statusVal) {
+        statusVal.textContent = status;
+        statusVal.className = status === "STOPPED" ? "info-val text-warning" : (status === "UPDATING" ? "info-val text-info" : "info-val text-danger");
+    }
+
+    if (exitCodeEl) exitCodeEl.textContent = data.exit_code != null ? data.exit_code : (status === "STOPPED" ? "0" : "1");
     if (timeEl) timeEl.textContent = data.crash_time || new Date().toLocaleTimeString();
     if (tracebackEl) {
-        tracebackEl.textContent = data.error_summary || data.message || "Trading engine stopped or crashed unexpectedly.";
+        tracebackEl.textContent = data.error_summary || data.message || "Trading engine stopped or crashed.";
     }
 
     if (crashModal) crashModal.style.display = "flex";
@@ -258,15 +288,15 @@ async function fetchCrashModalLogs() {
                 if (l.includes("ERROR") || l.includes("CRITICAL") || l.includes("Traceback") || l.includes("Exception")) cls = "color: #f87171;";
                 else if (l.includes("WARNING")) cls = "color: #fbbf24;";
                 else if (l.includes("INFO")) cls = "color: #94a3b8;";
-                return `<div style="${cls}">${escapeHtml(l)}</div>`;
+                return `<div style="${cls} margin-bottom: 2px;">${l.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`;
             });
             container.innerHTML = lines.join("");
             container.scrollTop = container.scrollHeight;
         } else {
-            container.textContent = "No log lines recorded yet.";
+            container.innerHTML = `<div style="color: var(--text-muted);">אין נתוני לוג חדשים זמינים.</div>`;
         }
     } catch (e) {
-        console.error("Error fetching crash logs:", e);
+        console.error("Failed to fetch crash modal logs:", e);
     }
 }
 
@@ -321,8 +351,44 @@ function showConnectionStatusDetails() {
     }
 }
 
-function openEmergencyServerPage() {
-    window.location.reload();
+async function openEmergencyServerPage() {
+    // Open emergency diagnostics and logs modal immediately without destructive full window reload
+    const offlineModal = document.getElementById("serverOfflineModal");
+    if (offlineModal) offlineModal.style.display = "none";
+
+    const crashModal = document.getElementById("serverCrashModal");
+    if (crashModal) {
+        crashModal.style.display = "flex";
+        isServerCrashed = true;
+    }
+
+    const titleEl = crashModal ? crashModal.querySelector("h3") : null;
+    if (titleEl) {
+        titleEl.textContent = "📋 אבחון מערכת ולוגי שגיאה (System & Crash Diagnostics)";
+    }
+
+    const tbEl = document.getElementById("crashModalTraceback");
+    if (tbEl) {
+        tbEl.textContent = lastOfflineError || "בודק תקשורת ומחלץ לוגים אחרונים מפורט 8090...";
+    }
+
+    const logConsole = document.getElementById("crashModalLogsConsole");
+    if (logConsole) {
+        logConsole.innerHTML = `<div style="color: #60a5fa;">⏳ מתחבר לשרת החירום בפורט 8090 וטוען לוגים...</div>`;
+    }
+
+    try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        if (res.ok) {
+            const data = await res.json();
+            showServerCrashModal(data);
+            return;
+        }
+    } catch (e) {
+        // Continue to fetch crash modal logs anyway
+    }
+
+    fetchCrashModalLogs();
 }
 
 async function copyCrashModalTraceback() {

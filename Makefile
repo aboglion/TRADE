@@ -34,6 +34,9 @@ run:
 stop:
 	@RUN/scripts/stop_bot.sh 8090
 
+kill:
+	@RUN/scripts/stop_bot.sh 8090 --hard
+
 status:
 	@if [ -f logs/bot.pid ] && kill -0 $$(cat logs/bot.pid 2>/dev/null) 2>/dev/null; then \
 		echo "🟢 Trading bot is running (PID: $$(cat logs/bot.pid))"; \
@@ -59,17 +62,20 @@ pull:
 pull-safe:
 	@RUN/scripts/safe_pull.sh
 
-restart: stop pull-safe
+restart: pull-safe
 	@MODE=$$(cat logs/last_mode 2>/dev/null || grep -E '^\s*run_mode:' RUN/config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'"); \
 	MODE=$${MODE:-DRY_RUN}; \
 	echo "🔄 Detected run mode: $$MODE"; \
+	@RUN/scripts/stop_bot.sh 8090 --hard >/dev/null 2>&1 || true; \
 	if [ "$$MODE" = "LIVE" ]; then \
 		$(MAKE) run; \
 	else \
 		$(MAKE) dry; \
 	fi
 
-restart-dry: stop pull-safe dry
+restart-dry: pull-safe
+	@RUN/scripts/stop_bot.sh 8090 --hard >/dev/null 2>&1 || true; \
+	$(MAKE) dry
 
 # Git Auto-Updater Watcher
 watch:

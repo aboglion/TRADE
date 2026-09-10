@@ -154,7 +154,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 class FallbackCrashHandler(SimpleHTTPRequestHandler):
-    """Emergency HTTP Request Handler served when main.py crashes."""
+    """Emergency HTTP Request Handler served when main.py crashes or stops."""
 
     exit_code: int = 1
     crash_time: str = ""
@@ -162,6 +162,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
     restart_requested: bool = False
     server_instance: Optional[ThreadedHTTPServer] = None
     last_crash_error: str = ""
+    system_status: str = "CRASHED"  # "CRASHED" | "STOPPED" | "UPDATING"
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -182,20 +183,24 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             self._serve_crash_page()
         elif clean_path == "/api/status":
             self._send_json({
-                "status": "CRASHED",
-                "is_crashed": True,
+                "status": FallbackCrashHandler.system_status,
+                "is_crashed": FallbackCrashHandler.system_status == "CRASHED",
+                "is_stopped": FallbackCrashHandler.system_status == "STOPPED",
+                "is_updating": FallbackCrashHandler.system_status == "UPDATING",
                 "exit_code": FallbackCrashHandler.exit_code,
                 "crash_time": FallbackCrashHandler.crash_time,
                 "error_summary": FallbackCrashHandler.last_crash_error,
-                "message": "Trading engine is currently stopped/crashed. Emergency Fallback Server is active."
+                "message": f"Trading engine is currently {FallbackCrashHandler.system_status.lower()}. Emergency Fallback Server is active on port {FallbackCrashHandler.port}."
             })
         elif clean_path == "/api/logs":
             self._handle_logs()
         elif clean_path.startswith("/api/"):
             self._send_json({
-                "error": "Trading engine is currently stopped/crashed. Emergency Fallback Server active.",
-                "status": "CRASHED",
-                "is_crashed": True,
+                "error": f"Trading engine is currently {FallbackCrashHandler.system_status.lower()}. Emergency Fallback Server active.",
+                "status": FallbackCrashHandler.system_status,
+                "is_crashed": FallbackCrashHandler.system_status == "CRASHED",
+                "is_stopped": FallbackCrashHandler.system_status == "STOPPED",
+                "is_updating": FallbackCrashHandler.system_status == "UPDATING",
                 "exit_code": FallbackCrashHandler.exit_code,
                 "crash_time": FallbackCrashHandler.crash_time,
                 "error_summary": FallbackCrashHandler.last_crash_error
@@ -218,6 +223,13 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             self._send_json({"success": True, "message": "Restarting main bot process with latest updates..."})
             if FallbackCrashHandler.server_instance:
                 # Schedule server shutdown in separate thread so HTTP response finishes first
+                import threading
+                threading.Thread(target=FallbackCrashHandler.server_instance.shutdown).start()
+        elif clean_path in ("/api/start", "/api/run"):
+            log_runner("Start requested via Emergency Web Server UI!")
+            FallbackCrashHandler.restart_requested = True
+            self._send_json({"success": True, "message": "Starting trading engine process..."})
+            if FallbackCrashHandler.server_instance:
                 import threading
                 threading.Thread(target=FallbackCrashHandler.server_instance.shutdown).start()
         elif clean_path in ("/api/logs/clear", "/api/clear_logs"):
@@ -285,19 +297,72 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             pass
 
     def _serve_crash_page(self) -> None:
+        status = FallbackCrashHandler.system_status
+        if status == "STOPPED":
+            header_icon = "⏸️"
+            header_title = "מנוע המסחר מושבת (Trading Engine Stopped)"
+            header_sub = "System Notice: Trading Engine Stopped &bull; Diagnostic & Control Server (Port 8090)"
+            badge_class = "badge-amber"
+            badge_text = "STOPPED"
+            accent_color = "#f59e0b"
+            accent_glow = "rgba(245, 158, 11, 0.2)"
+            summary_title = "סטטוס מנוע: הפסקה יזומה / Engine Stopped"
+            summary_default = "מנוע המסחר כבוי כעת. לוגי הפעילות האחרונים מוצגים להלן. ניתן להפעיל את המנוע מחדש בכל עת."
+            action_buttons = """
+                <button class="restart-btn" onclick="startBotEngine()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                    <span>▶️</span> הפעל מנוע מסחר (Start Engine)
+                </button>
+                <button class="restart-btn" onclick="gitPullAndRestart()" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+                    <span>⬇️</span> משוך עדכונים והפעל (Git Pull & Start)
+                </button>
+            """
+        elif status == "UPDATING":
+            header_icon = "🔄"
+            header_title = "עדכון מערכת בפעולה (System Updating)"
+            header_sub = "System Update: Pulling changes from GitHub & restarting engine &bull; Port 8090"
+            badge_class = "badge-cyan"
+            badge_text = "UPDATING"
+            accent_color = "#06b6d4"
+            accent_glow = "rgba(6, 182, 212, 0.2)"
+            summary_title = "סטטוס עדכון גרסה מ-GitHub:"
+            summary_default = "מערכת המסחר מורידה כעת עדכונים מ-GitHub ומאתחלת את מנוע המסחר. הדף יתרענן אוטומטית עם סיום ההפעלה."
+            action_buttons = """
+                <button class="restart-btn" onclick="window.location.reload()" style="background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);">
+                    <span>🔄</span> רענן סטטוס (Check Status)
+                </button>
+            """
+        else:
+            header_icon = "🚨"
+            header_title = "התרעת מערכת: מנוע המסחר קרס / הושבת"
+            header_sub = "System Alert: Trading Engine Stopped / Crashed &bull; Emergency Diagnostic Server (Port 8090)"
+            badge_class = "badge-red"
+            badge_text = "CRASHED"
+            accent_color = "#ef4444"
+            accent_glow = "rgba(239, 68, 68, 0.2)"
+            summary_title = "סיבת התקלה שזוהתה / Identified Failure Cause:"
+            summary_default = "Trading engine stopped or crashed (non-zero exit code). Review the logs below for specific exceptions."
+            action_buttons = """
+                <button class="restart-btn" onclick="restartBot()" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                    <span>🔄</span> הפעל מחדש עכשיו (Restart Bot)
+                </button>
+                <button class="restart-btn" onclick="gitPullAndRestart()" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+                    <span>⬇️</span> משוך עדכונים והפעל (Git Pull & Restart)
+                </button>
+            """
+
         page_html = f"""<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚨 System Alert - Bot Process Crashed</title>
+    <title>🚨 System Notice - Trading Engine Status ({badge_text})</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {{
             --bg-color: #0b0f19;
             --card-bg: #151c2c;
-            --red-alert: #ef4444;
-            --red-glow: rgba(239, 68, 68, 0.2);
+            --accent-color: {accent_color};
+            --accent-glow: {accent_glow};
             --green-btn: #10b981;
             --green-hover: #059669;
             --text-primary: #f3f4f6;
@@ -321,8 +386,8 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         }}
         .header-card {{
             background: var(--card-bg);
-            border: 2px solid var(--red-alert);
-            box-shadow: 0 0 25px var(--red-glow);
+            border: 2px solid var(--accent-color);
+            box-shadow: 0 0 25px var(--accent-glow);
             border-radius: 16px;
             padding: 24px 32px;
             display: flex;
@@ -343,27 +408,32 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         p.subtitle {{ color: var(--text-secondary); font-size: 0.95rem; margin-top: 4px; }}
         
         .restart-btn {{
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: #ffffff;
             border: none;
-            padding: 14px 28px;
-            font-size: 1.1rem;
+            padding: 12px 24px;
+            font-size: 1rem;
             font-weight: 700;
             border-radius: 10px;
             cursor: pointer;
             transition: all 0.2s ease;
-            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
-            display: flex;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+            display: inline-flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }}
         .restart-btn:hover {{
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.6);
-            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            filter: brightness(1.1);
         }}
         .restart-btn:active {{ transform: translateY(0); }}
         
+        .header-buttons {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }}
+
         .info-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -378,7 +448,9 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         }}
         .info-label {{ font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px; }}
         .info-val {{ font-size: 1.2rem; font-weight: 700; color: #ffffff; }}
-        .badge-red {{ color: var(--red-alert); }}
+        .badge-red {{ color: #ef4444; }}
+        .badge-amber {{ color: #f59e0b; }}
+        .badge-cyan {{ color: #06b6d4; }}
         
         .log-section {{
             background: var(--card-bg);
@@ -441,9 +513,9 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             color: #ffffff;
         }}
         .live-tag {{
-            background: rgba(239, 68, 68, 0.15);
-            color: var(--red-alert);
-            border: 1px solid var(--red-alert);
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             padding: 4px 10px;
             border-radius: 20px;
             font-size: 0.8rem;
@@ -492,41 +564,41 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
     <div class="container">
         <div class="header-card">
             <div class="title-area">
-                <div class="alert-icon">🚨</div>
+                <div class="alert-icon">{header_icon}</div>
                 <div>
-                    <h1>התרעת מערכת: מנוע המסחר קרס / הושבת</h1>
-                    <p class="subtitle">System Alert: Trading Engine Stopped / Crashed &bull; Emergency Diagnostic Server (Port 8090)</p>
+                    <h1>{header_title}</h1>
+                    <p class="subtitle">{header_sub}</p>
                 </div>
             </div>
-            <button class="restart-btn" onclick="restartBot()">
-                <span>🔄</span> הפעל מחדש עכשיו (Restart Bot)
-            </button>
+            <div class="header-buttons">
+                {action_buttons}
+            </div>
         </div>
 
         <div class="info-grid">
             <div class="info-box">
                 <div class="info-label">Engine Status</div>
-                <div class="info-val badge-red">CRASHED / STOPPED</div>
+                <div class="info-val {badge_class}">{badge_text}</div>
             </div>
             <div class="info-box">
                 <div class="info-label">Exit Code</div>
                 <div class="info-val">{FallbackCrashHandler.exit_code}</div>
             </div>
             <div class="info-box">
-                <div class="info-label">Crash Time</div>
+                <div class="info-label">Timestamp</div>
                 <div class="info-val" style="font-size: 1rem;">{FallbackCrashHandler.crash_time}</div>
             </div>
         </div>
 
-        <div class="error-summary-card" id="errorSummaryCard" style="background: rgba(239, 68, 68, 0.12); border: 2px solid var(--red-alert); border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);">
+        <div class="error-summary-card" id="errorSummaryCard" style="background: rgba(15, 23, 42, 0.8); border: 2px solid var(--accent-color); border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; box-shadow: 0 0 20px var(--accent-glow);">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
                 <div style="font-weight: 700; color: #fecdd3; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
-                    <span>⚠️</span>
-                    <span>סיבת התקלה שזוהתה / Identified Failure Cause:</span>
+                    <span>ℹ️</span>
+                    <span>{summary_title}</span>
                 </div>
-                <button class="btn-copy" onclick="copyCrashTraceback()" style="padding: 6px 14px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(239, 68, 68, 0.5); color: #fff; border-radius: 6px; cursor: pointer;">📋 העתק סיבת תקלה</button>
+                <button class="btn-copy" onclick="copyCrashTraceback()" style="padding: 6px 14px; font-size: 0.85rem; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; border-radius: 6px; cursor: pointer;">📋 העתק פרטים</button>
             </div>
-            <pre id="crashTracebackBox" style="background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #fda4af; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto;">{html_escape(FallbackCrashHandler.last_crash_error or 'Trading engine stopped or crashed (non-zero exit code). Review the logs below for specific exceptions.')}</pre>
+            <pre id="crashTracebackBox" style="background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto;">{html_escape(FallbackCrashHandler.last_crash_error or summary_default)}</pre>
         </div>
 
         <div class="log-section">
@@ -548,7 +620,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         function showToast(msg, isError = false) {{
             const t = document.getElementById("toast");
             t.innerText = msg;
-            t.style.background = isError ? "var(--red-alert)" : "var(--green-btn)";
+            t.style.background = isError ? "var(--accent-color)" : "var(--green-btn)";
             t.style.display = "block";
             setTimeout(() => {{ t.style.display = "none"; }}, 4000);
         }}
@@ -640,7 +712,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             if (!text) return;
             const copied = await copyTextToClipboard(text);
             if (copied) {{
-                showToast("📋 סיבת התקלה הועתקה ללוח בהצלחה!");
+                showToast("📋 הפרטים הועתקו ללוח בהצלחה!");
             }} else {{
                 showToast("⚠️ לא ניתן היה להעתיק אוטומטית. לחץ Ctrl+C", true);
             }}
@@ -705,8 +777,58 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             }}
         }}
 
+        async function startBotEngine() {{
+            showToast("מפעיל את מנוע המסחר... / Starting trading engine...");
+            try {{
+                const res = await fetch("/api/start", {{ method: "POST" }});
+                const data = await res.json();
+                if (data.success) {{
+                    showToast("מנוע המסחר עולה כעת! הדף יתרענן תוך מספר שניות.");
+                    setTimeout(() => {{ window.location.reload(); }}, 3000);
+                }} else {{
+                    alert("שגיאה: " + (data.error || "Unknown error"));
+                }}
+            }} catch (err) {{
+                showToast("מנוע המסחר עולה כעת! מרענן את הדף...");
+                setTimeout(() => {{ window.location.reload(); }}, 3000);
+            }}
+        }}
+
+        async function gitPullAndRestart() {{
+            if (!confirm("האם למשוך עדכונים מ-GitHub ולהפעיל מחדש? / Pull latest code from GitHub and restart?")) return;
+            showToast("מושך עדכונים מ-GitHub ומפעיל מחדש...");
+            try {{
+                const res = await fetch("/api/restart", {{ method: "POST" }});
+                const data = await res.json();
+                if (data.success) {{
+                    showToast("העדכון וההפעלה מחדש החלו! הדף יתרענן אוטומטית.");
+                    setTimeout(() => {{ window.location.reload(); }}, 4000);
+                }} else {{
+                    alert("שגיאה: " + (data.error || "Unknown error"));
+                }}
+            }} catch (err) {{
+                showToast("הפעלה מחדש בעיצומה! מרענן...");
+                setTimeout(() => {{ window.location.reload(); }}, 3000);
+            }}
+        }}
+
+        // Automatic reconnection monitor: checks if main engine has recovered
+        async function checkEngineRecovery() {{
+            try {{
+                const res = await fetch("/api/status", {{ cache: "no-store" }});
+                if (res.ok) {{
+                    const data = await res.json();
+                    if (data.status && data.status !== "CRASHED" && data.status !== "STOPPED" && data.status !== "UPDATING") {{
+                        showToast("🟢 מנוע המסחר חזר לפעילות תקינה! טוען את לוח הבקרה...");
+                        setTimeout(() => {{ window.location.reload(); }}, 1200);
+                    }}
+                }}
+            }} catch (err) {{}}
+        }}
+
         fetchLogs();
         setInterval(fetchLogs, 3000);
+        setInterval(checkEngineRecovery, 2000);
     </script>
 </body>
 </html>"""
@@ -718,7 +840,7 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         self.wfile.write(encoded)
 
 
-def run_fallback_server(port: int, exit_code: int) -> bool:
+def run_fallback_server(port: int, exit_code: int, system_status: str = "CRASHED") -> bool:
     """
     Run Emergency Fallback HTTP Server on the specified port.
     Returns True if user requested restart, False if stopped manually.
@@ -727,9 +849,10 @@ def run_fallback_server(port: int, exit_code: int) -> bool:
     FallbackCrashHandler.exit_code = exit_code
     FallbackCrashHandler.crash_time = crash_time
     FallbackCrashHandler.port = port
+    FallbackCrashHandler.system_status = system_status
     FallbackCrashHandler.restart_requested = False
 
-    log_runner(f"🚨 Launching Emergency Fallback Log Server on http://0.0.0.0:{port}")
+    log_runner(f"🚨 Launching Emergency Fallback Log Server on http://0.0.0.0:{port} (Status: {system_status})")
 
     server = None
     for attempt in range(15):
@@ -936,47 +1059,84 @@ def main() -> None:
             else:
                 FallbackCrashHandler.last_crash_error = ""
 
-            # Check if this was an intentional shutdown or restart
-            is_intentional = (
-                shutdown_flag
-                or stop_flag_file.exists()
-                or exit_code == 0
-            )
+            # Check if kill.flag exists (Hard kill of supervisor requested)
+            kill_flag_file = logs_dir / "kill.flag"
+            if kill_flag_file.exists():
+                try:
+                    kill_flag_file.unlink()
+                except Exception:
+                    pass
+                log_runner("Hard kill flag detected. Supervisor shutting down completely.")
+                cleanup_pids()
+                break
 
-            # Consume stop flag if present
-            if stop_flag_file.exists():
+            if shutdown_flag:
+                log_runner("Shutdown signal received. Supervisor shutting down completely.")
+                cleanup_pids()
+                break
+
+            is_stop_flag = stop_flag_file.exists()
+            if is_stop_flag:
                 try:
                     stop_flag_file.unlink()
                 except Exception:
                     pass
 
-            if is_intentional:
-                log_runner(f"main.py stopped gracefully or stop flag detected (Code {exit_code}). Exiting supervisor.")
-                cleanup_pids()
-                break
+            is_update_flag = (logs_dir / "update.flag").exists()
+            if is_update_flag:
+                try:
+                    (logs_dir / "update.flag").unlink()
+                except Exception:
+                    pass
 
-            # Read last 50 lines of logs/bot.log or recent output for Telegram crash alert
-            last_logs = list(recent_output_lines)[-50:]
-            if not last_logs:
-                for lp in (PROJECT_DIR / "logs" / "bot.log", RUN_DIR / "logs" / "bot.log"):
-                    if lp.exists():
-                        try:
-                            with open(lp, "r", encoding="utf-8", errors="replace") as f:
-                                last_logs = [line.strip() for line in f.readlines()[-50:] if line.strip()]
-                                if last_logs:
-                                    break
-                        except Exception:
-                            pass
+            is_restart_flag = (logs_dir / "restart.flag").exists()
+            if is_restart_flag:
+                try:
+                    (logs_dir / "restart.flag").unlink()
+                except Exception:
+                    pass
 
-            # Send Telegram Crash Notification
-            send_telegram_crash_alert(exit_code, last_logs)
+            # If it's an immediate restart requested, reboot main.py directly
+            if is_restart_flag:
+                log_runner("Immediate restart flag detected. Rebooting main.py...")
+                time.sleep(0.5)
+                continue
 
-            # Launch Emergency Fallback HTTP Server
-            log_runner("Starting Emergency Fallback Log Server...")
-            should_restart = run_fallback_server(port=port, exit_code=exit_code)
+            # Classify system status: UPDATING vs CRASHED vs STOPPED
+            if is_update_flag:
+                status = "UPDATING"
+                error_summary = "System update in progress (Git Pull & Engine Restart)."
+            elif exit_code != 0 and not is_stop_flag:
+                status = "CRASHED"
+                error_summary = "\n".join(crash_lines)
+            else:
+                status = "STOPPED"
+                error_summary = f"Trading engine stopped cleanly (Exit Code: {exit_code}). Review logs below or click Start."
+
+            FallbackCrashHandler.last_crash_error = error_summary
+            FallbackCrashHandler.system_status = status
+
+            # Send Telegram Crash Notification ONLY for real unexpected crashes
+            if status == "CRASHED":
+                last_logs = list(recent_output_lines)[-50:]
+                if not last_logs:
+                    for lp in (PROJECT_DIR / "logs" / "bot.log", RUN_DIR / "logs" / "bot.log"):
+                        if lp.exists():
+                            try:
+                                with open(lp, "r", encoding="utf-8", errors="replace") as f:
+                                    last_logs = [line.strip() for line in f.readlines()[-50:] if line.strip()]
+                                    if last_logs:
+                                        break
+                            except Exception:
+                                pass
+                send_telegram_crash_alert(exit_code, last_logs)
+
+            # Launch Emergency Fallback HTTP Server on port 8090
+            log_runner(f"Starting Emergency Fallback Server (Status: {status}, Port: {port})...")
+            should_restart = run_fallback_server(port=port, exit_code=exit_code, system_status=status)
 
             if should_restart:
-                log_runner("User requested restart from Emergency Web UI. Waiting for port to free up...")
+                log_runner("User or system requested restart from Emergency Web UI. Waiting for port to free up...")
                 safe_pull_script = PROJECT_DIR / "RUN" / "scripts" / "safe_pull.sh"
                 if safe_pull_script.exists():
                     try:
@@ -984,7 +1144,7 @@ def main() -> None:
                         subprocess.run([str(safe_pull_script), "main"], cwd=str(PROJECT_DIR), timeout=45)
                     except Exception as ex:
                         log_runner(f"safe_pull.sh note: {ex}")
-                for _ in range(10):
+                for _ in range(15):
                     try:
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                             s.settimeout(0.5)

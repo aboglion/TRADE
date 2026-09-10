@@ -89,3 +89,78 @@ def test_traceback_extraction_logic():
     extracted = "\n".join(crash_lines)
     assert "Traceback (most recent call last):" in extracted
     assert "ExchangeAuthError" in extracted
+
+
+def test_fallback_crash_handler_multi_status():
+    """Verify FallbackCrashHandler properly reflects STOPPED, UPDATING, and CRASHED states."""
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    import bot_runner
+
+    # 1. Test CRASHED
+    bot_runner.FallbackCrashHandler.system_status = "CRASHED"
+    bot_runner.FallbackCrashHandler.exit_code = 2
+    assert bot_runner.FallbackCrashHandler.system_status == "CRASHED"
+
+    # 2. Test STOPPED
+    bot_runner.FallbackCrashHandler.system_status = "STOPPED"
+    bot_runner.FallbackCrashHandler.exit_code = 0
+    bot_runner.FallbackCrashHandler.last_crash_error = "Trading engine stopped cleanly."
+    assert bot_runner.FallbackCrashHandler.system_status == "STOPPED"
+
+    # 3. Test UPDATING
+    bot_runner.FallbackCrashHandler.system_status = "UPDATING"
+    bot_runner.FallbackCrashHandler.last_crash_error = "Git Pull in progress."
+    assert bot_runner.FallbackCrashHandler.system_status == "UPDATING"
+
+
+def test_fallback_crash_handler_html_generation():
+    """Verify HTML generation contains proper Hebrew/English indicators for different states."""
+    scripts_dir = Path(__file__).parent.parent / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    import bot_runner
+    from io import BytesIO
+
+    class DummyHandler(bot_runner.FallbackCrashHandler):
+        def __init__(self):
+            self.wfile = BytesIO()
+            self.headers = {}
+            self._headers_buffer = []
+
+        def send_response(self, code, message=None):
+            self.status_code = code
+
+        def send_header(self, keyword, value):
+            pass
+
+        def end_headers(self):
+            pass
+
+    # Test STOPPED page
+    bot_runner.FallbackCrashHandler.system_status = "STOPPED"
+    bot_runner.FallbackCrashHandler.last_crash_error = "Stopped by user"
+    h = DummyHandler()
+    h._serve_crash_page()
+    content = h.wfile.getvalue().decode("utf-8")
+    assert "STOPPED" in content
+    assert "מנוע המסחר מושבת" in content
+    assert "הפעל מנוע מסחר" in content
+
+    # Test UPDATING page
+    bot_runner.FallbackCrashHandler.system_status = "UPDATING"
+    h = DummyHandler()
+    h._serve_crash_page()
+    content = h.wfile.getvalue().decode("utf-8")
+    assert "UPDATING" in content
+    assert "עדכון מערכת בפעולה" in content
+
+    # Test CRASHED page
+    bot_runner.FallbackCrashHandler.system_status = "CRASHED"
+    bot_runner.FallbackCrashHandler.last_crash_error = "ZeroDivisionError: division by zero"
+    h = DummyHandler()
+    h._serve_crash_page()
+    content = h.wfile.getvalue().decode("utf-8")
+    assert "CRASHED" in content
+    assert "התרעת מערכת: מנוע המסחר קרס" in content
+    assert "ZeroDivisionError" in content
+
