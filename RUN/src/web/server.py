@@ -384,6 +384,21 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 return
 
             if requested_mode == "LIVE":
+                # Ensure .env is read if keys aren't in os.environ yet
+                for env_candidate in (".env", "RUN/.env", str(Path(__file__).resolve().parent.parent.parent / ".env")):
+                    if Path(env_candidate).exists():
+                        try:
+                            with open(env_candidate, "r", encoding="utf-8") as ef:
+                                for eline in ef:
+                                    eline = eline.strip()
+                                    if eline and not eline.startswith("#") and "=" in eline:
+                                        ek, _, ev = eline.partition("=")
+                                        ek, ev = ek.strip(), ev.strip().strip("'\"")
+                                        if ek and (ek not in os.environ or not os.environ[ek]):
+                                            os.environ[ek] = ev
+                        except Exception:
+                            pass
+
                 api_key = os.environ.get("BINANCE_API_KEY", "").strip()
                 api_secret = os.environ.get("BINANCE_API_SECRET", "").strip()
                 if not api_key or not api_secret or api_key == "your_api_key_here":
