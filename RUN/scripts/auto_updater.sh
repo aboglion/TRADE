@@ -29,6 +29,9 @@ run_loop() {
     # Cleanup PID file on exit
     trap 'log "🛑 Auto-Updater stopped."; rm -f "$PID_FILE"; exit 0' SIGINT SIGTERM EXIT
 
+    # Initial grace period allowing the bot process to initialize
+    sleep 15
+
     while true; do
         cd "$PROJECT_DIR" || exit 1
 
@@ -53,8 +56,9 @@ run_loop() {
             log "⚠️ Warning: Could not fetch from origin/$BRANCH (Network issue or permissions)"
         fi
 
-        # Process watchdog: ensure bot stays alive 24/7
-        if ! pgrep -f "(bot_runner\.py|main\.py)" >/dev/null 2>&1; then
+        # Process watchdog: ensure bot stays alive 24/7 unless intentionally stopped
+        STOP_FLAG="${PROJECT_DIR}/logs/stop.flag"
+        if [ ! -f "$STOP_FLAG" ] && ! pgrep -f "(bot_runner\.py|main\.py)" >/dev/null 2>&1; then
             log "⚠️ Bot process not running — automatically starting bot..."
             make restart >> "$LOG_FILE" 2>&1 || true
         fi
@@ -67,6 +71,10 @@ start_daemon() {
     mkdir -p "${PROJECT_DIR}/logs"
     if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
         echo "⚠️ Auto-updater is already running (PID: $(cat "$PID_FILE"))"
+        exit 0
+    fi
+    if pgrep -f "auto_updater\.sh run" >/dev/null 2>&1; then
+        echo "⚠️ Auto-updater process already active."
         exit 0
     fi
 

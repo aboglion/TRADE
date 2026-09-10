@@ -21,18 +21,14 @@ gp:
 dry:
 	@mkdir -p logs
 	@echo "DRY_RUN" > logs/last_mode
-	@RUN/scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
 	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
-	@nohup $(PYTHON) RUN/scripts/bot_runner.py --mode DRY_RUN --dashboard --port 8090 >> logs/bot.log 2>&1 &
-	@echo "⚡ Bot started in DRY_RUN mode with Emergency Crash Fallback Server (24/7 on port 8090)"
+	@RUN/scripts/start_bot.sh DRY_RUN 8090
 
 run:
 	@mkdir -p logs
 	@echo "LIVE" > logs/last_mode
-	@RUN/scripts/stop_bot.sh 8090 >/dev/null 2>&1 || true
 	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
-	@CONFIRM_LIVE=YES_I_UNDERSTAND nohup $(PYTHON) RUN/scripts/bot_runner.py --mode LIVE --dashboard --port 8090 >> logs/bot.log 2>&1 &
-	@echo "🔥 Bot started in LIVE mode with Emergency Crash Fallback Server (24/7 on port 8090)"
+	@RUN/scripts/start_bot.sh LIVE 8090
 
 # Management and Diagnostics
 stop:

@@ -885,6 +885,7 @@ def main() -> None:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,
             )
             try:
                 bot_pid_file.write_text(str(proc.pid))

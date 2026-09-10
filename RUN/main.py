@@ -20,8 +20,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sys
 from pathlib import Path
+
+# SIGHUP = terminal closed / disconnected. Ignore it so background runs 24/7
+if hasattr(signal, "SIGHUP"):
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).parent))
