@@ -30,7 +30,7 @@ run:
 	@RUN/scripts/auto_updater.sh start >/dev/null 2>&1 || true
 	@RUN/scripts/start_bot.sh LIVE 8090
 
-# Management and Diagnostics
+# Management and Diagnostics .
 stop:
 	@RUN/scripts/stop_bot.sh 8090
 
