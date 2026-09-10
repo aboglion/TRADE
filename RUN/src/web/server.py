@@ -1214,6 +1214,27 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         init_stop_dist = round(((c_close - initial_stop) / initial_stop) * 100.0, 1) if (initial_stop and initial_stop > 0) else 0.0
                         trail_stop_dist = round(((c_close - trailing_stop) / trailing_stop) * 100.0, 1) if (trailing_stop and trailing_stop > 0) else 0.0
 
+                        m_prog = 100.0 if (macro_regime == "BULL") else 0.0
+                        m_prog_label = f"+{macro_gap_pct:.1f}% מעל הסף" if (macro_regime == "BULL") else "BEAR (סגירת לונגים)"
+
+                        cs_prog = 100.0 if in_momentum else 50.0
+                        cs_prog_label = "🚀 מומנטום פעיל" if in_momentum else "🛡️ Safe Haven (1.0x)"
+
+                        init_prog = max(0.0, min(100.0, round(((c_low - initial_stop) / max(c_close - initial_stop, 1e-6)) * 100.0, 0))) if initial_stop else 100.0
+                        init_prog_label = f"+{init_stop_dist:.1f}% מרווח ביטחון" if initial_stop else "מוגן"
+
+                        trail_prog = max(0.0, min(100.0, round(((c_low - trailing_stop) / max(c_close - trailing_stop, 1e-6)) * 100.0, 0))) if trailing_stop else 100.0
+                        trail_prog_label = f"+{trail_stop_dist:.1f}% מרווח מהסטופ" if trailing_stop else "מוגן"
+
+                        ema_dist = round(((c_close - ema50) / ema50) * 100.0, 1) if ema50 > 0 else 0.0
+                        ema_prog = 100.0 if c_close >= ema50 else max(0.0, min(99.0, round(100.0 + ema_dist, 0)))
+                        ema_prog_label = f"+{ema_dist:.1f}% מעל EMA50" if c_close >= ema50 else f"שבירה של {abs(ema_dist):.1f}%"
+
+                        r_prog = min(100.0, round((open_r / 0.6) * 100.0, 0)) if open_r > 0 else 0.0
+                        pb_prog = min(100.0, round((pullback_atr / 1.5) * 100.0, 0)) if pullback_atr > 0 else 0.0
+                        pyr_prog = 100.0 if pyramid_met else round((r_prog + pb_prog) / 2.0, 0)
+                        pyr_prog_label = "✓ מוכן להוספה!" if pyramid_met else (f"רווח {open_r:+.1f}/0.6R ({int(r_prog)}%)" if open_r < 0.6 else f"ממתין לתיקון {pullback_atr:.1f}/1.5 ATR")
+
                         buy_tree_nodes = [
                             {
                                 "id": "node_macro_regime",
@@ -1223,6 +1244,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"${btc_daily_close:,.0f} vs ${btc_sma150:,.0f} ({macro_gap_pct:+.1f}%)",
                                 "live_val": f"${btc_daily_close:,.0f}",
                                 "badge": f"{macro_gap_pct:+.1f}% (BULL)" if macro_regime == "BULL" else "BEAR (אזהרה)",
+                                "progress_pct": m_prog,
+                                "progress_label": m_prog_label,
                                 "met": macro_regime == "BULL",
                                 "explanation": "בדיקת בסיס: האם השוק הכללי שוורי להגנה על פוזיציות לונג קיימות."
                             },
@@ -1234,6 +1257,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"5d PB: {btc_pb_from_5d:+.2f}% | EMA9: ${btc_ema9_daily:,.0f}",
                                 "live_val": f"5d: {btc_pb_from_5d:+.1f}%",
                                 "badge": "🚀 מומנטום" if in_momentum else "🛡️ Safe Haven (1.0x)",
+                                "progress_pct": cs_prog,
+                                "progress_label": cs_prog_label,
                                 "met": in_momentum,
                                 "explanation": "בדיקת יציבות מומנטום. שבירת מומנטום מורידה מינוף ל-1.0x ומעבירה 60% למזומן."
                             },
@@ -1245,6 +1270,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"Low ${c_low:,.2f} vs Stop ${initial_stop:,.2f}" if initial_stop else "מוגן",
                                 "live_val": f"${initial_stop:,.2f}" if initial_stop else "--",
                                 "badge": f"+{init_stop_dist:.1f}% מרווח" if initial_stop else "מוגן",
+                                "progress_pct": init_prog,
+                                "progress_label": init_prog_label,
                                 "met": (c_low > initial_stop) if initial_stop else True,
                                 "explanation": "הגנה מפני הפסד מעבר לסיכון הכניסה המוגדר."
                             },
@@ -1256,6 +1283,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"Low ${c_low:,.2f} vs Trail ${trailing_stop:,.2f}" if trailing_stop else "מוגן",
                                 "live_val": f"${trailing_stop:,.2f}" if trailing_stop else "--",
                                 "badge": f"+{trail_stop_dist:.1f}% מרווח" if trailing_stop else "מוגן",
+                                "progress_pct": trail_prog,
+                                "progress_label": trail_prog_label,
                                 "met": (c_low > trailing_stop) if trailing_stop else True,
                                 "explanation": "נעילת רווחים! סטופ נגרר המתקדם עם שיאי המחיר החדשים."
                             },
@@ -1267,6 +1296,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
                                 "live_val": f"EMA50: ${ema50:,.2f}",
                                 "badge": "✓ תקין מעל" if c_close >= ema50 else "⚠️ שבירה מתחת",
+                                "progress_pct": ema_prog,
+                                "progress_label": ema_prog_label,
                                 "met": c_close >= ema50,
                                 "explanation": "אימות שהנכס לא שבר את ממוצע 50 בטרנד."
                             },
@@ -1278,6 +1309,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"PnL: {open_r:+.2f} ATR | Pullback: {pullback_atr:.2f} ATR",
                                 "live_val": f"{open_r:+.1f} ATR",
                                 "badge": "✓ מוכן להוספה!" if pyramid_met else ("נעול (Safe Haven)" if safe_haven_active else f"ממתין ({open_r:+.1f}R)"),
+                                "progress_pct": pyr_prog,
+                                "progress_label": pyr_prog_label,
                                 "met": pyramid_met,
                                 "explanation": "הוספת פוזיציה מדורגת (50%+ / 30%+) רק בטרנד שוורים מובהק לאחר תיקון בריא."
                             }
@@ -1288,6 +1321,34 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         adx_badge = f"+{adx_diff}" if adx_diff >= 0 else f"חסר {abs(adx_diff)}"
                         gap_badge = f"+{gap_pct:.2f}% (נפרץ!)" if gap_pct >= 0 else f"{gap_pct:.2f}% לפריצה"
 
+                        # Proximity & Progress Calculations for Entry
+                        m_met = (macro_regime == "BULL")
+                        m_prog = 100.0 if m_met else max(0.0, min(99.0, round(100.0 + macro_gap_pct, 1)))
+                        m_prog_label = f"+{macro_gap_pct:.1f}% מעל הסף" if m_met else f"חסר {abs(macro_gap_pct):.1f}% ל-SMA"
+
+                        cs_met = in_momentum
+                        pb_gap = round(btc_pb_from_5d - cutoff_pct, 2)
+                        cs_prog = 100.0 if cs_met else max(15.0, min(95.0, round(100.0 + pb_gap * 15.0, 1)))
+                        cs_prog_label = "✓ 100% מומנטום" if cs_met else f"חריגה {abs(pb_gap):.1f}% משיא 5d"
+
+                        lev_prog = 100.0 if m_met else 0.0
+                        lev_prog_label = f"מינוף {leverage:.1f}x פעיל"
+
+                        c_above_20 = c_close > ema20
+                        c_20_50 = ema20 > ema50
+                        c_50_200 = ema50 > ema200
+                        trend_score = (1 if c_above_20 else 0) + (1 if c_20_50 else 0) + (1 if c_50_200 else 0)
+                        trend_prog = 100.0 if regime_ok else round((trend_score / 3.0) * 100.0, 0)
+                        trend_prog_label = "✓ 100% טרנד מאושר" if regime_ok else f"{trend_score}/3 ממוצעים עולים ({int(trend_prog)}%)"
+
+                        donch_prog = 100.0 if donchian_ok else (max(10.0, min(99.0, round((c_close / donchian30) * 100.0, 1))) if donchian30 > 0 else 0.0)
+                        diff_usd = round(donchian30 - c_close, 2) if donchian30 > 0 else 0.0
+                        donch_prog_label = f"נפרץ ב-+{gap_pct:.2f}%" if donchian_ok else f"חסר {abs(gap_pct):.2f}% (${abs(diff_usd):,.0f})"
+
+                        adx_prog = 100.0 if adx_ok else (max(10.0, min(99.0, round((c_adx / min_adx) * 100.0, 1))) if min_adx > 0 else 0.0)
+                        adx_gap_val = round(min_adx - c_adx, 1)
+                        adx_prog_label = f"✓ {c_adx:.1f} (100%)" if adx_ok else f"חסר {adx_gap_val:.1f} נק' ({int(adx_prog)}%)"
+
                         buy_tree_nodes = [
                             {
                                 "id": "node_macro_regime",
@@ -1297,6 +1358,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"${btc_daily_close:,.0f} vs ${btc_sma150:,.0f} ({macro_gap_pct:+.1f}%)",
                                 "live_val": f"${btc_daily_close:,.0f}",
                                 "badge": f"{macro_gap_pct:+.1f}%" if macro_regime == "BULL" else "BEAR (חסום)",
+                                "progress_pct": m_prog,
+                                "progress_label": m_prog_label,
                                 "met": macro_regime == "BULL",
                                 "explanation": "שער בסיס עליון: אימות מגמת עלייה שורית בביטקוין מעל ממוצע 150 ימים. בלעדיו כל הלונגים מושבתים."
                             },
@@ -1308,6 +1371,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"5d PB: {btc_pb_from_5d:+.2f}% | EMA9: ${btc_ema9_daily:,.0f}",
                                 "live_val": f"5d: {btc_pb_from_5d:+.1f}%",
                                 "badge": "🚀 מומנטום" if in_momentum else "🛡️ Safe Haven",
+                                "progress_pct": cs_prog,
+                                "progress_label": cs_prog_label,
                                 "met": in_momentum,
                                 "explanation": "אימות שביטקוין לא נסוג מעל 2% משיא 5 ימים ומחזיק מעל EMA9 יומית לפתיחת מינוף מוגבר."
                             },
@@ -1319,6 +1384,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": active_tier,
                                 "live_val": f"{leverage:.1f}x ({total_crypto_exposure:.0f}%)",
                                 "badge": f"{leverage:.1f}x",
+                                "progress_pct": lev_prog,
+                                "progress_label": lev_prog_label,
                                 "met": macro_regime == "BULL",
                                 "explanation": "קביעת המינוף האפקטיבי וכוח הקנייה (עד 10x ברגיעה, 5x/2.5x בתנודתיות, או 1.0x ספוט)."
                             },
@@ -1330,6 +1397,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": asset_regime,
                                 "live_val": asset_regime,
                                 "badge": "✓ מגמה עולה" if regime_ok else "✗ דורש טרנד",
+                                "progress_pct": trend_prog,
+                                "progress_label": trend_prog_label,
                                 "met": regime_ok,
                                 "explanation": f"אימות ש-{coin} נמצא במגמת עלייה טכנית מובהקת (EMA20 > EMA50 > EMA200)."
                             },
@@ -1341,6 +1410,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"${c_close:,.2f} / ${donchian30:,.2f} ({gap_pct:+.2f}%)",
                                 "live_val": f"${c_close:,.2f} / ${donchian30:,.2f}",
                                 "badge": gap_badge,
+                                "progress_pct": donch_prog,
+                                "progress_label": donch_prog_label,
                                 "met": donchian_ok,
                                 "explanation": f"טריגר כניסה קלאסי! סגירת נר 4 שעות של {coin} מעל שיא 30 הנרות האחרונים (${donchian30:,.2f})."
                             },
@@ -1352,10 +1423,47 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "actual": f"{c_adx:.1f} vs {min_adx:.1f}",
                                 "live_val": f"{c_adx:.1f} / {min_adx:.1f}",
                                 "badge": adx_badge,
+                                "progress_pct": adx_prog,
+                                "progress_label": adx_prog_label,
                                 "met": adx_ok,
                                 "explanation": f"סינון דשדוש! מדד ADX ({c_adx:.1f}) חייב להיות מעל {min_adx} לאימות עוצמת תנועה ומניעת מלכודות סרק."
                             }
                         ]
+
+                    # Calculations for Sell Ladder Proximity
+                    bear_trig = (macro_regime == "BEAR")
+                    s1_prog = 0.0 if bear_trig else 100.0
+                    s1_label = f"+{macro_gap_pct:.1f}% מעל SMA (מוגן)" if not bear_trig else f"🐻 שורט פעיל ({macro_gap_pct:.1f}%)"
+
+                    s2_prog = 0.0 if safe_haven_active else 100.0
+                    s2_label = "✓ מוגן (מרווח משיא)" if not safe_haven_active else f"נסיגה {btc_pb_from_5d:+.1f}% משיא 5d"
+
+                    flash_margin = round(abs(flash_wick_limit_pct) - abs(btc_intraday_dip_pct), 1)
+                    s3_prog = 0.0 if flash_triggered else 100.0
+                    s3_label = f"מרווח {flash_margin:+.1f}% מפלאש" if not flash_triggered else f"צניחה {btc_intraday_dip_pct:+.1f}%"
+
+                    if is_active and initial_stop is not None and initial_stop > 0:
+                        i_dist = round(((c_low - initial_stop) / initial_stop) * 100, 1)
+                        s4_trig = c_low <= initial_stop
+                        s4_prog = 0.0 if s4_trig else 100.0
+                        s4_label = f"🚨 נשבר ב-{abs(i_dist):.1f}%" if s4_trig else f"+{i_dist:.1f}% מרווח מסטופ"
+                    else:
+                        s4_prog = 100.0
+                        s4_label = "אין פוזיציה (בטוח)"
+
+                    if is_active and trailing_stop is not None and trailing_stop > 0:
+                        t_dist = round(((c_low - trailing_stop) / trailing_stop) * 100, 1)
+                        s5_trig = c_low <= trailing_stop
+                        s5_prog = 0.0 if s5_trig else 100.0
+                        s5_label = f"🚨 נשבר ב-{abs(t_dist):.1f}%" if s5_trig else f"+{t_dist:.1f}% מרווח מטרייל"
+                    else:
+                        s5_prog = 100.0
+                        s5_label = "אין פוזיציה (בטוח)"
+
+                    ema_dist = round(((c_close - ema50) / ema50) * 100, 1) if ema50 > 0 else 0.0
+                    s6_trig = (c_close < ema50) if (entry_mode == "TREND" and is_active) else False
+                    s6_prog = 0.0 if s6_trig else 100.0
+                    s6_label = f"שבירה {abs(ema_dist):.1f}% מתחת" if s6_trig else (f"+{ema_dist:.1f}% מעל EMA50" if ema_dist >= 0 else f"{ema_dist:.1f}% מ-EMA50")
 
                     sell_tree_nodes = [
                         {
@@ -1366,6 +1474,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "actual": "BEAR ACTIVE (35% @ 2.0x Short BTC)" if macro_regime == "BEAR" else "BULL ACTIVE (תקין)",
                             "live_val": "BEAR" if macro_regime == "BEAR" else "BULL",
                             "badge": "🚨 שורט דובים!" if macro_regime == "BEAR" else "✓ תקין",
+                            "progress_pct": s1_prog,
+                            "progress_label": s1_label,
                             "triggered": macro_regime == "BEAR",
                             "explanation": "סגירת כל הלונגים ומעבר לגידור שורט ממונף 2.0x על BTC במעבר למשטר דובים."
                         },
@@ -1377,6 +1487,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "actual": f"5d PB: {btc_pb_from_5d:+.2f}%, Under EMA9: {btc_daily_close < btc_ema9_daily}",
                             "live_val": f"{btc_pb_from_5d:+.1f}%",
                             "badge": "🛡️ הופעל (Safe Haven)" if safe_haven_active else "✓ מוגן",
+                            "progress_pct": s2_prog,
+                            "progress_label": s2_label,
                             "triggered": safe_haven_active,
                             "explanation": "נסיגה משיא 5 ימים או שבירת EMA9 מורידה מיד ל-1.0x ספוט ומעבירה 60% למזומן בריבית."
                         },
@@ -1388,6 +1500,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "actual": f"Intraday Dip: {btc_intraday_dip_pct:+.2f}%",
                             "live_val": f"{btc_intraday_dip_pct:+.1f}%",
                             "badge": "⚡ הופעל!" if flash_triggered else "✓ תקין",
+                            "progress_pct": s3_prog,
+                            "progress_label": s3_label,
                             "triggered": flash_triggered,
                             "explanation": "צניחה תוך-יומית מנר הפתיחה חותכת מיד את המינוף ל-1.0x לספיגת המכה."
                         },
@@ -1399,6 +1513,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${initial_stop:,.2f}" if initial_stop else ""),
                             "live_val": f"${initial_stop:,.2f}" if initial_stop else "--",
                             "badge": "🚨 נשבר!" if (is_active and initial_stop is not None and c_low <= initial_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
+                            "progress_pct": s4_prog,
+                            "progress_label": s4_label,
                             "triggered": (c_low <= initial_stop) if (is_active and initial_stop is not None) else False,
                             "explanation": "יציאת חירום אם הנר שבר את רמת הסיכון הראשונית בכניסה."
                         },
@@ -1410,6 +1526,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${trailing_stop:,.2f}" if trailing_stop else ""),
                             "live_val": f"${trailing_stop:,.2f}" if trailing_stop else "--",
                             "badge": "🚨 נשבר!" if (is_active and trailing_stop is not None and c_low <= trailing_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
+                            "progress_pct": s5_prog,
+                            "progress_label": s5_label,
                             "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop is not None) else False,
                             "explanation": "נעילת רווחים: יציאה מיידית אם המחיר נסוג מתחת לסטופ הנגרר."
                         },
@@ -1421,6 +1539,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
                             "live_val": f"EMA50: ${ema50:,.2f}",
                             "badge": "🚨 שבירה!" if ((c_close < ema50) and (entry_mode == "TREND")) else ("✓ מעל" if is_active else "אין פוזיציה"),
+                            "progress_pct": s6_prog,
+                            "progress_label": s6_label,
                             "triggered": (c_close < ema50) if (entry_mode == "TREND" and is_active) else False,
                             "explanation": "אזהרת היפוך מגמה: סגירת נר מתחת ל-EMA50 כשהמצב הוא TREND."
                         }

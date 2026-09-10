@@ -2809,6 +2809,39 @@ function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActiv
 
         const liveValText = node.live_val || node.actual || "";
 
+        // Progress Bar & Proximity Distance Metric
+        let progPct = 100;
+        let progLabel = "";
+        if (node.progress_pct !== undefined && node.progress_pct !== null) {
+            progPct = Math.max(0, Math.min(100, Number(node.progress_pct)));
+            progLabel = node.progress_label || `${progPct.toFixed(0)}%`;
+        } else if (node.circuitState === "energized" || node.met === true || node.isMet === true) {
+            progPct = 100;
+            progLabel = node.progress_label || "✓ 100% מושג";
+        } else {
+            progPct = 0;
+            progLabel = node.progress_label || "0% לא מתקיים";
+        }
+
+        let progBarClass = "pass";
+        let progTextClass = "prog-pass";
+
+        if (node.circuitState === "blocking") {
+            progBarClass = "blocking";
+            progTextClass = "prog-blocking";
+        } else if (node.circuitState === "dormant") {
+            if (node.isMet) {
+                progBarClass = "dormant-pass";
+                progTextClass = "prog-dormant-pass";
+            } else {
+                progBarClass = "dormant-fail";
+                progTextClass = "prog-dormant-fail";
+            }
+        } else {
+            progBarClass = "energized";
+            progTextClass = "prog-energized";
+        }
+
         tHtml += `
             <div class="pipeline-node-wrapper" data-node-id="${node.id}">
                 <div class="pipeline-node-circle ${circleClass}">${circleIcon}</div>
@@ -2816,6 +2849,13 @@ function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActiv
                 ${liveValText ? `<span class="pipeline-node-live-val">${liveValText}</span>` : ''}
                 <span class="pipeline-node-badge ${statusClass}">${statusBadgeText}</span>
                 
+                <div class="pipeline-progress-box" title="${progLabel}">
+                    <div class="pipeline-progress-track">
+                        <div class="pipeline-progress-fill ${progBarClass}" style="width: ${progPct}%;"></div>
+                    </div>
+                    <span class="pipeline-progress-text ${progTextClass}">${progLabel}</span>
+                </div>
+
                 <div class="pipeline-popover-content" style="display:none;">
                     <div class="popover-header">
                         <span class="popover-title">${node.fullTitle || node.title}</span>
@@ -2824,6 +2864,7 @@ function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActiv
                     <div class="popover-grid">
                         <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
                         <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
+                        <div><span class="popover-item-label">📈 מרחק / התקדמות:</span> <span class="popover-item-val">${progLabel} (${progPct.toFixed(0)}%)</span></div>
                     </div>
                     <div class="popover-explanation">💡 ${node.explanation || ''}</div>
                 </div>
@@ -2847,13 +2888,26 @@ function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActiv
     const finalConnClass = (allPass || isPosActive) ? "energized" : "dormant";
     tHtml += `<div class="pipeline-connector ${finalConnClass}"></div>`;
 
-    // Output Coil
+    // Output Coil & Overall Circuit Progress
+    const passedCount = evaluatedNodes.filter(n => n.circuitState === 'energized').length;
+    const totalCount = evaluatedNodes.length;
+    const circuitProgressPct = (allPass || isPosActive) ? 100 : Math.round((passedCount / totalCount) * 100);
+    const coilProgLabel = (allPass || isPosActive) ? '✓ 100% מעגל מושלם' : `${passedCount}/${totalCount} שערים (${circuitProgressPct}%)`;
+    const coilProgClass = (allPass || isPosActive) ? 'energized' : 'blocking';
+    const coilTextClass = (allPass || isPosActive) ? 'prog-energized' : 'prog-blocking';
+
     tHtml += `
         <div class="pipeline-node-wrapper ladder-output-coil">
             <div class="pipeline-node-circle ${outcomeMeta.circleClass}">${outcomeMeta.icon}</div>
             <span class="pipeline-node-label">${outcomeMeta.title}</span>
             <span class="pipeline-node-live-val">${outcomeMeta.liveVal}</span>
             <span class="pipeline-node-badge ${outcomeMeta.badgeClass}">${outcomeMeta.badgeText}</span>
+            <div class="pipeline-progress-box" title="${coilProgLabel}">
+                <div class="pipeline-progress-track">
+                    <div class="pipeline-progress-fill ${coilProgClass}" style="width: ${circuitProgressPct}%;"></div>
+                </div>
+                <span class="pipeline-progress-text ${coilTextClass}">${coilProgLabel}</span>
+            </div>
         </div>
     `;
 
@@ -2909,6 +2963,30 @@ function renderDashboardPipeline(data) {
         const effectiveLev = macro.effective_leverage || (isBull ? 2.5 : 0.0);
         const totalExposure = macro.total_crypto_weight_pct || (isBull ? 205 : 0);
 
+        const btcDistSma = macro.btc_sma150 ? ((btcClose - macro.btc_sma150) / macro.btc_sma150) * 100 : 0;
+        const r1_prog = isBull ? 100 : Math.max(0, Math.min(99, Math.round(100 + btcDistSma)));
+        const r1_label = isBull ? `+${btcDistSma.toFixed(1)}% מעל הסף` : `חסר ${Math.abs(btcDistSma).toFixed(1)}% ל-SMA`;
+
+        const pbGap = dist5d - (-2.0);
+        const r2_prog = inMomentum ? 100 : Math.max(15, Math.min(95, Math.round(100 + pbGap * 15)));
+        const r2_label = inMomentum ? "✓ 100% מומנטום" : `חריגה ${Math.abs(pbGap).toFixed(1)}% משיא 5d`;
+
+        const r3_prog = effectiveLev >= 10.0 ? 100 : (effectiveLev >= 5.0 ? 75 : (effectiveLev >= 2.5 ? 50 : 25));
+        const r3_label = `מינוף ${effectiveLev.toFixed(1)}x פעיל`;
+
+        const flashMargin = (Math.abs(flashLimit) - Math.abs(intradayDip));
+        const r4_prog = !flashTriggered ? 100 : 0;
+        const r4_label = !flashTriggered ? `מרווח: ${flashMargin.toFixed(1)}%` : `צניחה ${Math.abs(intradayDip).toFixed(1)}%`;
+
+        const r5_prog = barsSinceTrip > 4 ? 100 : Math.round((barsSinceTrip / 4) * 100);
+        const r5_label = barsSinceTrip > 4 ? "✓ 100% מושלם" : `שלב ${barsSinceTrip}/4 (${r5_prog}%)`;
+
+        const r6_prog = 100;
+        const r6_label = safeHavenActive ? "🛡️ 60% מזומן" : "🚀 100% מושקע";
+
+        const r7_prog = isBull ? 100 : 0;
+        const r7_label = isBull ? "✓ מוגן (רדום)" : "🐻 שורט פעיל";
+
         const riskNodes = [
             {
                 id: "dash_risk_1",
@@ -2918,6 +2996,8 @@ function renderDashboardPipeline(data) {
                 actual: isBull ? `BULL REGIME ($${(macro.btc_close||0).toLocaleString()} > $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME ($${(macro.btc_close||0).toLocaleString()} < $${(macro.btc_sma150||0).toLocaleString()})`,
                 live_val: `$${(macro.btc_close||0).toLocaleString()}`,
                 badge: isBull ? "✓ שוורי" : "🐻 דובים",
+                progress_pct: r1_prog,
+                progress_label: r1_label,
                 met: isBull,
                 explanation: "אימות מגמת עלייה שורית ראשית בביטקוין מעל ממוצע 150 ימים. בלעדיו מושבתים כל הלונגים."
             },
@@ -2929,6 +3009,8 @@ function renderDashboardPipeline(data) {
                 actual: `5d PB: ${dist5d.toFixed(2)}% | EMA9: $${(ema9||0).toLocaleString()} (${inMomentum ? '🚀 מומנטום' : '🛡️ Safe Haven'})`,
                 live_val: `5d: ${dist5d.toFixed(1)}%`,
                 badge: inMomentum ? "🚀 מומנטום" : "🛡️ Safe Haven",
+                progress_pct: r2_prog,
+                progress_label: r2_label,
                 met: inMomentum,
                 explanation: "שער הכניסה למינוף מוגבר: נסיגה מעל 2%- משיא 5 ימים מפעילה מיד Safe Haven והורדה ל-1.0x ספוט."
             },
@@ -2940,6 +3022,8 @@ function renderDashboardPipeline(data) {
                 actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || `${effectiveLev.toFixed(1)}x Tier`}`,
                 live_val: `${effectiveLev.toFixed(1)}x Tier`,
                 badge: `${effectiveLev.toFixed(1)}x`,
+                progress_pct: r3_prog,
+                progress_label: r3_label,
                 met: isBull && inMomentum && effectiveLev >= 2.5,
                 explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 10x ברגיעה ומומנטום, ו-5.0x / 2.5x בתנודתיות."
             },
@@ -2951,6 +3035,8 @@ function renderDashboardPipeline(data) {
                 actual: `${intradayDip.toFixed(2)}% ${flashTriggered ? '⚠️ הופעל!' : '✓ תקין'}`,
                 live_val: `${intradayDip.toFixed(1)}%`,
                 badge: flashTriggered ? "⚡ הופעל!" : "✓ תקין",
+                progress_pct: r4_prog,
+                progress_label: r4_label,
                 met: !flashTriggered,
                 explanation: "מפסק הגנה תוך-יומי החותך מיידית את המינוף ל-1.0x אם נר יומי צונח מעל 3.8%- מפתיחה."
             },
@@ -2962,6 +3048,8 @@ function renderDashboardPipeline(data) {
                 actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
                 live_val: ladderStep,
                 badge: `תקרה ${ladderCap.toFixed(0)}x`,
+                progress_pct: r5_prog,
+                progress_label: r5_label,
                 met: barsSinceTrip > 4,
                 explanation: "מניעת מלכודות שוורים: חזרה הדרגתית ומבוקרת למינוף מלא ב-4 שלבים מדודים."
             },
@@ -2973,6 +3061,8 @@ function renderDashboardPipeline(data) {
                 actual: safeHavenActive ? "🛡️ 60% Cash Buffer (4% APY) + 30% Spot" : "🚀 100% Capital Deployed",
                 live_val: safeHavenActive ? "60% Cash @ 4%" : "100% מושקע",
                 badge: safeHavenActive ? "4% APY" : "🚀 מומנטום",
+                progress_pct: r6_prog,
+                progress_label: r6_label,
                 met: true,
                 explanation: "הקצאת 60% מההון למזומן בריבית 4% כשהשוק בתיקון, לשמירה מוחלטת על הקרן."
             },
@@ -2984,6 +3074,8 @@ function renderDashboardPipeline(data) {
                 actual: isBull ? "✓ משטר שוורים (שורט רדום)" : "🐻 שורט פעיל: 35% ממונף 2.0x",
                 live_val: isBull ? "לונגים מאושרים" : "-70% Net Short",
                 badge: isBull ? "✓ תקין" : "🐻 שורט פעיל",
+                progress_pct: r7_prog,
+                progress_label: r7_label,
                 met: isBull,
                 explanation: "הגנה אקטיבית: הקצאת 35% מההון לשורט ממונף 2.0x על ביטקוין כאשר השוק עובר למשטר דובים."
             }
