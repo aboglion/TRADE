@@ -83,8 +83,8 @@ class ExchangeGateway:
             options["portfolioMargin"] = True
 
         # API credentials (not needed for DRY_RUN with no real calls)
-        api_key = self._config.api_key if self._config.api_key else None
-        api_secret = self._config.api_secret if self._config.api_secret else None
+        api_key = self._config.api_key.strip().strip("'\"").strip() if self._config.api_key else None
+        api_secret = self._config.api_secret.strip().strip("'\"").strip() if self._config.api_secret else None
 
         self._exchange = ccxt.binance({
             "apiKey": api_key,
@@ -285,7 +285,21 @@ class ExchangeGateway:
 
         Returns dict of {currency: {"free": x, "used": y, "total": z}}.
         """
-        raw = self._retry(lambda: self.exchange.fetch_balance())
+        try:
+            raw = self._retry(lambda: self.exchange.fetch_balance())
+        except ExchangeAuthError as e:
+            if self._config.market_type == "future" and "-2015" in str(e):
+                curr_pm = bool(self.exchange.options.get("portfolioMargin", False))
+                logger.info("Attempting automatic portfolioMargin fallback (trying portfolioMargin=%s)...", not curr_pm)
+                self.exchange.options["portfolioMargin"] = not curr_pm
+                try:
+                    raw = self._retry(lambda: self.exchange.fetch_balance())
+                    logger.info("Portfolio Margin fallback succeeded! Running with portfolioMargin=%s", not curr_pm)
+                except Exception:
+                    self.exchange.options["portfolioMargin"] = curr_pm
+                    raise e
+            else:
+                raise
         result: Dict[str, Dict[str, float]] = {}
         for currency, balance in raw.items():
             if isinstance(balance, dict) and "free" in balance:

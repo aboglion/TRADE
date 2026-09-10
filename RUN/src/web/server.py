@@ -319,6 +319,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_get_telegram()
         elif clean_api_path == "/api/strategy/conditions":
             self._handle_strategy_conditions()
+        elif clean_api_path in ("/api/test_binance", "/api/binance/test"):
+            self._handle_test_binance()
         elif clean_path.startswith("/api/"):
             self._send_json({"error": f"API endpoint '{clean_path}' not found"}, status=404)
         else:
@@ -532,6 +534,87 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "strategy_state": state.strategy_state if state else {},
         }
         self._send_json(data)
+
+    def _handle_test_binance(self) -> None:
+        import ccxt
+        import urllib.request
+        outbound_ip = "unknown"
+        try:
+            req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                outbound_ip = resp.read().decode("utf-8").strip()
+        except Exception as ex:
+            outbound_ip = f"Error detecting IP: {ex}"
+
+        # Ensure .env is read
+        try:
+            from main import load_dotenv
+            load_dotenv()
+        except ImportError:
+            try:
+                from src.main import load_dotenv
+                load_dotenv()
+            except ImportError:
+                pass
+
+        api_key = os.environ.get("BINANCE_API_KEY", "").strip().strip("'\"").strip()
+        api_secret = os.environ.get("BINANCE_API_SECRET", "").strip().strip("'\"").strip()
+
+        if not api_key or not api_secret or api_key in ("your_api_key_here", ""):
+            self._send_json({
+                "success": False,
+                "outbound_ip": outbound_ip,
+                "error": "No API key configured in environment or .env file",
+                "key_length": len(api_key),
+            })
+            return
+
+        results = {
+            "outbound_ip": outbound_ip,
+            "key_prefix": api_key[:6] + "..." if len(api_key) >= 6 else "short",
+            "tests": {}
+        }
+
+        # 1. Test Spot
+        try:
+            spot_ex = ccxt.binance({
+                "apiKey": api_key, "secret": api_secret,
+                "enableRateLimit": True, "timeout": 10000,
+                "options": {"adjustForTimeDifference": True, "recvWindow": 10000}
+            })
+            b = spot_ex.fetch_balance()
+            spot_assets = {k: v["total"] for k, v in b.items() if isinstance(v, dict) and v.get("total", 0) > 0}
+            results["tests"]["spot"] = {"status": "SUCCESS", "balances": spot_assets}
+        except Exception as e:
+            results["tests"]["spot"] = {"status": "FAILED", "error": str(e)}
+
+        # 2. Test USDT-M Futures
+        try:
+            fapi_ex = ccxt.binance({
+                "apiKey": api_key, "secret": api_secret,
+                "enableRateLimit": True, "timeout": 10000,
+                "options": {"defaultType": "future", "adjustForTimeDifference": True, "recvWindow": 10000}
+            })
+            b_f = fapi_ex.fetch_balance()
+            f_assets = {k: v["total"] for k, v in b_f.items() if isinstance(v, dict) and v.get("total", 0) > 0}
+            results["tests"]["futures_usdt_m"] = {"status": "SUCCESS", "balances": f_assets}
+        except Exception as e:
+            results["tests"]["futures_usdt_m"] = {"status": "FAILED", "error": str(e)}
+
+        # 3. Test Portfolio Margin
+        try:
+            papi_ex = ccxt.binance({
+                "apiKey": api_key, "secret": api_secret,
+                "enableRateLimit": True, "timeout": 10000,
+                "options": {"defaultType": "future", "portfolioMargin": True, "adjustForTimeDifference": True, "recvWindow": 10000}
+            })
+            b_p = papi_ex.fetch_balance()
+            p_assets = {k: v["total"] for k, v in b_p.items() if isinstance(v, dict) and v.get("total", 0) > 0}
+            results["tests"]["portfolio_margin"] = {"status": "SUCCESS", "balances": p_assets}
+        except Exception as e:
+            results["tests"]["portfolio_margin"] = {"status": "FAILED", "error": str(e)}
+
+        self._send_json(results)
 
     def _handle_portfolio(self) -> None:
         if not self.gateway:

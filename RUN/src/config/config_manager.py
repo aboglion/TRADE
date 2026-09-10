@@ -205,8 +205,8 @@ class ConfigManager:
             rate_limit=ex_raw.get("rate_limit", True),
             max_retries=ex_raw.get("max_retries", 3),
             retry_delay_base_ms=ex_raw.get("retry_delay_base_ms", 1000),
-            api_key=os.environ.get("BINANCE_API_KEY", ""),
-            api_secret=os.environ.get("BINANCE_API_SECRET", ""),
+            api_key=os.environ.get("BINANCE_API_KEY", "").strip().strip("'\"").strip(),
+            api_secret=os.environ.get("BINANCE_API_SECRET", "").strip().strip("'\"").strip(),
             market_type=ex_raw.get("market_type", "future"),
             portfolio_margin=ex_raw.get("portfolio_margin", False),
         )
