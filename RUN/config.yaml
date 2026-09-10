@@ -2,7 +2,7 @@ run_mode: DRY_RUN
 exchange:
   name: binance
   market_type: future
-  portfolio_margin: true
+  portfolio_margin: false
   timeout_ms: 30000
   rate_limit: true
   max_retries: 3
@@ -27,6 +27,7 @@ strategy:
   - 4.0
   - 10.0
   bear_short_hedge_weight: 0.35
+  short_leverage: 2.0
   cash_apr: 0.04
   assets:
     BTC:
@@ -63,9 +64,9 @@ scheduler:
   max_consecutive_errors: 10
 dry_run:
   initial_balances:
-    USDT: 418.8910877
-    BTC: 0.0148827
-    ETH: 0.5506405
+    USDT: 2940.83006728
+    BTC: 0.0
+    ETH: 0.0
     SOL: 0.0
 telegram:
   enabled: false

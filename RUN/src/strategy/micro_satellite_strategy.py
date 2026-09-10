@@ -109,12 +109,14 @@ class MicroSatelliteStrategy:
 
             latest = df.iloc[-1]
             current_bar = len(df)
-            c_close = latest.Close
-            c_high = latest.High
-            c_atr = latest.ATR
-            regime = latest.MicroRegime
+            c_close = float(latest["Close"])
+            c_high = float(latest["High"])
+            c_low = float(latest["Low"])
+            c_atr = float(latest["ATR"])
+            regime = latest["MicroRegime"]
 
             # Position active?
+            current_ts = int(candles[-1].timestamp_ms)
             if not pos_state["active"]:
                 # Check for entry
                 if regime in ("HIGH_CONVICTION_MICRO", "MICRO_TREND_ACCELERATION"):
@@ -126,11 +128,12 @@ class MicroSatelliteStrategy:
                     pos_state["extreme_px"] = c_close
                     pos_state["stop_px"] = c_close - self._cfg["init_stop_atr"] * c_atr
                     pos_state["entry_bar"] = current_bar
+                    pos_state["entry_ts"] = current_ts
                     pos_state["tp1_done"] = False
                     pos_state["mode"] = regime
                     pos_state["alloc"] = alloc
 
-                    target_weights[symbol] = alloc * self._weights.get(symbol, 0.0)
+                    target_weights[symbol] = alloc * self._weights.get(base, 0.0)
                     signals.append(StrategySignal(
                         symbol=symbol,
                         action=PositionAction.OPEN,
@@ -140,13 +143,26 @@ class MicroSatelliteStrategy:
                     ))
                 else:
                     target_weights[symbol] = 0.0
+                    signals.append(StrategySignal(
+                        symbol=symbol,
+                        action=PositionAction.HOLD,
+                        asset_regime=self._to_asset_regime(regime),
+                        target_weight=0.0,
+                        reason=f"Micro Neutral / No Entry ({regime})",
+                    ))
             else:
                 # Manage active position matching BACK_TEST/engine.py run_micro_backtest
-                bars_held = current_bar - pos_state["entry_bar"]
-                prev_extreme = pos_state["extreme_px"]
-                entry_px = pos_state["entry_px"]
-                alloc = pos_state["alloc"]
-                stop_px = pos_state.get("stop_px", entry_px - self._cfg["init_stop_atr"] * c_atr)
+                entry_ts = pos_state.get("entry_ts")
+                if not entry_ts:
+                    entry_ts = current_ts
+                    pos_state["entry_ts"] = current_ts
+                interval_ms = (candles[1].timestamp_ms - candles[0].timestamp_ms) if len(candles) >= 2 else 14_400_000
+                candle_interval_ms = max(1, interval_ms)
+                bars_held = max(0, int((current_ts - entry_ts) / candle_interval_ms))
+                entry_px = float(pos_state.get("entry_px") or c_close)
+                prev_extreme = max(float(pos_state.get("extreme_px") or 0.0), entry_px, c_close)
+                alloc = float(pos_state.get("alloc") or self._cfg.get("base_alloc", 0.85))
+                stop_px = float(pos_state.get("stop_px") or (entry_px - self._cfg["init_stop_atr"] * c_atr))
 
                 open_profit_atr = (c_close - entry_px) / max(c_atr, 1e-6)
                 raw_trail = prev_extreme - self._cfg["trail_atr"] * c_atr
@@ -161,10 +177,11 @@ class MicroSatelliteStrategy:
 
                 # Check Exit Conditions FIRST (matching BACK_TEST lines 612-623)
                 exit_reason = None
-                if latest.Low <= stop_px:
-                    exit_reason = f"Micro ATR Trail / Breakeven Stop Hit (Low {latest.Low:.2f} <= Stop {stop_px:.2f}, Hold {bars_held}b)"
-                elif c_close < latest.EMA50 and open_profit_atr < 0.2:
-                    exit_reason = f"Micro EMA50 Breakdown (Close {c_close:.2f} < EMA50 {latest.EMA50:.2f}, PnL {open_profit_atr:.2f} ATR)"
+                latest_ema50 = float(latest["EMA50"])
+                if c_low <= stop_px:
+                    exit_reason = f"Micro ATR Trail / Breakeven Stop Hit (Low {c_low:.2f} <= Stop {stop_px:.2f}, Hold {bars_held}b)"
+                elif c_close < latest_ema50 and open_profit_atr < 0.2:
+                    exit_reason = f"Micro EMA50 Breakdown (Close {c_close:.2f} < EMA50 {latest_ema50:.2f}, PnL {open_profit_atr:.2f} ATR)"
                 elif bars_held >= self._cfg["max_hold_bars"]:
                     exit_reason = f"Micro Time Stop (Hold {bars_held}b >= {self._cfg['max_hold_bars']}b)"
 
@@ -189,7 +206,7 @@ class MicroSatelliteStrategy:
                         pos_state["alloc"] = alloc
                         tp1_signal = True
 
-                    target_weights[symbol] = alloc * self._weights.get(symbol, 0.0)
+                    target_weights[symbol] = alloc * self._weights.get(base, 0.0)
                     if tp1_signal:
                         signals.append(StrategySignal(
                             symbol=symbol,
@@ -268,7 +285,8 @@ class MicroSatelliteStrategy:
             ret30 = ret30_v[i]
 
             macro_strong = (c > e50 > e200) and (ret30 > 0.05)
-            if macro_strong and c >= donch_hi[i] and rsi_val >= self._cfg["rsi_surge_min"] and vol > volsma * self._cfg["vol_surge_mult"]:
+            donch_val = donch_hi[i] if not np.isnan(donch_hi[i]) else float("inf")
+            if macro_strong and c >= donch_val and rsi_val >= self._cfg["rsi_surge_min"] and vol > volsma * self._cfg["vol_surge_mult"]:
                 regimes.append("HIGH_CONVICTION_MICRO")
             elif macro_strong and (c > e9 > e21) and (c > o) and rsi_val >= 52.0 and vol > volsma * 1.3:
                 regimes.append("MICRO_TREND_ACCELERATION")

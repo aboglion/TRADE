@@ -28,6 +28,7 @@ strategy:
   flash_wick_limit: -0.038
   ladder_steps: [1.0, 2.0, 4.0, 10.0]
   bear_short_hedge_weight: 0.35    # 0.35 = 35% margin @ 2.0x short hedge on BTC
+  short_leverage: 2.0              # 2.0x leverage for short hedge
   cash_apr: 0.04                   # 4.0% APY for cash parked in yield / earn
 
   assets:

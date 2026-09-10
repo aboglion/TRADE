@@ -63,6 +63,7 @@ class StrategyConfig:
     flash_wick_limit: float = -0.038
     ladder_steps: List[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0])
     bear_short_hedge_weight: float = 0.35   # 0.35 for 35% margin @ 2.0x short hedge on BTC
+    short_leverage: float = 2.0            # 2.0x leverage for short hedge
     cash_apr: float = 0.04
     core_ratio: float = 0.80               # Macro/Micro allocation split
     # Macro per-asset configs are kept as dicts matching engine.py constants
@@ -74,7 +75,7 @@ class StrategyConfig:
 class RiskConfig:
     max_orders_per_cycle: int = 6
     max_single_order_usd: float = 10000.0
-    max_portfolio_change_pct: float = 0.20
+    max_portfolio_change_pct: float = 3.5
     min_seconds_between_orders: int = 10
     allowed_symbols: List[str] = field(default_factory=list)
     banned_symbols: List[str] = field(default_factory=list)
@@ -240,6 +241,7 @@ class ConfigManager:
             flash_wick_limit=s_raw.get("flash_wick_limit", -0.038),
             ladder_steps=s_raw.get("ladder_steps", [1.0, 2.0, 4.0, 10.0]),
             bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.35),
+            short_leverage=s_raw.get("short_leverage", 2.0),
             cash_apr=s_raw.get("cash_apr", 0.04),
             core_ratio=s_raw.get("core_ratio", 0.80),
             macro_configs=s_raw.get("macro_configs", {}),
@@ -405,6 +407,57 @@ class ConfigManager:
                 yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
         except Exception as e:
             logger.error("Failed to save dry run balances to %s: %s", self._config_path, e)
+
+    def save_run_mode(self, mode: str) -> None:
+        """Persist updated run_mode back to config.yaml and logs/last_mode."""
+        mode_upper = mode.upper()
+        if self._config:
+            try:
+                self._config.run_mode = RunMode[mode_upper]
+            except KeyError:
+                pass
+
+        if self._config_path and Path(self._config_path).exists():
+            try:
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+
+                data["run_mode"] = mode_upper
+
+                with open(self._config_path, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+            except Exception as e:
+                logger.error("Failed to save run_mode to %s: %s", self._config_path, e)
+
+        # Write to logs/last_mode for Makefile / restart persistence
+        for lm_path in (Path("logs/last_mode"), Path("RUN/logs/last_mode")):
+            try:
+                lm_path.parent.mkdir(parents=True, exist_ok=True)
+                lm_path.write_text(mode_upper)
+            except Exception:
+                pass
+
+    def save_kill_switch(self, enabled: bool) -> None:
+        """Persist updated risk.kill_switch state back to config.yaml."""
+        if self._config:
+            self._config.risk.kill_switch = enabled
+
+        if not self._config_path or not Path(self._config_path).exists():
+            return
+
+        try:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            if "risk" not in data:
+                data["risk"] = {}
+            data["risk"]["kill_switch"] = bool(enabled)
+
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+            logger.info("Persisted risk.kill_switch=%s to %s", enabled, self._config_path)
+        except Exception as e:
+            logger.error("Failed to save kill_switch to %s: %s", self._config_path, e)
 
     # ── Validation ───────────────────────────────────────────
 

@@ -33,9 +33,10 @@
                         <span id="connText">ONLINE</span>
                     </div>
 
-                    <div class="status-badge mode-badge" id="modeBadge" title="Execution Mode: DRY_RUN (live simulation), TESTNET or LIVE">
-                        <span class="dot pulse"></span>
+                    <div class="status-badge mode-badge" id="modeBadge" title="Execution Mode: Click to switch between DRY_RUN (simulation) and LIVE mode" onclick="openSwitchModeModal()">
+                        <span class="dot pulse" id="modeDot"></span>
                         <span id="modeText">DRY_RUN</span>
+                        <span style="font-size: 0.72rem; opacity: 0.8; margin-left: 2px;">🔄</span>
                     </div>
 
                     <div class="status-badge regime-badge" id="regimeBadge" title="Current Market Regime: BULL (uptrend) / BEAR (downtrend) based on BTC vs SMA-150">
@@ -835,12 +836,61 @@
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline" id="closeConditionsModalFooter" onclick="closeConditionsModal()">Close / סגור</button>
+    <!-- Execution Mode Switching Modal (DRY_RUN <-> LIVE) -->
+    <div class="modal-backdrop" id="modeSwitchModal" style="display: none;">
+        <div class="modal glass shadow-2xl modal-mode-switch" style="max-width: 560px;">
+            <div class="modal-header">
+                <div class="modal-title-container">
+                    <span class="modal-icon" id="modeModalIcon">⚡</span>
+                    <div>
+                        <h3 id="modeModalTitle">שינוי מצב הפעלה (Execution Mode Switch)</h3>
+                        <p class="modal-subtitle" id="modeModalSubtitle">החלפה בטוחה בין סימולציה (DRY_RUN) לבין מסחר אמת (LIVE)</p>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeModeSwitchModal()">&times;</button>
+            </div>
+            
+            <div class="modal-body" style="padding: 1.5rem 1.75rem;">
+                <!-- Current vs Target Mode Selection Cards -->
+                <div class="mode-switch-grid">
+                    <div class="mode-option-card" id="modeOptDryRun" onclick="selectModeTarget('DRY_RUN')">
+                        <div class="mode-opt-header">
+                            <span class="mode-opt-badge dry-badge">DRY_RUN</span>
+                            <span class="mode-opt-icon">🛡️</span>
+                        </div>
+                        <div class="mode-opt-title">סימולציה (Simulation)</div>
+                        <div class="mode-opt-desc">מסחר בדיקה על נתוני שוק חיים. אפס סיכון כספי.</div>
+                    </div>
+
+                    <div class="mode-option-card" id="modeOptLive" onclick="selectModeTarget('LIVE')">
+                        <div class="mode-opt-header">
+                            <span class="mode-opt-badge live-badge">LIVE MODE</span>
+                            <span class="mode-opt-icon">🔥</span>
+                        </div>
+                        <div class="mode-opt-title">מסחר אמת (Real Money)</div>
+                        <div class="mode-opt-desc">מסחר אוטומטי בכסף אמיתי ב-Binance Futures.</div>
+                    </div>
+                </div>
+
+                <!-- Warning Notice Box -->
+                <div class="mode-alert-box" id="modeAlertBox">
+                    <div class="mode-alert-icon" id="modeAlertIcon">⚠️</div>
+                    <div class="mode-alert-content">
+                        <strong id="modeAlertTitle">שים לב! מעבר למצב מסחר אמת</strong>
+                        <p id="modeAlertDesc">הפעלת מצב LIVE תבצע פקודות קנייה ומכירה אמיתיות בחשבון ה-Binance שלך. וודא שמפתחות ה-API מוגדרים בקובץ <code>.env</code>.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-outline" onclick="closeModeSwitchModal()">ביטול / Cancel</button>
+                <button class="btn btn-primary" id="confirmModeSwitchBtn" onclick="executeModeSwitch()">
+                    <span>🔄</span> <span id="confirmModeBtnText">אשר והחלף מצב</span>
+                </button>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=20"></script>
+    <script src="app.js?v=21"></script>
 </body>
 </html>

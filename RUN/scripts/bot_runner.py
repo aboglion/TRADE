@@ -898,12 +898,6 @@ def main() -> None:
                             stripped = line.rstrip('\r\n')
                             recent_output_lines.append(stripped)
                             print(line, end='', flush=True)
-                            for lp in (PROJECT_DIR / "logs" / "bot.log", RUN_DIR / "logs" / "bot.log"):
-                                try:
-                                    with open(lp, "a", encoding="utf-8", errors="replace") as f:
-                                        f.write(f"{stripped}\n")
-                                except Exception:
-                                    pass
                 except Exception:
                     pass
 

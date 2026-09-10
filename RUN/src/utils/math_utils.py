@@ -35,16 +35,21 @@ def parse_precision_to_decimals(precision: Any) -> int:
 
 def truncate_to_precision(value: float, precision: Any) -> float:
     """
-    Truncate (floor) a float to *precision* decimal places.
+    Truncate (floor towards zero) a float to *precision* decimal places.
 
-    Unlike round(), this never rounds up — critical for order amounts
-    where exceeding available balance causes rejection.
+    Unlike round(), this never rounds up in magnitude — critical for order amounts
+    where exceeding available balance causes rejection. Symmetrically truncates
+    negative numbers towards zero (e.g. -1.2345 with prec 2 -> -1.23).
     """
     dec_places = parse_precision_to_decimals(precision)
     if dec_places <= 0:
-        return float(int(value))
+        sign = -1.0 if value < 0 else 1.0
+        return sign * float(int(abs(value) + 1e-11))
     factor = 10 ** dec_places
-    return math.floor(value * factor) / factor
+    sign = -1.0 if value < 0 else 1.0
+    val_abs = abs(value)
+    truncated = math.floor(round(val_abs * factor, 8)) / factor
+    return sign * round(truncated, dec_places)
 
 
 def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:

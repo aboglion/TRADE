@@ -116,7 +116,7 @@ if [ "$STASH_CREATED" -eq 1 ]; then
         if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
             echo "🔄 Restoring critical configuration files from backup..."
             cp -rn "$BACKUP_DIR/"* "$PROJECT_DIR/" 2>/dev/null || true
-            for cfg in ".env" "RUN/.env" "RUN/config.yaml" "config.yaml" "data/bot_state.json" "RUN/data/bot_state.json"; do
+            for cfg in ".env" "RUN/.env" "RUN/config.yaml" "config.yaml" "data/bot_state.json" "RUN/data/bot_state.json" "logs/last_mode" "RUN/logs/last_mode"; do
                 if [ -f "$BACKUP_DIR/$cfg" ]; then
                     cp -p "$BACKUP_DIR/$cfg" "$PROJECT_DIR/$cfg" 2>/dev/null || true
                 fi

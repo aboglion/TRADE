@@ -177,12 +177,20 @@ class RegimeAdaptiveStrategy(IStrategy):
             self._positions = positions
             logger.info("Imported active position tracking state: %s", list(positions.keys()))
             
-        self._bull_peak = state_dict.get("bull_peak", 0.0)
-        self._bars_since_circuit_trip = state_dict.get("bars_since_circuit_trip", 999)
-        self._effective_leverage = state_dict.get("effective_leverage", 1.0)
-        self._in_momentum = state_dict.get("in_momentum", False)
-        self._safe_haven_active = state_dict.get("safe_haven_active", False)
-        self._dist_from_5d_high_pct = state_dict.get("dist_from_5d_high_pct", 0.0)
+        val_bull_peak = state_dict.get("bull_peak")
+        self._bull_peak = float(val_bull_peak) if val_bull_peak is not None else 0.0
+
+        val_bars = state_dict.get("bars_since_circuit_trip")
+        self._bars_since_circuit_trip = int(val_bars) if val_bars is not None else 999
+
+        val_lev = state_dict.get("effective_leverage")
+        self._effective_leverage = float(val_lev) if val_lev is not None else 1.0
+
+        self._in_momentum = bool(state_dict.get("in_momentum", False))
+        self._safe_haven_active = bool(state_dict.get("safe_haven_active", False))
+
+        val_dist = state_dict.get("dist_from_5d_high_pct")
+        self._dist_from_5d_high_pct = float(val_dist) if val_dist is not None else 0.0
 
     def compute_signals(
         self,
@@ -200,7 +208,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         regime = self._determine_regime(candles_by_asset[btc_key])
 
         # 2. Compute target allocation & signals with per-asset entry/exit triggers
-        target_weights, signals = self._evaluate_strategy(
+        target_weights, signals, effective_regime = self._evaluate_strategy(
             candles_by_asset=candles_by_asset,
             regime=regime,
             portfolio=portfolio,
@@ -208,12 +216,12 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         target_alloc = TargetAllocation(
             weights=target_weights,
-            regime=regime,
+            regime=effective_regime,
             timestamp_ms=now_ms,
         )
 
         decision = StrategyDecision(
-            regime=regime,
+            regime=effective_regime,
             target_allocation=target_alloc,
             signals=signals,
             timestamp_ms=now_ms,
@@ -232,6 +240,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                 "safe_cash_weight": self._safe_cash_weight,
                 "safe_spot_weight": self._safe_spot_weight,
                 "bars_since_circuit_trip": self._bars_since_circuit_trip,
+                "short_leverage": self._short_leverage,
                 "active_positions": {k: v for k, v in self._positions.items() if v.get("active")},
             },
         )
@@ -295,7 +304,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         candles_by_asset: Dict[str, List[Candle]],
         regime: Regime,
         portfolio: PortfolioSnapshot,
-    ) -> tuple[Dict[str, float], List[StrategySignal]]:
+    ) -> tuple[Dict[str, float], List[StrategySignal], Regime]:
         """
         Evaluate full per-asset strategy matching BACK_TEST/engine.py:
         - Bullish Risk Guard (BTC daily close vs EMA20 & pullback > 8%)
@@ -358,14 +367,21 @@ class RegimeAdaptiveStrategy(IStrategy):
         adx_daily = dx.ewm(alpha=1/14, min_periods=14).mean()
         latest_adx = adx_daily.dropna().iloc[-1] if not adx_daily.dropna().empty else 20.0
 
-        # Tactical classification
-        is_bear_trend = (latest_btc < latest_ema20) and (latest_ema20 < latest_ema50 or latest_btc < latest_sma150 or regime == Regime.BEAR)
-        is_pullback = (latest_btc < latest_ema20) and not is_bear_trend
-        is_bullish = (latest_btc >= latest_ema20) and not is_bear_trend
+        # Macro & Tactical Bear Detection (Parity with engine.py lines 827-828):
+        # Bear regime triggers if BTC < SMA150 OR fast breakdown (BTC < EMA20 and EMA20 < EMA50)
+        is_fast_bear_breakdown = (latest_btc < latest_ema20) and (latest_ema20 < latest_ema50)
+        is_bear = (latest_btc < latest_sma150) or is_fast_bear_breakdown or (regime == Regime.BEAR)
+        is_pullback = (latest_btc < latest_ema20) and not is_bear
+        is_bullish = (latest_btc >= latest_ema20) and not is_bear
 
         # ── 1. BEAR REGIME (Systematic Short Hedge) ───────────
-        if is_bear_trend:
-            logger.info("🐻 BEAR REGIME ACTIVE: Fast Breakdown (BTC < EMA20 & EMA20 < EMA50). 35%% @ 2.0x Short BTC hedge active.")
+        if is_bear:
+            logger.info(
+                "🐻 BEAR REGIME ACTIVE: %s. %.0f%% @ %.1fx Short BTC hedge active.",
+                "Fast Breakdown (BTC < EMA20 & EMA20 < EMA50)" if is_fast_bear_breakdown else f"Macro Bear (BTC < SMA{self._sma_period})",
+                self._bear_short_hedge * 100,
+                self._short_leverage,
+            )
             self._bull_peak = 0.0
             self._bars_since_circuit_trip = 999
             self._effective_leverage = 0.0
@@ -375,7 +391,7 @@ class RegimeAdaptiveStrategy(IStrategy):
                 self._positions[base]["active"] = False
 
             # Assign 35% margin @ 2.0x short = 70% notional short hedge on BTC
-            target_short = -(self._bear_short_hedge * self._short_leverage) / max(0.01, self._core_ratio)
+            target_short = -(self._bear_short_hedge * self._short_leverage)
             
             for symbol in candles_by_asset:
                 if symbol == btc_key and self._bear_short_hedge > 0:
@@ -397,8 +413,8 @@ class RegimeAdaptiveStrategy(IStrategy):
                         reason="Bear regime — 100% USDT protection",
                     ))
             
-            target_weights["USDT"] = 1.0
-            return target_weights, signals
+            target_weights["USDT"] = max(0.0, 1.0 - self._bear_short_hedge if self._bear_short_hedge > 0 else 1.0)
+            return target_weights, signals, Regime.BEAR
 
         # ── 2. BULL / PULLBACK REGIME ────────────────────────
         # Update persistent bull peak
@@ -411,6 +427,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         pullback_from_peak = (latest_btc - peak_btc) / peak_btc if peak_btc > 0 else 0.0
 
         # MOMENTUM VALIDATION GATE (Institutional Crash Shield)
+        lev_reason = "Default"
         if self._momentum_cutoff_pct is not None:
             in_momentum = bool(is_bullish and (btc_pb_from_5d >= self._momentum_cutoff_pct) and (latest_btc >= latest_ema9))
             self._in_momentum = in_momentum
@@ -484,10 +501,11 @@ class RegimeAdaptiveStrategy(IStrategy):
                     latest_dip * 100, self._flash_wick_limit * 100,
                 )
                 lev_reason = f"Flash Circuit Breaker (dip={latest_dip*100:.1f}%)"
+                # Flash CB should actually de-lever to spot-only (same as safe_haven)
+                total_crypto_weight = self._safe_spot_weight
             else:
                 self._bars_since_circuit_trip += 1
-
-            total_crypto_weight = 0.70 * selected_lev + 0.30
+                total_crypto_weight = 0.70 * selected_lev + 0.30
 
         effective_leverage = selected_lev
         self._effective_leverage = effective_leverage
@@ -533,14 +551,16 @@ class RegimeAdaptiveStrategy(IStrategy):
             # Check cold-start adoption: if account holds asset but pos is inactive and regime is strong/trend
             current_weight = portfolio.get_weight(base)
             if not pos.get("active") and current_weight > 0.02 and asset_regime_str in ("STRONG_BULL_TREND", "TREND"):
-                logger.info("Cold-start adoption: adopting existing holding for %s (weight=%.2f%%)", symbol, current_weight * 100)
+                holding_obj = portfolio.holdings.get(base)
+                real_entry_px = holding_obj.entry_price if (holding_obj and holding_obj.entry_price > 0) else c_close
+                logger.info("Cold-start adoption: adopting existing holding for %s (weight=%.2f%%, entry_px=%.2f)", symbol, current_weight * 100, real_entry_px)
                 pos = {
                     "active": True,
-                    "entry_px": c_close,
+                    "entry_px": real_entry_px,
                     "atr_at_entry": c_atr if not np.isnan(c_atr) else 1.0,
-                    "high_water": c_high,
+                    "high_water": max(c_high, real_entry_px),
                     "mode": asset_regime_str,
-                    "entries": [{"px": c_close, "atr": c_atr if not np.isnan(c_atr) else 1.0}],
+                    "entries": [{"px": real_entry_px, "atr": c_atr if not np.isnan(c_atr) else 1.0}],
                 }
                 self._positions[base] = pos
 
@@ -563,6 +583,7 @@ class RegimeAdaptiveStrategy(IStrategy):
 
                 if not self._safe_haven_active and len(entries) < max_adds + 1 and entry_mode == "STRONG_BULL_TREND":
                     if open_r >= pyramid_profit_r:
+                        # Pullback from the last entry price (matching engine.py line 365-366)
                         last_px = entries[-1]["px"]
                         pullback = (last_px - c_low) / max(c_atr, 1e-6)
                         if pullback >= pyramid_pullback_atr and c_close > r_last["EMA20"]:
@@ -696,4 +717,4 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         # Remainder held in USDT
         target_weights["USDT"] = max(0.0, 1.0 - assigned_crypto_weight)
-        return target_weights, signals
+        return target_weights, signals, Regime.BULL

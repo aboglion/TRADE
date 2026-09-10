@@ -495,8 +495,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     safeAddListener("conditionsModalBtn", "click", openConditionsModal);
     safeAddListener("closeConditionsModal", "click", closeConditionsModal);
     safeAddListener("closeConditionsModalFooter", "click", closeConditionsModal);
-    safeAddListener("conditionsModal", "click", (e) => {
-        if (e.target.id === "conditionsModal") closeConditionsModal();
+    // Mode Switch modal event listeners
+    safeAddListener("modeBadge", "click", openSwitchModeModal);
+    safeAddListener("modeSwitchModal", "click", (e) => {
+        if (e.target.id === "modeSwitchModal") closeModeSwitchModal();
     });
 
     safeAddListener("tabBinaryTreeBtn", "click", () => switchConditionsTab("tree"));
@@ -774,7 +776,21 @@ async function fetchStatus() {
 
         // Mode badge
         currentRunMode = data.run_mode || "DRY_RUN";
-        document.getElementById("modeText").textContent = currentRunMode;
+        const modeBadgeEl = document.getElementById("modeBadge");
+        const modeTextEl = document.getElementById("modeText");
+        if (modeTextEl) modeTextEl.textContent = currentRunMode;
+        if (modeBadgeEl) {
+            modeBadgeEl.className = "status-badge mode-badge";
+            if (currentRunMode === "LIVE") {
+                modeBadgeEl.classList.add("mode-badge-live");
+                modeBadgeEl.title = "Execution Mode: LIVE (Real Money at Risk!). Click to switch mode.";
+            } else if (currentRunMode === "TESTNET") {
+                modeBadgeEl.classList.add("mode-badge-testnet");
+                modeBadgeEl.title = "Execution Mode: TESTNET (Binance Sandbox). Click to switch mode.";
+            } else {
+                modeBadgeEl.title = "Execution Mode: DRY_RUN (Simulated Trading). Click to switch mode.";
+            }
+        }
 
         // Regime badge & card
         const regimeBadge = document.getElementById("regimeBadge");
@@ -4005,7 +4021,94 @@ function handleRegimeHover(e, canvas, tooltip) {
     }
 }
 
-// ── Global Window Exports for Connection & Crash Modals ──────────
+// ── Mode Switch Modal Functions (DRY_RUN <-> LIVE) ─────────────
+let targetSelectedMode = "LIVE";
+
+function openSwitchModeModal() {
+    const modal = document.getElementById("modeSwitchModal");
+    if (!modal) return;
+
+    if (currentRunMode === "LIVE") {
+        targetSelectedMode = "DRY_RUN";
+    } else {
+        targetSelectedMode = "LIVE";
+    }
+
+    updateModeSwitchModalUI();
+    modal.style.display = "flex";
+}
+
+function closeModeSwitchModal() {
+    const modal = document.getElementById("modeSwitchModal");
+    if (modal) modal.style.display = "none";
+}
+
+function selectModeTarget(mode) {
+    targetSelectedMode = mode;
+    updateModeSwitchModalUI();
+}
+
+function updateModeSwitchModalUI() {
+    const dryCard = document.getElementById("modeOptDryRun");
+    const liveCard = document.getElementById("modeOptLive");
+    const alertTitle = document.getElementById("modeAlertTitle");
+    const alertDesc = document.getElementById("modeAlertDesc");
+    const btnText = document.getElementById("confirmModeBtnText");
+    const confirmBtn = document.getElementById("confirmModeSwitchBtn");
+
+    if (dryCard) dryCard.classList.toggle("selected", targetSelectedMode === "DRY_RUN");
+    if (liveCard) liveCard.classList.toggle("selected", targetSelectedMode === "LIVE");
+
+    if (targetSelectedMode === "LIVE") {
+        if (alertTitle) alertTitle.textContent = "⚠️ מעבר למצב LIVE (מסחר אמיתי בכסף ריאלי)";
+        if (alertDesc) alertDesc.textContent = "הפעלת מצב LIVE תבצע פקודות קנייה ומכירה אמיתיות בחשבון ה-Binance שלך. וודא שמפתחות ה-API מוגדרים בקובץ .env.";
+        if (btnText) btnText.textContent = "אשר והפעל LIVE MODE 🔥";
+        if (confirmBtn) confirmBtn.className = "btn btn-danger";
+    } else {
+        if (alertTitle) alertTitle.textContent = "🛡️ מעבר למצב DRY_RUN (סימולציית מסחר ללא סיכון)";
+        if (alertDesc) alertDesc.textContent = "מעבר למצב DRY_RUN יפסיק את המסחר בכסף אמיתי ויעביר את המנוע לסימולטור מקומי בטוח על נתוני שוק בזמן אמת.";
+        if (btnText) btnText.textContent = "אשר והעבר ל-DRY_RUN 🛡️";
+        if (confirmBtn) confirmBtn.className = "btn btn-primary";
+    }
+}
+
+async function executeModeSwitch() {
+    const confirmBtn = document.getElementById("confirmModeSwitchBtn");
+    const btnText = document.getElementById("confirmModeBtnText");
+    if (confirmBtn) confirmBtn.disabled = true;
+    if (btnText) btnText.textContent = "מעדכן ומאתחל מחדש...";
+
+    showToast(`🔄 מעביר מנוע מסחר למצב ${targetSelectedMode}...`, "info");
+
+    try {
+        const res = await apiFetch("/api/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: targetSelectedMode })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            showToast(`✅ ${data.message}`, "success");
+            closeModeSwitchModal();
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+        } else {
+            showToast(`❌ שגיאה בשינוי מצב: ${data.error || data.message || "Unknown error"}`, "error");
+            if (data.help) {
+                showToast(`💡 ${data.help}`, "info");
+            }
+        }
+    } catch (err) {
+        showToast("❌ שגיאת תקשורת בעת שינוי מצב ההפעלה: " + err, "error");
+    } finally {
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (btnText) btnText.textContent = "אשר והחלף מצב";
+    }
+}
+
+// ── Global Window Exports for Connection, Crash & Mode Modals ──
 window.manualReconnectAttempt = manualReconnectAttempt;
 window.closeOfflineModal = closeOfflineModal;
 window.closeCrashModal = closeCrashModal;
@@ -4014,5 +4117,9 @@ window.openEmergencyServerPage = openEmergencyServerPage;
 window.copyCrashModalTraceback = copyCrashModalTraceback;
 window.copyCrashModalLogs = copyCrashModalLogs;
 window.triggerCrashModalRestart = triggerCrashModalRestart;
+window.openSwitchModeModal = openSwitchModeModal;
+window.closeModeSwitchModal = closeModeSwitchModal;
+window.selectModeTarget = selectModeTarget;
+window.executeModeSwitch = executeModeSwitch;
 
 

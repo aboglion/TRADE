@@ -108,7 +108,7 @@ class TelegramService:
 
             symbol = str(order_data.get("symbol", "N/A"))
             amount = float(order_data.get("filled_amount") or order_data.get("amount") or 0.0)
-            price = float(order_data.get("average_price") or order_data.get("price") or 0.0)
+            price = float(order_data.get("average_price") or order_data.get("price") or order_data.get("estimated_price") or 0.0)
             fees = float(order_data.get("fees") or 0.0)
             fee_curr = str(order_data.get("fee_currency", "") or "").strip()
             reason = str(order_data.get("reason", "Strategy rebalance") or "Strategy rebalance").strip()
@@ -118,7 +118,7 @@ class TelegramService:
             side_emoji = "🟢" if side_is_buy else "🔴"
             action_text = "BUY" if side_is_buy else "SELL"
 
-            url_to_link = dashboard_url or self.dashboard_url or "http://localhost:8080"
+            url_to_link = dashboard_url or self.dashboard_url or "http://localhost:8090"
             if url_to_link and not url_to_link.startswith("http"):
                 url_to_link = f"http://{url_to_link}"
 
@@ -196,7 +196,7 @@ class TelegramService:
                 else:
                     return False, "Failed to send test message with last trade"
             else:
-                url_to_link = self.dashboard_url or "http://localhost:8080"
+                url_to_link = self.dashboard_url or "http://localhost:8090"
                 if url_to_link and not url_to_link.startswith("http"):
                     url_to_link = f"http://{url_to_link}"
 

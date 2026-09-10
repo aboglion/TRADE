@@ -24,7 +24,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from src.config.config_manager import BotConfig
-from src.core.enums import RunMode
+from src.core.enums import OrderStatus, Regime, RunMode
 from src.core.exceptions import (
     DataGapError,
     InsufficientDataError,
@@ -95,6 +95,8 @@ class BotOrchestrator:
 
         self._consecutive_errors = 0
         self._last_scan_time: Optional[float] = None
+        import threading
+        self._cycle_lock = threading.Lock()
 
     def clear_critical_errors(self) -> None:
         """Clear critical errors both in memory and persist state."""
@@ -114,6 +116,16 @@ class BotOrchestrator:
 
         Raises SafeStopRequired for unrecoverable errors.
         """
+        if not self._cycle_lock.acquire(blocking=False):
+            logger.warning("Cycle already in progress — skipping concurrent execution.")
+            return False
+
+        try:
+            return self._run_once_locked(force=force)
+        finally:
+            self._cycle_lock.release()
+
+    def _run_once_locked(self, force: bool = False) -> bool:
         cycle_start = time.time()
         now_ms = self._clock.now_ms()
 
@@ -189,28 +201,40 @@ class BotOrchestrator:
             logger.info("=" * 60)
             logger.info("CYCLE START | %s | Mode: %s%s", ms_to_iso(now_ms), self._config.run_mode.name, " | FORCED" if force else "")
 
-            # 4. Fetch full history for indicator computation
+            # 4. Fetch full history for indicator computation (synchronizing up_to_ts across all pairs)
+            all_latest_ts = []
+            for pair in pairs.values():
+                latest_new = new_candles_by_pair.get(pair, [])
+                if latest_new:
+                    all_latest_ts.append(latest_new[-1].timestamp_ms)
+                else:
+                    last_ts = self._state.last_processed_candle_ts.get(pair)
+                    if last_ts:
+                        all_latest_ts.append(last_ts)
+
+            target_up_to_ts = max(all_latest_ts) if all_latest_ts else now_ms
+
             candles_by_asset: Dict[str, list] = {}
             for asset_name, pair in pairs.items():
-                latest_new = new_candles_by_pair.get(pair, [])
-                if not latest_new:
-                    # Even if no NEW candles for this asset, we need its history
-                    last_ts = self._state.last_processed_candle_ts.get(pair)
-                    up_to_ts = last_ts or now_ms
-                else:
-                    up_to_ts = latest_new[-1].timestamp_ms
-
                 try:
                     full_history = self._candle_service.get_full_history(
                         symbol=pair,
-                        up_to_ts=up_to_ts,
+                        up_to_ts=target_up_to_ts,
                         min_candles=self._config.strategy.warmup_candles,
                     )
                     candles_by_asset[pair] = full_history
                 except InsufficientDataError as e:
-                    logger.error("Insufficient data for %s: %s", pair, e)
+                    logger.error("Insufficient data for %s: %s — halting cycle", pair, e)
+                    self._state.critical_errors.append(f"Insufficient data for {pair}: {e}")
                     self._save_state(success=False)
                     return False
+            # Synchronize candle timelines to common latest closed timestamp across all assets
+            if candles_by_asset:
+                latest_ts_list = [candles[-1].timestamp_ms for candles in candles_by_asset.values() if candles]
+                if latest_ts_list:
+                    common_latest_ts = min(latest_ts_list)
+                    for pair in list(candles_by_asset.keys()):
+                        candles_by_asset[pair] = [c for c in candles_by_asset[pair] if c.timestamp_ms <= common_latest_ts]
 
             # 5. Validate data continuity
             for pair, candles in candles_by_asset.items():
@@ -253,23 +277,59 @@ class BotOrchestrator:
                 prices=prices,
             )
 
-            # 9. Risk-check and execute each order
+            # 9. Dynamic Leverage Sync & Risk-check execute each order
             self._risk_manager.reset_cycle()
             executed_count = 0
 
+            target_lev = decision.metadata.get("effective_leverage", 1.0) if decision.metadata else 1.0
+            clamped_lev = max(1.0, float(target_lev))
+
+            # In Bear Regime, the effective_leverage is 0.0 but short hedge needs short_leverage
+            is_bear_regime = (decision.regime == Regime.BEAR or getattr(decision.regime, "value", decision.regime) == "bear")
+            short_lev = decision.metadata.get("short_leverage", 2.0) if decision.metadata else 2.0
+
+            if hasattr(self._gateway, "set_leverage"):
+                for p in pairs.values():
+                    try:
+                        if is_bear_regime:
+                            # In Bear: set short_leverage for the hedge symbol, 1x for others
+                            btc_pair = next((v for v in pairs.values() if "BTC" in v), None)
+                            lev_to_set = max(1.0, float(short_lev)) if p == btc_pair else 1.0
+                        else:
+                            lev_to_set = clamped_lev
+                        self._gateway.set_leverage(lev_to_set, p)
+                    except Exception as ex:
+                        logger.warning("Could not sync leverage=%.1fx for %s: %s", lev_to_set, p, ex)
+
+            failed_symbols: set[str] = set()
             for idx, intent in enumerate(plan.orders):
+                base_sym = intent.symbol.split("/")[0].split(":")[0]
+                if intent.symbol in failed_symbols or base_sym in failed_symbols:
+                    logger.warning(
+                        "Skipping order for %s (%s) because previous order for this symbol failed in this cycle",
+                        intent.symbol, intent.reason,
+                    )
+                    continue
+
                 if idx > 0:
-                    time.sleep(1.0)
+                    wait_sec = max(0.1, float(getattr(self._config.risk, "min_seconds_between_orders", 1))) + 0.1
+                    time.sleep(wait_sec)
                 approved, reason = self._risk_manager.approve_order(
                     intent, portfolio
                 )
                 if not approved:
                     logger.warning("Order rejected: %s", reason)
+                    failed_symbols.add(intent.symbol)
+                    failed_symbols.add(base_sym)
                     continue
 
                 try:
                     result = self._order_manager.execute(intent)
-                    executed_count += 1
+                    if result.status in (OrderStatus.FILLED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED):
+                        executed_count += 1
+                    elif result.status in (OrderStatus.FAILED, OrderStatus.CANCELLED):
+                        failed_symbols.add(intent.symbol)
+                        failed_symbols.add(base_sym)
                     logger.info(
                         "Order executed: %s %s %.8f — %s",
                         intent.side.value,
@@ -279,10 +339,12 @@ class BotOrchestrator:
                     )
                 except Exception as e:
                     logger.error("Order execution failed: %s", e)
-                    # Don't halt the cycle — continue with remaining orders
+                    failed_symbols.add(intent.symbol)
+                    failed_symbols.add(base_sym)
+                    # Don't halt the cycle — continue with remaining orders for other symbols
 
             # 10. Update last processed candle timestamps
-            for pair, candles in new_candles_by_pair.items():
+            for pair, candles in candles_by_asset.items():
                 if candles:
                     self._state.last_processed_candle_ts[pair] = (
                         candles[-1].timestamp_ms

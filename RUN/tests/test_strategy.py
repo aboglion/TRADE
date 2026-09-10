@@ -100,6 +100,7 @@ class TestRegimeAdaptiveStrategyParity:
 
         decision = hybrid.compute_signals(candles_by_asset, portfolio)
         assert decision.regime == Regime.BEAR
+        # Bear regime bypasses micro split (BUG-06 fix): full macro weight = -(0.15 * 1.0) = -0.15
         assert pytest.approx(decision.target_allocation.weights["BTC/USDT"], abs=1e-4) == -0.15
 
     def test_bull_regime_leverage_allocation(self):
@@ -397,7 +398,7 @@ class TestRegimeAdaptiveStrategyParity:
         assert PositionAction.EXIT == PositionAction.CLOSE
         assert PositionAction.OUT == PositionAction.CLOSE
 
-        micro = MicroSatelliteStrategy(asset_weights={"BTC/USDT": 1.0})
+        micro = MicroSatelliteStrategy(asset_weights={"BTC": 1.0})
         candles = make_candle_series(1_600_000_000_000, count=220, base_price=50000.0, trend=100.0)
         portfolio = PortfolioSnapshot(
             timestamp_ms=candles[-1].timestamp_ms,

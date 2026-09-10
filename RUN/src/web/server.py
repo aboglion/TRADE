@@ -29,13 +29,42 @@ _market_metrics_cache: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
 _market_metrics_lock = Lock()
 _market_metrics_updating = False
 
+_cached_ccxt_exchange: Optional[Any] = None
+_cached_ccxt_lock = Lock()
+
+
+def _get_shared_exchange(gateway: Optional[Any] = None) -> Optional[Any]:
+    """Reuse existing exchange client or module-level cached ccxt client."""
+    if gateway:
+        if hasattr(gateway, "exchange"):
+            try:
+                ex = gateway.exchange
+                if ex is not None:
+                    return ex
+            except Exception:
+                pass
+        if hasattr(gateway, "_exchange") and gateway._exchange is not None:
+            return gateway._exchange
+
+    global _cached_ccxt_exchange
+    with _cached_ccxt_lock:
+        if _cached_ccxt_exchange is None:
+            try:
+                import ccxt
+                _cached_ccxt_exchange = ccxt.binance({"timeout": 10000, "enableRateLimit": False})
+            except Exception as e:
+                logger.debug("Failed initializing shared ccxt client: %s", e)
+                return None
+        return _cached_ccxt_exchange
+
 
 def _fetch_market_metrics_worker() -> None:
     global _market_metrics_cache, _market_metrics_updating
     try:
-        import ccxt
         import numpy as np
-        exchange = ccxt.binance({"timeout": 5000, "enableRateLimit": False})
+        exchange = _get_shared_exchange()
+        if exchange is None:
+            return
         symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
         
         tickers = {}
@@ -298,7 +327,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.path = "/index.html"
             else:
                 self.path = clean_path
-            super().do_GET()
+            try:
+                super().do_GET()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    def log_error(self, format, *args):
+        if args and any("Broken pipe" in str(a) or "Connection reset" in str(a) for a in args):
+            return
+        super().log_error(format, *args)
 
     def do_POST(self) -> None:
         clean_path = self.path.split("?")[0]
@@ -330,8 +367,58 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_update_telegram()
         elif clean_path == "/api/telegram/test":
             self._handle_test_telegram()
+        elif clean_path == "/api/mode":
+            self._handle_switch_mode()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
+
+    def _handle_switch_mode(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+            requested_mode = str(data.get("mode", "")).upper()
+
+            if requested_mode not in ("DRY_RUN", "LIVE", "TESTNET"):
+                self._send_json({"error": f"Invalid mode '{requested_mode}'. Allowed: DRY_RUN, LIVE, TESTNET"}, status=400)
+                return
+
+            if requested_mode == "LIVE":
+                api_key = os.environ.get("BINANCE_API_KEY", "").strip()
+                api_secret = os.environ.get("BINANCE_API_SECRET", "").strip()
+                if not api_key or not api_secret or api_key == "your_api_key_here":
+                    self._send_json({
+                        "error": "Cannot switch to LIVE mode: BINANCE_API_KEY and BINANCE_API_SECRET are missing in environment or .env file!",
+                        "help": "Set BINANCE_API_KEY and BINANCE_API_SECRET in .env file before activating LIVE mode."
+                    }, status=400)
+                    return
+                os.environ["CONFIRM_LIVE"] = "YES_I_UNDERSTAND"
+
+            from src.config.config_manager import ConfigManager
+            cfg_path = "config.yaml" if Path("config.yaml").exists() else "RUN/config.yaml"
+            cm = ConfigManager(str(cfg_path))
+            cm.save_run_mode(requested_mode)
+
+            self._send_json({
+                "success": True,
+                "mode": requested_mode,
+                "message": f"Successfully updated run mode to {requested_mode}. Rebooting bot...",
+            })
+
+            import threading
+            import subprocess
+            def _reboot():
+                time.sleep(1.0)
+                try:
+                    proj_dir = Path(__file__).resolve().parent.parent.parent.parent
+                    subprocess.run(["make", "restart"], cwd=str(proj_dir), timeout=30)
+                except Exception as ex:
+                    logger.error("Error during mode restart: %s", ex)
+
+            threading.Thread(target=_reboot, daemon=True).start()
+
+        except Exception as e:
+            self._send_json({"error": str(e)}, status=500)
 
     def _handle_auth_check(self) -> None:
         expected_pass = os.environ.get("DASHBOARD_PASSWORD", "").strip()
@@ -733,7 +820,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         import urllib.request
         import json
-        clean_sym = symbol.replace("/", "").replace("-", "")
+        clean_sym = symbol.split(":")[0].replace("/", "").replace("-", "")
         urls = [
             f"https://api.binance.com/api/v3/klines?symbol={clean_sym}&interval={timeframe}&limit={limit}",
             f"https://data-api.binance.vision/api/v3/klines?symbol={clean_sym}&interval={timeframe}&limit={limit}",
@@ -759,6 +846,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             from src.core.models import Candle
 
             state = self.state_store.load_state() if self.state_store else None
+            last_regime = state.last_regime if (state and state.last_regime) else "BEAR"
             strat_state = state.strategy_state if state else {}
             macro_state = strat_state.get("macro_state", {}) if isinstance(strat_state, dict) else {}
             positions_state = (
@@ -787,15 +875,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             btc_adx_daily = 20.0
             btc_intraday_dip_pct = 0.0
 
-            import ccxt
-            exchange = None
-            if self.gateway and hasattr(self.gateway, "_ccxt"):
-                exchange = self.gateway._ccxt
-            else:
-                try:
-                    exchange = ccxt.binance({"timeout": 10000, "enableRateLimit": False})
-                except Exception:
-                    exchange = None
+            exchange = _get_shared_exchange(self.gateway)
 
             # 1. Fetch BTC daily first to establish Macro Regime & Crash Shield parameters
             try:
@@ -845,11 +925,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             except Exception as ex_btc:
                 logger.warning("Failed fetching BTC daily candles for macro regime: %s", ex_btc)
 
+            if btc_daily_close <= 0.0 and self.gateway:
+                try:
+                    btc_daily_close = float(self.gateway.fetch_ticker_price("BTC/USDT"))
+                except Exception:
+                    pass
+
             # Regime Determination: matches engine.py and regime_adaptive_strategy.py
-            is_bear_trend = (btc_daily_close < btc_ema20_daily) and (
-                (btc_ema20_daily < btc_ema50_daily) or (btc_daily_close < btc_sma150 and btc_sma150 > 0)
-            )
-            macro_regime = "BEAR" if is_bear_trend or (btc_daily_close < btc_sma150 and btc_sma150 > 0) else "BULL"
+            if btc_daily_close <= 0.0 or btc_sma150 <= 0.0:
+                macro_regime = (last_regime.upper() if last_regime else "BEAR")
+            else:
+                is_bear_trend = (btc_daily_close < btc_ema20_daily) and (
+                    (btc_ema20_daily < btc_ema50_daily) or (btc_daily_close < btc_sma150)
+                )
+                macro_regime = "BEAR" if is_bear_trend or (btc_daily_close < btc_sma150) else "BULL"
 
             peak = max(bull_peak, btc_daily_close)
             pullback_pct = round(((btc_daily_close - peak) / peak) * 100.0, 2) if peak > 0 else 0.0
@@ -857,17 +946,40 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
             # Momentum Validation Gate (Institutional Crash Shield)
             strat_cfg = getattr(self.config, "strategy", None) if self.config else None
-            cutoff_pct = getattr(strat_cfg, "momentum_cutoff_pct", -0.02) * 100.0 if strat_cfg else -2.0
-            flash_wick_limit_pct = getattr(strat_cfg, "flash_wick_limit", -0.038) * 100.0 if strat_cfg else -3.8
+            try:
+                raw_cutoff = getattr(strat_cfg, "momentum_cutoff_pct", -0.02)
+                cutoff_pct = float(raw_cutoff) * 100.0 if raw_cutoff is not None else -2.0
+            except (TypeError, ValueError):
+                cutoff_pct = -2.0
+
+            try:
+                raw_wick = getattr(strat_cfg, "flash_wick_limit", -0.038)
+                flash_wick_limit_pct = float(raw_wick) * 100.0 if raw_wick is not None else -3.8
+            except (TypeError, ValueError):
+                flash_wick_limit_pct = -3.8
+
             flash_triggered = (btc_intraday_dip_pct < flash_wick_limit_pct)
 
             in_momentum = (macro_regime == "BULL") and (btc_pb_from_5d >= cutoff_pct) and (btc_daily_close >= btc_ema9_daily)
             safe_haven_active = (macro_regime == "BULL") and not in_momentum
 
-            conviction_lev = getattr(strat_cfg, "conviction_leverage", 10.0) if strat_cfg else 10.0
-            mid_lev = getattr(strat_cfg, "mid_leverage", 5.0) if strat_cfg else 5.0
-            base_lev = getattr(strat_cfg, "base_leverage", 2.5) if strat_cfg else 2.5
-            ladder_steps = getattr(strat_cfg, "ladder_steps", [1.0, 2.0, 4.0, 10.0]) if strat_cfg else [1.0, 2.0, 4.0, 10.0]
+            try:
+                conviction_lev = float(getattr(strat_cfg, "conviction_leverage", 10.0))
+            except (TypeError, ValueError):
+                conviction_lev = 10.0
+
+            try:
+                mid_lev = float(getattr(strat_cfg, "mid_leverage", 5.0))
+            except (TypeError, ValueError):
+                mid_lev = 5.0
+
+            try:
+                base_lev = float(getattr(strat_cfg, "base_leverage", 2.5))
+            except (TypeError, ValueError):
+                base_lev = 2.5
+
+            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 2.0, 4.0, 10.0])
+            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 2.0, 4.0, 10.0]
             if not ladder_steps:
                 ladder_steps = [1.0, 2.0, 4.0, 10.0]
 
@@ -918,7 +1030,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             for pair in symbols:
                 coin = pair.split("/")[0]
                 try:
-                    ohlcv = self._fetch_ohlcv_safe(exchange, pair, timeframe="4h", limit=120)
+                    ohlcv = self._fetch_ohlcv_safe(exchange, pair, timeframe="4h", limit=300)
                     if not ohlcv:
                         continue
                     candles = [
@@ -1178,6 +1290,17 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self.config.risk.kill_switch = not self.config.risk.kill_switch
             status = "ACTIVATED" if self.config.risk.kill_switch else "DEACTIVATED"
             logger.warning("Kill switch toggled via API: %s", status)
+
+            # Persist to config.yaml so restarts maintain kill switch state
+            try:
+                from pathlib import Path
+                from src.config.config_manager import ConfigManager
+                cfg_path = "RUN/config.yaml" if Path("RUN/config.yaml").exists() else "config.yaml"
+                cm = ConfigManager(cfg_path)
+                cm.save_kill_switch(self.config.risk.kill_switch)
+            except Exception as ex:
+                logger.warning("Could not persist kill switch state to config.yaml: %s", ex)
+
             self._send_json({"kill_switch": self.config.risk.kill_switch, "message": f"Kill switch {status}"})
         else:
             self._send_json({"error": "Config unavailable"}, status=500)

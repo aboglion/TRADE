@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.core.enums import OrderStatus, RunMode
 from src.core.exceptions import (
@@ -192,9 +192,17 @@ class OrderManager:
                     OrderStatus.EXPIRED,
                 ):
                     self._state.completed_orders.append(order_data)
-                    if result.status == OrderStatus.FILLED and result.fees > 0 and result.fee_currency:
-                        curr = result.fee_currency
-                        self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                    if result.status == OrderStatus.FILLED:
+                        if result.fees > 0 and result.fee_currency:
+                            curr = result.fee_currency
+                            self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                        if self._telegram_service:
+                            try:
+                                self._telegram_service.send_trade_notification(
+                                    order_data, run_mode=self._run_mode
+                                )
+                            except Exception as tel_err:
+                                logger.warning("Failed to send telegram notification for filled order: %s", tel_err)
 
             except Exception as e:
                 logger.warning(
@@ -243,15 +251,33 @@ class OrderManager:
         for o in open_orders:
             if not o.exchange_order_id:
                 continue
-            symbol = ""
-            if isinstance(o.raw_response, dict):
+            symbol = o.symbol or ""
+            if not symbol and isinstance(o.raw_response, dict):
                 symbol = o.raw_response.get("symbol", "")
-            try:
-                logger.warning("Canceling stale open order %s (%s)...", o.exchange_order_id, symbol)
-                self._gateway.cancel_order(symbol=symbol, order_id=o.exchange_order_id)
-                canceled_count += 1
-            except Exception as e:
-                logger.error("Failed to cancel open order %s: %s", o.exchange_order_id, e)
+            
+            # Match symbol from pending or completed state if missing
+            if not symbol or "/" not in symbol:
+                for tracked in self._state.pending_orders + self._state.completed_orders:
+                    if tracked.get("exchange_order_id") == o.exchange_order_id or tracked.get("client_order_id") == o.client_order_id:
+                        symbol = tracked.get("symbol", symbol)
+                        break
+
+            # Format raw symbol like "BTCUSDT" -> "BTC/USDT" if needed
+            if symbol and "/" not in symbol:
+                for base in ("BTC", "ETH", "SOL"):
+                    if symbol.startswith(base):
+                        symbol = f"{base}/USDT"
+                        break
+
+            candidate_symbols = [symbol] if symbol else ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+            for sym in candidate_symbols:
+                try:
+                    logger.warning("Canceling stale open order %s (%s)...", o.exchange_order_id, sym)
+                    self._gateway.cancel_order(symbol=sym, order_id=o.exchange_order_id)
+                    canceled_count += 1
+                    break
+                except Exception as e:
+                    logger.error("Failed to cancel open order %s (%s): %s", o.exchange_order_id, sym, e)
         return canceled_count
 
     # ── Internal helpers ─────────────────────────────────────
@@ -265,6 +291,7 @@ class OrderManager:
             "order_type": intent.order_type.value,
             "amount": intent.amount,
             "price": intent.price,
+            "estimated_price": intent.estimated_price,
             "reason": intent.reason,
             "status": "intent",
             "fees": 0.0,
@@ -313,6 +340,10 @@ class OrderManager:
             o for o in self._state.pending_orders
             if o.get("status") in ("intent", "submitted", "unknown", "open")
         ]
+
+        # Cap completed_orders in memory to prevent unbounded growth
+        if len(self._state.completed_orders) > 6000:
+            self._state.completed_orders = self._state.completed_orders[-5000:]
 
     def _load_submitted_ids(self) -> None:
         """Load previously submitted order IDs from state."""

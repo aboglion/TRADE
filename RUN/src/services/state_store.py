@@ -74,9 +74,20 @@ class JsonStateStore(IStateStore):
                 except Exception as e2:
                     logger.error("Backup also corrupt: %s", e2)
 
-            raise StateCorruptionError(
-                f"Cannot load state from {self._path} or backup: {e}"
-            )
+            # If both are corrupt or missing, archive corrupt file and return fresh BotState to avoid crash loop
+            try:
+                import time
+                corrupt_backup = self._path.with_suffix(f".corrupt.{int(time.time())}")
+                if self._path.exists():
+                    shutil.move(str(self._path), str(corrupt_backup))
+                logger.critical(
+                    "State file and backup were corrupt. Archived to %s and started fresh state.",
+                    corrupt_backup,
+                )
+                return BotState()
+            except Exception as e_recover:
+                logger.critical("Failed archiving corrupt state: %s — returning fresh state", e_recover)
+                return BotState()
 
     def save_state(self, state: BotState) -> None:
         """

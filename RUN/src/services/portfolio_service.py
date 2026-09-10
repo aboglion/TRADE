@@ -8,7 +8,10 @@ targets, and generates the minimal set of trades needed to rebalance.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.exchanges.exchange_gateway import ExchangeGateway
 
 from src.core.enums import OrderSide, OrderType
 from src.core.models import (
@@ -21,6 +24,7 @@ from src.core.models import (
 from src.utils.math_utils import (
     compute_order_amount,
     get_market_constraints,
+    is_above_min_order,
     truncate_to_precision,
 )
 
@@ -115,9 +119,9 @@ class PortfolioService:
                 sym = pos.get("symbol", "")
                 base = sym.split("/")[0] if "/" in sym else sym.replace("USDT", "")
                 contracts = float(pos.get("contracts", 0) or 0)
+                if contracts == 0:
+                    continue
                 side = pos.get("side", "")
-                
-                # In CCXT, if side is short, contracts might be positive but we need it negative
                 if side == "short" and contracts > 0:
                     contracts = -contracts
                 
@@ -125,9 +129,8 @@ class PortfolioService:
                 unrealized_pnl = float(pos.get("unrealizedPnl", 0) or 0)
                 leverage = float(pos.get("leverage", 1) or 1)
                 
-                # For positions, we track the notional value (absolute contracts * current price)
-                # But it does not add to total_value because total_value is USDT Margin Balance.
-                price = prices.get(sym, 0.0)
+                clean_sym = sym.split(":")[0] if ":" in sym else sym
+                price = prices.get(sym, 0.0) or prices.get(clean_sym, 0.0)
                 if price <= 0:
                     try:
                         price = self._gateway.fetch_ticker_price(sym)
@@ -135,16 +138,34 @@ class PortfolioService:
                         price = 0.0
                         
                 value_usd = abs(contracts) * price
-                
+
+                existing = holdings.get(base)
+                spot_free = existing.free if existing else 0.0
+                spot_locked = existing.locked if existing else 0.0
+                spot_total = existing.total if existing else 0.0
+                combined_total = spot_total + contracts
+
+                # Calculate notional USD value handling spot + futures longs/shorts
+                if spot_total > 0 and contracts < 0:
+                    # Hedged position (Spot Long + Futures Short)
+                    net_qty = spot_total + contracts
+                    value_usd = abs(net_qty) * price
+                elif spot_total > 0 and contracts > 0:
+                    # Combined Long (Spot + Futures Long)
+                    value_usd = (spot_total + contracts) * price
+                else:
+                    # Pure futures position (contracts long or short)
+                    value_usd = abs(contracts) * price
+
                 holdings[base] = AssetHolding(
                     symbol=base,
-                    free=0.0,
-                    locked=0.0,
-                    total=contracts,
+                    free=spot_free,
+                    locked=spot_locked,
+                    total=combined_total,
                     value_usd=value_usd,
                     unrealized_pnl=unrealized_pnl,
                     entry_price=entry_price,
-                    leverage=leverage
+                    leverage=leverage,
                 )
         except Exception as e:
             logger.warning("Failed to fetch futures positions: %s", e)
@@ -188,12 +209,30 @@ class PortfolioService:
                 target_allocation=target, total_deviation_pct=0.0,
             )
 
-        # Compute deviations
+        # Compute deviations for all target weights AND untracked portfolio holdings
+        all_symbols = set(target.weights.keys())
+        for base_asset, holding in portfolio.holdings.items():
+            if base_asset in ("USDT", "USD", "BUSD", "USDC", "BNB"):
+                continue
+            if abs(holding.total) > 1e-6:
+                # Find matching symbol in target weights (e.g. "BTC/USDT" or "BTC")
+                matching_sym = None
+                for s in target.weights:
+                    if s.startswith(base_asset + "/") or s == base_asset:
+                        matching_sym = s
+                        break
+                if not matching_sym:
+                    matching_sym = f"{base_asset}/USDT"
+                all_symbols.add(matching_sym)
+
         deviations: Dict[str, float] = {}
-        for symbol, target_weight in target.weights.items():
-            if symbol == "USDT":
+        for symbol in all_symbols:
+            if symbol in ("USDT", "USD", "BUSD", "USDC", "BNB"):
                 continue  # USDT is the residual
-            base = symbol.split("/")[0] if "/" in symbol else symbol
+            target_weight = target.weights.get(symbol, 0.0)
+            base = symbol.split("/")[0].split(":")[0]
+            if target_weight == 0.0 and base in target.weights:
+                target_weight = target.weights.get(base, 0.0)
             current_weight = portfolio.get_weight(base)
             deviation = target_weight - current_weight
             deviations[symbol] = deviation
@@ -211,21 +250,39 @@ class PortfolioService:
         buy_orders: List[OrderIntent] = []
 
         for symbol, deviation in deviations.items():
+            pair_symbol = symbol if "/" in symbol else f"{symbol}/USDT"
             target_weight = target.weights.get(symbol, 0.0)
-            # Skip small deviations unless target is 0 and we have a position to liquidate
-            if abs(deviation) < self._deviation_threshold and not (target_weight == 0.0 and deviation < 0):
+            base = symbol.split("/")[0].split(":")[0]
+            if target_weight == 0.0 and base in target.weights:
+                target_weight = target.weights.get(base, 0.0)
+            current_weight = portfolio.get_weight(base)
+
+            # Skip small deviations unless target is 0.0 and we have an active position to liquidate (long or short)
+            has_position = abs(current_weight) > 1e-6
+            is_full_liquidation = (target_weight == 0.0 and has_position)
+            if abs(deviation) < self._deviation_threshold and not is_full_liquidation:
                 continue
 
             price = prices.get(symbol, 0.0)
+            if price <= 0 and "/" not in symbol:
+                price = prices.get(pair_symbol, 0.0)
+            if price <= 0 and ":" in symbol:
+                price = prices.get(symbol.split(":")[0], 0.0)
+            if price <= 0 and self._gateway:
+                try:
+                    price = self._gateway.fetch_ticker_price(pair_symbol)
+                except Exception:
+                    price = 0.0
+
             if price <= 0:
-                logger.warning("No price for %s, skipping", symbol)
+                logger.warning("No price for %s, skipping", pair_symbol)
                 continue
 
             target_value_usd = abs(deviation) * total_value
 
             # Get market constraints
             try:
-                market_info = self._gateway.get_market_info(symbol)
+                market_info = self._gateway.get_market_info(pair_symbol)
                 constraints = get_market_constraints(market_info)
             except Exception:
                 constraints = {
@@ -234,13 +291,96 @@ class PortfolioService:
                     "min_notional": 10.0,
                 }
 
-            amount = compute_order_amount(
-                target_value_usd=target_value_usd,
-                price=price,
-                amount_precision=constraints["amount_precision"],
-                min_amount=constraints["min_amount"],
-                min_notional=constraints["min_notional"],
+            holding = portfolio.holdings.get(base)
+            is_flip = (
+                holding is not None
+                and abs(holding.total) > 1e-6
+                and ((current_weight > 1e-6 and target_weight < -1e-6) or (current_weight < -1e-6 and target_weight > 1e-6))
             )
+
+            if is_flip and holding:
+                # 1. Close current position completely
+                raw_close_qty = abs(holding.total)
+                close_amount = truncate_to_precision(raw_close_qty, constraints["amount_precision"])
+                close_side = OrderSide.SELL if current_weight > 0 else OrderSide.BUY
+                order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
+                order_price = None if order_type == OrderType.MARKET else price
+
+                if is_above_min_order(close_amount, price, constraints["min_amount"], constraints["min_notional"]):
+                    intent_close = OrderIntent(
+                        client_order_id=OrderIntent.generate_id(),
+                        symbol=pair_symbol,
+                        side=close_side,
+                        order_type=order_type,
+                        amount=close_amount,
+                        price=order_price,
+                        estimated_price=price,
+                        reason=f"Close previous {current_weight:+.2%} position for regime reversal",
+                        candle_ts=target.timestamp_ms,
+                    )
+                    if close_side == OrderSide.SELL:
+                        sell_orders.append(intent_close)
+                    else:
+                        buy_orders.append(intent_close)
+
+                # 2. Open new target position in opposite direction
+                target_open_val = abs(target_weight) * total_value
+                open_amount = compute_order_amount(
+                    target_value_usd=target_open_val,
+                    price=price,
+                    amount_precision=constraints["amount_precision"],
+                    min_amount=constraints["min_amount"],
+                    min_notional=constraints["min_notional"],
+                )
+                open_side = OrderSide.SELL if target_weight < 0 else OrderSide.BUY
+                if open_amount is not None:
+                    intent_open = OrderIntent(
+                        client_order_id=OrderIntent.generate_id(),
+                        symbol=pair_symbol,
+                        side=open_side,
+                        order_type=order_type,
+                        amount=open_amount,
+                        price=order_price,
+                        estimated_price=price,
+                        reason=f"Open new {target_weight:+.2%} position in {pair_symbol}",
+                        candle_ts=target.timestamp_ms,
+                    )
+                    if open_side == OrderSide.SELL:
+                        sell_orders.append(intent_open)
+                    else:
+                        buy_orders.append(intent_open)
+                continue
+
+            if is_full_liquidation:
+                if holding:
+                    raw_qty = abs(holding.free if not self._is_futures else holding.total)
+                    full_amount = truncate_to_precision(raw_qty, constraints["amount_precision"])
+                    if full_amount >= constraints["min_amount"] and (full_amount * price) >= constraints["min_notional"]:
+                        amount = full_amount
+                    else:
+                        amount = compute_order_amount(
+                            target_value_usd=target_value_usd,
+                            price=price,
+                            amount_precision=constraints["amount_precision"],
+                            min_amount=constraints["min_amount"],
+                            min_notional=constraints["min_notional"],
+                        )
+                else:
+                    amount = compute_order_amount(
+                        target_value_usd=target_value_usd,
+                        price=price,
+                        amount_precision=constraints["amount_precision"],
+                        min_amount=constraints["min_amount"],
+                        min_notional=constraints["min_notional"],
+                    )
+            else:
+                amount = compute_order_amount(
+                    target_value_usd=target_value_usd,
+                    price=price,
+                    amount_precision=constraints["amount_precision"],
+                    min_amount=constraints["min_amount"],
+                    min_notional=constraints["min_notional"],
+                )
 
             if amount is None:
                 logger.debug(
@@ -258,7 +398,8 @@ class PortfolioService:
                     amount = truncate_to_precision(
                         available, constraints["amount_precision"]
                     )
-                    if amount <= 0:
+                    if not is_above_min_order(amount, price, constraints["min_amount"], constraints["min_notional"]):
+                        logger.debug("Available balance for %s ($%.2f) below exchange minimums, skipping", symbol, amount * price)
                         continue
 
             order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
@@ -266,13 +407,13 @@ class PortfolioService:
 
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
-                symbol=symbol,
+                symbol=pair_symbol,
                 side=OrderSide.SELL if deviation < 0 else OrderSide.BUY,
                 order_type=order_type,
                 amount=amount,
                 price=order_price,
                 estimated_price=price,
-                reason=f"Rebalance: {deviation:+.2%} deviation in {symbol}",
+                reason=f"Rebalance: {deviation:+.2%} deviation in {pair_symbol}",
                 candle_ts=target.timestamp_ms,
             )
 
@@ -281,8 +422,41 @@ class PortfolioService:
             else:
                 buy_orders.append(intent)
 
-        # Sells first, then buys (to free up USDT)
-        all_orders = sell_orders + buy_orders
+        # Separate reducing vs expanding orders:
+        # Sells that reduce longs come before sells that open shorts
+        reducing_sells: List[OrderIntent] = []
+        expanding_sells: List[OrderIntent] = []
+        for o in sell_orders:
+            base = o.symbol.split("/")[0] if "/" in o.symbol else o.symbol
+            holding = portfolio.holdings.get(base)
+            if "Close previous" in o.reason:
+                reducing_sells.append(o)
+            elif "Open new" in o.reason:
+                expanding_sells.append(o)
+            elif holding and holding.total > 1e-6:
+                reducing_sells.append(o)
+            else:
+                expanding_sells.append(o)
+
+        # Buys that cover shorts come before buys that open longs
+        reducing_buys: List[OrderIntent] = []
+        expanding_buys: List[OrderIntent] = []
+        for o in buy_orders:
+            base = o.symbol.split("/")[0] if "/" in o.symbol else o.symbol
+            holding = portfolio.holdings.get(base)
+            if "Close previous" in o.reason:
+                reducing_buys.append(o)
+            elif "Open new" in o.reason:
+                expanding_buys.append(o)
+            elif holding and holding.total < -1e-6:
+                reducing_buys.append(o)
+            else:
+                expanding_buys.append(o)
+
+        # Sells first (reducing before expanding), then buys (covering before expanding)
+        sorted_sells = reducing_sells + expanding_sells
+        sorted_buys = reducing_buys + expanding_buys
+        all_orders = sorted_sells + sorted_buys
 
         if all_orders:
             logger.info(

@@ -124,3 +124,29 @@ class TestDryRunBalancesUpdate:
 
         snap = portfolio_service.get_portfolio(prices={"SOL/USDT": 100.0})
         assert snap.total_value_usd == 3500.0  # 2500 USDT + 10 SOL * $100
+
+    def test_spot_liquidation_to_safe_haven(self, dry_exchange, portfolio_service):
+        prices = {"BTC/USDT": 50000.0, "ETH/USDT": 3000.0, "SOL/USDT": 100.0}
+        snap = portfolio_service.get_portfolio(prices=prices)
+
+        # Sell all crypto to 100% USDT Safe Haven
+        target = TargetAllocation(
+            weights={"BTC/USDT": 0.0, "ETH/USDT": 0.0, "SOL/USDT": 0.0, "USDT": 1.0},
+            regime=Regime.BEAR,
+            timestamp_ms=int(time.time() * 1000),
+        )
+
+        plan = portfolio_service.compute_rebalance_plan(snap, target, prices)
+        for order in plan.orders:
+            res = dry_exchange.create_order(order)
+            assert res.status.name == "FILLED"
+
+        # Verify new snapshot has 0 crypto spot holdings and ~100% USDT
+        new_snap = portfolio_service.get_portfolio(prices=prices)
+        assert new_snap.get_weight("BTC") == 0.0
+        assert new_snap.get_weight("ETH") == 0.0
+        assert new_snap.holdings["USDT"].total > 0.0
+
+        # Subsequent rebalance check must yield 0 orders
+        next_plan = portfolio_service.compute_rebalance_plan(new_snap, target, prices)
+        assert len(next_plan.orders) == 0

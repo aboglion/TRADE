@@ -40,20 +40,34 @@ class DryRunExchange:
         self._fee_rate = fee_rate
         self._markets: Dict[str, Any] = {}
         self._on_balance_change = on_balance_change
+        self._current_leverage: Dict[str, float] = {}
+
+        self._public_exchange: Optional[Any] = None
 
         # Initialize default balances
         defaults = initial_balances or {"USDT": 1000.0}
         for currency, amount in defaults.items():
             self._balances[currency] = {
-                "free": amount,
+                "free": float(amount),
                 "used": 0.0,
-                "total": amount,
+                "total": float(amount),
             }
+        if "USDT" not in self._balances:
+            self._balances["USDT"] = {"free": 0.0, "used": 0.0, "total": 0.0}
 
         logger.info(
             "DryRunExchange initialized with balances: %s",
             {k: v["total"] for k, v in self._balances.items()},
         )
+
+    def _get_public_exchange(self) -> Optional[Any]:
+        if self._public_exchange is None:
+            try:
+                import ccxt
+                self._public_exchange = ccxt.binance({"enableRateLimit": True, "timeout": 10000})
+            except Exception:
+                return None
+        return self._public_exchange
 
     def _notify_balance_change(self) -> None:
         if callable(self._on_balance_change):
@@ -74,12 +88,13 @@ class DryRunExchange:
             return self._last_prices[symbol]
         # Fallback to fetching live price via ccxt
         try:
-            import ccxt
-            ex = ccxt.binance({"enableRateLimit": True})
-            ticker = ex.fetch_ticker(symbol)
-            price = float(ticker.get("last", 0) or ticker.get("close", 0))
-            self._last_prices[symbol] = price
-            return price
+            ex = self._get_public_exchange()
+            if ex:
+                ticker = ex.fetch_ticker(symbol)
+                price = float(ticker.get("last", 0) or ticker.get("close", 0))
+                self._last_prices[symbol] = price
+                return price
+            return 0.0
         except Exception:
             return 0.0
 
@@ -95,12 +110,13 @@ class DryRunExchange:
     ) -> List[Candle]:
         """Fetch real public candles from Binance in dry run mode."""
         try:
-            import ccxt
-            ex = ccxt.binance({"enableRateLimit": True})
+            ex = self._get_public_exchange()
+            if not ex:
+                return []
             raw = ex.fetch_ohlcv(symbol, timeframe, since=since_ms, limit=limit)
             candles: List[Candle] = []
             now_ms = int(time.time() * 1000)
-            tf_ms = 14_400_000 if timeframe == "4h" else 60_000
+            tf_ms = self._timeframe_to_ms(timeframe)
 
             for row in raw:
                 ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
@@ -157,14 +173,22 @@ class DryRunExchange:
     # ── Account ──────────────────────────────────────────────
 
     def fetch_balance(self) -> Dict[str, Dict[str, float]]:
-        # In futures, update USDT total based on unrealized PnL
+        # In futures, update USDT total based on unrealized PnL and compute locked margin
         bal = dict(self._balances)
         if "USDT" in bal:
-            unrealized = sum(p.get("unrealizedPnl", 0.0) for p in self.fetch_positions())
+            active_positions = self.fetch_positions()
+            unrealized = sum(p.get("unrealizedPnl", 0.0) for p in active_positions)
+            used_margin = sum(
+                abs(float(p.get("contracts", 0.0))) * float(p.get("entryPrice", 0.0)) / max(1.0, float(p.get("leverage", 1.0)))
+                for p in active_positions
+            )
+            raw_wallet = bal["USDT"]["free"] + bal["USDT"]["used"]
+            margin_balance = raw_wallet + unrealized
+            free_margin = max(0.0, margin_balance - used_margin)
             bal["USDT"] = {
-                "free": bal["USDT"]["free"],
-                "used": bal["USDT"]["used"],
-                "total": bal["USDT"]["free"] + unrealized
+                "free": free_margin,
+                "used": used_margin,
+                "total": margin_balance,
             }
         return bal
 
@@ -175,7 +199,15 @@ class DryRunExchange:
             if pos["contracts"] == 0:
                 continue
             
-            price = self._last_prices.get(symbol, pos["entryPrice"])
+            price = self._last_prices.get(symbol)
+            if price is None or price <= 0:
+                clean_sym = symbol.split(":")[0] if ":" in symbol else symbol
+                price = self._last_prices.get(clean_sym)
+            if price is None or price <= 0:
+                price = self.fetch_ticker_price(symbol)
+            if price <= 0:
+                price = float(pos.get("entryPrice", 0.0) or 0.0)
+
             if pos["side"] == "long":
                 pnl = (price - pos["entryPrice"]) * pos["contracts"]
             else:
@@ -203,12 +235,21 @@ class DryRunExchange:
         )
         self._notify_balance_change()
 
+    def set_leverage(self, leverage: int | float, symbol: str) -> None:
+        """Set leverage for a simulated futures market symbol."""
+        self._current_leverage[symbol] = float(leverage)
+        logger.info("[DRY_RUN] Set leverage=%.1fx for %s", leverage, symbol)
+
+    def _get_active_leverage(self, symbol: str) -> float:
+        levs = getattr(self, "_current_leverage", {})
+        return float(levs.get(symbol, 3.5))
+
     # ── Orders ───────────────────────────────────────────────
 
     def create_order(self, intent: OrderIntent) -> OrderResult:
         """Simulate order execution."""
         base, quote = self._parse_symbol(intent.symbol)
-        price = intent.price or self._last_prices.get(intent.symbol, 0.0)
+        price = intent.price or intent.estimated_price or self._last_prices.get(intent.symbol, 0.0)
 
         if price <= 0:
             return OrderResult(
@@ -223,56 +264,97 @@ class DryRunExchange:
         # Basic margin/balance check
         quote = intent.symbol.split("/")[1] if "/" in intent.symbol else "USDT"
         is_futures = True  # Strategy operates in futures mode
-        leverage = 3.5
+        leverage = self._get_active_leverage(intent.symbol)
         margin_req = cost / leverage if is_futures else cost
         total_collateral = self._calculate_total_collateral()
         available_margin = max(self._get_free(quote), total_collateral)
 
-        if intent.side == OrderSide.BUY and margin_req > (available_margin + 1e-4):
+        # Determine expanding amount for margin requirement
+        existing_pos = self._positions.get(intent.symbol, {})
+        existing_contracts = float(existing_pos.get("contracts", 0.0) or 0.0)
+        
+        if intent.side == OrderSide.BUY:
+            if existing_contracts >= 0:
+                expanding_qty = intent.amount
+            else:
+                expanding_qty = max(0.0, intent.amount - abs(existing_contracts))
+        else:  # SELL
+            if existing_contracts <= 0:
+                expanding_qty = intent.amount
+            else:
+                expanding_qty = max(0.0, intent.amount - existing_contracts)
+
+        expanding_cost = expanding_qty * price
+        margin_req = expanding_cost / leverage if is_futures else expanding_cost
+
+        if expanding_qty > 0 and margin_req > (available_margin + 1e-4):
              return OrderResult(
                  client_order_id=intent.client_order_id,
                  status=OrderStatus.FAILED,
-                 error_message=f"Insufficient balance: need {margin_req:.2f} {quote} margin (available={available_margin:.2f}, cost={cost:.2f})",
+                 error_message=f"Insufficient balance: need {margin_req:.2f} {quote} margin (available={available_margin:.2f}, cost={expanding_cost:.2f})",
              )
 
-        # Handle Futures execution
+        # Handle Futures / Spot balance execution
+        base, quote = self._parse_symbol(intent.symbol)
+        futures_amount = intent.amount
+
+        # Check if spot balance exists for base asset when selling
+        if intent.side == OrderSide.SELL:
+            spot_bal = self._balances.get(base, {}).get("total", 0.0)
+            if spot_bal > 0:
+                sell_spot = min(spot_bal, intent.amount)
+                self._balances[base]["free"] = max(0.0, self._balances[base]["free"] - sell_spot)
+                self._balances[base]["total"] = max(0.0, self._balances[base]["total"] - sell_spot)
+                spot_proceeds = (sell_spot * price) * (1.0 - self._fee_rate)
+                self._adjust_balance(quote, spot_proceeds)
+                futures_amount = intent.amount - sell_spot
+
         is_futures = True  # We migrated to futures
         
-        if is_futures:
+        if is_futures and futures_amount > 0:
+            active_lev = self._get_active_leverage(intent.symbol)
             pos = self._positions.get(intent.symbol, {
                 "symbol": intent.symbol,
                 "contracts": 0.0,
                 "entryPrice": 0.0,
-                "side": "long",
+                "side": "neutral",
                 "unrealizedPnl": 0.0,
-                "leverage": 1.0,
+                "leverage": active_lev,
             })
+            pos["leverage"] = active_lev
             
             # Calculate realized PnL if closing/reducing
             realized_pnl = 0.0
             contracts_before = pos["contracts"]
-            qty_delta = intent.amount if intent.side == OrderSide.BUY else -intent.amount
+            qty_delta = futures_amount if intent.side == OrderSide.BUY else -futures_amount
             
-            # Simple average entry price logic for adding to position
-            if (contracts_before > 0 and qty_delta > 0) or (contracts_before < 0 and qty_delta < 0):
-                total_cost = (abs(contracts_before) * pos["entryPrice"]) + (intent.amount * price)
-                pos["entryPrice"] = total_cost / (abs(contracts_before) + intent.amount)
+            # Simple average entry price logic for adding to or opening position
+            if contracts_before == 0:
+                pos["entryPrice"] = price
+            elif (contracts_before > 0 and qty_delta > 0) or (contracts_before < 0 and qty_delta < 0):
+                total_cost = (abs(contracts_before) * pos["entryPrice"]) + (futures_amount * price)
+                pos["entryPrice"] = total_cost / (abs(contracts_before) + futures_amount)
             elif contracts_before != 0:
                 # Reducing position
-                reduce_qty = min(abs(contracts_before), intent.amount)
+                reduce_qty = min(abs(contracts_before), futures_amount)
                 if contracts_before > 0:
                     realized_pnl = (price - pos["entryPrice"]) * reduce_qty
                 else:
                     realized_pnl = (pos["entryPrice"] - price) * reduce_qty
                 
                 # If flipped side, update entry price for remainder
-                if intent.amount > abs(contracts_before):
+                if futures_amount > abs(contracts_before):
                     pos["entryPrice"] = price
                     
             pos["contracts"] += qty_delta
-            if pos["contracts"] > 0:
+            if abs(pos["contracts"]) < 1e-8:
+                pos["contracts"] = 0.0
+                pos["entryPrice"] = 0.0
+                pos["side"] = "neutral"
+                pos["unrealizedPnl"] = 0.0
+            elif pos["contracts"] > 0:
                 pos["side"] = "long"
-            elif pos["contracts"] < 0:
+            else:
                 pos["side"] = "short"
                 
             self._positions[intent.symbol] = pos
@@ -280,7 +362,6 @@ class DryRunExchange:
             # Apply realized PnL and fees to USDT balance
             self._adjust_balance("USDT", realized_pnl - fee)
             quote = "USDT"
-            base = intent.symbol.split("/")[0]
 
         exchange_id = f"dry_{uuid.uuid4().hex[:12]}"
         result = OrderResult(
@@ -383,8 +464,21 @@ class DryRunExchange:
 
     @staticmethod
     def _parse_symbol(symbol: str):
-        """Split 'BTC/USDT' into ('BTC', 'USDT')."""
-        parts = symbol.split("/")
-        if len(parts) != 2:
-            raise ValueError(f"Invalid symbol format: {symbol}")
-        return parts[0], parts[1]
+        """Split 'BTC/USDT' or 'BTC/USDT:USDT' into ('BTC', 'USDT')."""
+        clean = symbol.split(":")[0] if ":" in symbol else symbol
+        if "/" in clean:
+            parts = clean.split("/")
+            return parts[0], parts[1]
+        for base in ("BTC", "ETH", "SOL", "BNB"):
+            if clean.startswith(base):
+                return base, clean[len(base):]
+        raise ValueError(f"Invalid symbol format: {symbol}")
+
+    @staticmethod
+    def _timeframe_to_ms(timeframe: str) -> int:
+        """Convert timeframe string to milliseconds."""
+        units = {"s": 1_000, "m": 60_000, "h": 3_600_000, "d": 86_400_000, "w": 604_800_000}
+        for suffix, ms in units.items():
+            if timeframe.endswith(suffix):
+                return int(timeframe[:-len(suffix)]) * ms
+        raise ValueError(f"Cannot parse timeframe: {timeframe}")

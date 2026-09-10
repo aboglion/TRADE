@@ -122,13 +122,14 @@ class CandleService:
             InsufficientDataError: If not enough candles are available.
         """
         needed = min_candles or self._warmup_candles
-        since_ms = up_to_ts - (self._tf_ms * (needed + 50))  # Extra buffer
+        buffer_candles = max(100, int(needed * 0.1))
+        since_ms = up_to_ts - (self._tf_ms * (needed + buffer_candles))
 
         candles = self._provider.fetch_candles(
             symbol=symbol,
             timeframe=self._timeframe,
             since_ms=since_ms,
-            limit=needed + 50,
+            limit=needed + buffer_candles,
         )
 
         # Filter to closed candles up to the target

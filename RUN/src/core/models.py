@@ -75,6 +75,9 @@ class PortfolioSnapshot:
         if self.total_value_usd <= 0:
             return 0.0
         h = self.holdings.get(symbol)
+        if h is None and ("/" in symbol or ":" in symbol):
+            clean_base = symbol.split("/")[0].split(":")[0]
+            h = self.holdings.get(clean_base)
         if h is None:
             return 0.0
         weight = h.value_usd / self.total_value_usd
@@ -121,6 +124,7 @@ class OrderIntent:
 class OrderResult:
     """Result of submitting an order to the exchange."""
     client_order_id: str
+    symbol: str = ""
     exchange_order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.UNKNOWN
     filled_amount: float = 0.0

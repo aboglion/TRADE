@@ -125,9 +125,18 @@ class ReconciliationService:
                     exc_order.exchange_order_id,
                     exc_order.client_order_id,
                 )
+                amount = 0.0
+                side = "buy"
+                if isinstance(exc_order.raw_response, dict):
+                    amount = float(exc_order.raw_response.get("amount", 0.0) or 0.0)
+                    side = str(exc_order.raw_response.get("side", "buy") or "buy").lower()
+
                 self._state.pending_orders.append({
                     "client_order_id": exc_order.client_order_id,
                     "exchange_order_id": exc_order.exchange_order_id,
+                    "symbol": exc_order.symbol,
+                    "side": side,
+                    "amount": amount,
                     "status": exc_order.status.value,
                     "filled_amount": exc_order.filled_amount,
                     "source": "orphan_detected",

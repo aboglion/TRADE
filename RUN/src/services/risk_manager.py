@@ -80,7 +80,8 @@ class RiskManager(IRiskManager):
         self._cycle_order_count += 1
         self._last_order_time = time.time()
         order_value = self._get_order_value(intent)
-        self._cycle_total_value += order_value
+        if not self._is_position_reducing_order(intent, portfolio):
+            self._cycle_total_value += order_value
 
         logger.info(
             "Order APPROVED by risk manager: %s %s %.8f ($%.2f)",
@@ -112,13 +113,12 @@ class RiskManager(IRiskManager):
     def _check_symbol_allowed(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> Tuple[bool, str]:
-        if intent.symbol in self._config.banned_symbols:
+        clean_sym = intent.symbol.split(":")[0] if ":" in intent.symbol else intent.symbol
+        if intent.symbol in self._config.banned_symbols or clean_sym in self._config.banned_symbols:
             return False, f"Symbol {intent.symbol} is banned"
-        if (
-            self._config.allowed_symbols
-            and intent.symbol not in self._config.allowed_symbols
-        ):
-            return False, f"Symbol {intent.symbol} not in allowed list"
+        if self._config.allowed_symbols:
+            if intent.symbol not in self._config.allowed_symbols and clean_sym not in self._config.allowed_symbols:
+                return False, f"Symbol {intent.symbol} not in allowed list"
         return True, ""
 
     def _check_market_order(
@@ -138,6 +138,8 @@ class RiskManager(IRiskManager):
     def _check_max_order_value(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> Tuple[bool, str]:
+        if self._is_position_reducing_order(intent, portfolio):
+            return True, ""
         order_value = self._get_order_value(intent)
         if order_value > self._config.max_single_order_usd:
             return (
@@ -162,7 +164,8 @@ class RiskManager(IRiskManager):
     ) -> Tuple[bool, str]:
         if self._last_order_time > 0:
             elapsed = time.time() - self._last_order_time
-            if elapsed < self._config.min_seconds_between_orders:
+            # Allow 0.05s tolerance for OS scheduler sleep jitter
+            if elapsed < (self._config.min_seconds_between_orders - 0.05):
                 return (
                     False,
                     f"Only {elapsed:.1f}s since last order "
@@ -170,10 +173,28 @@ class RiskManager(IRiskManager):
                 )
         return True, ""
 
+    def _is_position_reducing_order(
+        self, intent: OrderIntent, portfolio: PortfolioSnapshot
+    ) -> bool:
+        """Check if an order only reduces or closes an existing position without flipping/expanding."""
+        base = intent.symbol.split("/")[0].split(":")[0]
+        holding = portfolio.holdings.get(base)
+        if holding is None:
+            return False
+        current_qty = holding.total
+        if current_qty > 1e-8 and intent.side.value.upper() == "SELL":
+            return intent.amount <= (current_qty + 1e-6)
+        if current_qty < -1e-8 and intent.side.value.upper() == "BUY":
+            return intent.amount <= (abs(current_qty) + 1e-6)
+        return False
+
     def _check_max_portfolio_change(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> Tuple[bool, str]:
         if portfolio.total_value_usd <= 0:
+            return True, ""
+        # Position reduction/liquidation orders reduce risk and must not be blocked by portfolio change caps
+        if self._is_position_reducing_order(intent, portfolio):
             return True, ""
         order_value = self._get_order_value(intent)
         total_change = (self._cycle_total_value + order_value) / portfolio.total_value_usd
