@@ -1,23 +1,26 @@
 """
 Network utilities.
-Provides outbound IP detection and caching for exchange whitelist configuration.
+Autonomous outbound IP detection and caching for exchange whitelist configuration.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import socket
 from typing import Optional
 import urllib.request
 
 logger = logging.getLogger("bot.utils.network")
 
 _cached_outbound_ip: Optional[str] = None
+_IPV4_REGEX = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
 
 
 def get_outbound_ip(timeout: float = 3.0) -> str:
     """
-    Get the server's public outbound IP address.
-    Caches the result to avoid redundant network requests.
+    Autonomously detect the server's public outbound IP address.
+    Caches the result in memory so it doesn't incur latency on repeated checks.
     """
     global _cached_outbound_ip
     if _cached_outbound_ip:
@@ -25,19 +28,37 @@ def get_outbound_ip(timeout: float = 3.0) -> str:
 
     endpoints = [
         "https://api.ipify.org",
-        "https://ifconfig.me/ip",
         "https://icanhazip.com",
+        "https://ifconfig.me/ip",
+        "https://checkip.amazonaws.com",
     ]
 
     for url in endpoints:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "curl/7.68.0"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 ip = resp.read().decode("utf-8").strip()
-                if ip and len(ip.split(".")) == 4:
+                if ip and _IPV4_REGEX.match(ip):
                     _cached_outbound_ip = ip
                     return ip
         except Exception:
             continue
 
-    return "46.210.168.102"
+    # Fallback: attempt socket route check to external DNS
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(1.0)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            if local_ip and _IPV4_REGEX.match(local_ip):
+                _cached_outbound_ip = local_ip
+                return local_ip
+    except Exception:
+        pass
+
+    return "unknown"
+
+
+def get_whitelist_ip_summary() -> str:
+    """Returns the autonomously detected server outbound IP."""
+    return get_outbound_ip()

@@ -980,7 +980,7 @@ async function fetchPortfolio() {
         const res = await apiFetch("/api/portfolio");
         if (!res.ok) {
             let errorMsg = "Exchange connection unavailable";
-            let serverIp = "46.210.168.102";
+            let serverIp = "unknown";
             try {
                 const errData = await res.json();
                 if (errData.error) errorMsg = errData.error;

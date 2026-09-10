@@ -31,7 +31,7 @@ from src.core.exceptions import (
     InvalidOrderError,
 )
 from src.core.models import Candle, OrderIntent, OrderResult
-from src.utils.network_utils import get_outbound_ip
+from src.utils.network_utils import get_outbound_ip, get_whitelist_ip_summary
 
 logger = logging.getLogger("bot.exchange")
 
@@ -585,7 +585,7 @@ class ExchangeGateway:
                         f"Action required on Binance:\n"
                         f"  1. Go to Binance API Management -> Edit API Key.\n"
                         f"  2. Enable 'Enable Futures' permission checkbox (if using Futures trading).\n"
-                        f"  3. Check IP Whitelist restrictions: if enabled, add server IP: {get_outbound_ip()}\n"
+                        f"  3. Check IP Whitelist restrictions: if enabled, add server IP: {get_whitelist_ip_summary()}\n"
                         f"  4. Verify BINANCE_API_KEY and BINANCE_API_SECRET in your .env file.\n"
                         f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
                     )
@@ -599,7 +599,7 @@ class ExchangeGateway:
                         f"Action required on Binance:\n"
                         f"  1. Go to Binance API Management -> Edit API Key.\n"
                         f"  2. Enable 'Enable Futures' permission checkbox (if using Futures trading).\n"
-                        f"  3. Check IP Whitelist restrictions: if enabled, add server IP: {get_outbound_ip()}\n"
+                        f"  3. Check IP Whitelist restrictions: if enabled, add server IP: {get_whitelist_ip_summary()}\n"
                         f"  4. Verify BINANCE_API_KEY and BINANCE_API_SECRET in your .env file.\n"
                         f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
                     )
