@@ -20,6 +20,8 @@ from socketserver import ThreadingMixIn
 from threading import Lock, Thread
 from typing import Any, Dict, Optional
 
+from src.utils.network_utils import get_outbound_ip
+
 logger = logging.getLogger("bot.web.server")
 
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
@@ -543,14 +545,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def _handle_test_binance(self) -> None:
         import ccxt
-        import urllib.request
-        outbound_ip = "unknown"
-        try:
-            req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                outbound_ip = resp.read().decode("utf-8").strip()
-        except Exception as ex:
-            outbound_ip = f"Error detecting IP: {ex}"
+        outbound_ip = get_outbound_ip()
 
         # Ensure .env is read
         try:
@@ -763,7 +758,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 "error": err_msg,
                 "is_auth_error": is_auth_err,
                 "code": -2015 if "-2015" in err_msg else 500,
-                "server_ip": "172.236.200.8",
+                "server_ip": get_outbound_ip(),
                 "message": "Binance authentication rejected (-2015: Invalid API-key, IP whitelist, or Futures permission)." if is_auth_err else err_msg,
             }, status=500)
 

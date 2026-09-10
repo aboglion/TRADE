@@ -980,10 +980,11 @@ async function fetchPortfolio() {
         const res = await apiFetch("/api/portfolio");
         if (!res.ok) {
             let errorMsg = "Exchange connection unavailable";
-            let isAuthErr = false;
+            let serverIp = "46.210.168.102";
             try {
                 const errData = await res.json();
                 if (errData.error) errorMsg = errData.error;
+                if (errData.server_ip) serverIp = errData.server_ip;
                 if (errData.is_auth_error || errorMsg.includes("-2015") || errorMsg.includes("Invalid API-key") || errorMsg.includes("permissions")) {
                     isAuthErr = true;
                 }
@@ -998,7 +999,7 @@ async function fetchPortfolio() {
                             <div style="font-weight: 600; color: #fecdd3; margin-bottom: 6px;">🔑 שגיאת אימות Binance (-2015: Invalid API-key, IP, or permissions):</div>
                             <ul style="margin: 4px 0 4px 20px; padding: 0;">
                                 <li><strong>קובץ מפתחות (.env):</strong> וודא שקובץ <code>.env</code> מכיל <code>BINANCE_API_KEY</code> ו-<code>BINANCE_API_SECRET</code> תקינים.</li>
-                                <li><strong>כתובת IP מורשית (IP Whitelist):</strong> אם מוגדרת הגבלת IP בבינאנס, הוסף את ה-IP של השרת: <code>172.236.200.8</code>.</li>
+                                <li><strong>כתובת IP מורשית (IP Whitelist):</strong> אם מוגדרת הגבלת IP בבינאנס, הוסף את ה-IP של השרת: <code>${escapeHtml(serverIp)}</code>.</li>
                                 <li><strong>הרשאת חוזים (Futures):</strong> בניהול ה-API בבינאנס סמן ב-V את <code>Enable Futures</code> (וחשבון USDT-M פעיל).</li>
                             </ul>
                         </div>
