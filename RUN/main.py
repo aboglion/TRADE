@@ -25,8 +25,13 @@ import sys
 from pathlib import Path
 
 # SIGHUP = terminal closed / disconnected. Ignore it so background runs 24/7
-if hasattr(signal, "SIGHUP"):
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+import threading
+
+if hasattr(signal, "SIGHUP") and threading.current_thread() is threading.main_thread():
+    try:
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    except (ValueError, AttributeError):
+        pass
 
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).parent))
