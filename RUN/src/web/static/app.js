@@ -2752,6 +2752,115 @@ function renderBinaryTree(data) {
     container.innerHTML = html;
 }
 
+function evaluateLadderCircuit(nodes) {
+    let isCircuitLive = true;
+    let firstBlocker = null;
+    const evaluated = nodes.map(node => {
+        const isMet = !!node.met;
+        let circuitState = "";
+        if (isCircuitLive && isMet) {
+            circuitState = "energized";
+        } else if (isCircuitLive && !isMet) {
+            circuitState = "blocking";
+            isCircuitLive = false;
+            firstBlocker = node;
+        } else {
+            circuitState = "dormant";
+        }
+        return { ...node, isMet, circuitState };
+    });
+    const allPass = evaluated.every(n => n.isMet);
+    return { evaluated, allPass, firstBlocker };
+}
+
+function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActive, outcomeMeta) {
+    let tHtml = `<div class="pipeline-track ladder-circuit">`;
+    tHtml += `
+        <div class="ladder-power-rail energized" title="מתח פיקוד ראשי (Power Rail)">
+            <span class="rail-tag">⚡ LADDER POWER</span>
+        </div>
+    `;
+    const firstState = evaluatedNodes.length > 0 ? evaluatedNodes[0].circuitState : 'dormant';
+    const firstConnClass = (firstState === 'energized' || firstState === 'blocking') ? 'energized' : 'dormant';
+    tHtml += `<div class="pipeline-connector ${firstConnClass}"></div>`;
+
+    evaluatedNodes.forEach((node, idx) => {
+        let circleClass = "";
+        let circleIcon = "";
+        let statusClass = "";
+        let statusBadgeText = "";
+
+        if (node.circuitState === "energized") {
+            circleClass = "pass energized";
+            circleIcon = "✓";
+            statusClass = "badge-pass";
+            statusBadgeText = node.badge || "✓ מאושר";
+        } else if (node.circuitState === "blocking") {
+            circleClass = "fail blocking";
+            circleIcon = "🛑";
+            statusClass = "badge-blocking";
+            statusBadgeText = node.badge || "🛑 חסם נוכחי";
+        } else {
+            circleClass = "dormant";
+            circleIcon = node.isMet ? "✓" : "✗";
+            statusClass = "badge-dormant";
+            statusBadgeText = "(ממתין לזרימה)";
+        }
+
+        const liveValText = node.live_val || node.actual || "";
+
+        tHtml += `
+            <div class="pipeline-node-wrapper" data-node-id="${node.id}">
+                <div class="pipeline-node-circle ${circleClass}">${circleIcon}</div>
+                <span class="pipeline-node-label">${node.shortTitle || node.title}</span>
+                ${liveValText ? `<span class="pipeline-node-live-val">${liveValText}</span>` : ''}
+                <span class="pipeline-node-badge ${statusClass}">${statusBadgeText}</span>
+                
+                <div class="pipeline-popover-content" style="display:none;">
+                    <div class="popover-header">
+                        <span class="popover-title">${node.fullTitle || node.title}</span>
+                        <span class="popover-badge ${node.isMet ? 'badge-pass' : 'badge-fail'}">${node.isMet ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
+                    </div>
+                    <div class="popover-grid">
+                        <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
+                        <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
+                    </div>
+                    <div class="popover-explanation">💡 ${node.explanation || ''}</div>
+                </div>
+            </div>
+        `;
+
+        if (idx < evaluatedNodes.length - 1) {
+            const nextNode = evaluatedNodes[idx + 1];
+            let connClass = "dormant";
+            if (node.circuitState === "energized") {
+                if (nextNode.circuitState === "energized") {
+                    connClass = "energized";
+                } else if (nextNode.circuitState === "blocking") {
+                    connClass = "blocking-lead";
+                }
+            }
+            tHtml += `<div class="pipeline-connector ${connClass}"></div>`;
+        }
+    });
+
+    const finalConnClass = (allPass || isPosActive) ? "energized" : "dormant";
+    tHtml += `<div class="pipeline-connector ${finalConnClass}"></div>`;
+
+    // Output Coil
+    tHtml += `
+        <div class="pipeline-node-wrapper ladder-output-coil">
+            <div class="pipeline-node-circle ${outcomeMeta.circleClass}">${outcomeMeta.icon}</div>
+            <span class="pipeline-node-label">${outcomeMeta.title}</span>
+            <span class="pipeline-node-live-val">${outcomeMeta.liveVal}</span>
+            <span class="pipeline-node-badge ${outcomeMeta.badgeClass}">${outcomeMeta.badgeText}</span>
+        </div>
+    `;
+
+    tHtml += `</div>`;
+    return tHtml;
+}
+
 function renderDashboardPipeline(data) {
     const container = document.getElementById("dashPipelineContainer");
     if (!container || !data) return;
@@ -2781,7 +2890,7 @@ function renderDashboardPipeline(data) {
 
     let html = `<div class="pipeline-stepper-container">`;
 
-    // 1. If RISK mode selected (or in ALL), render Macro Risk Guard Pipeline first
+    // 1. RISK PIPELINE LADDER
     if (modesToRender.includes("RISK")) {
         const isBull = macro.regime === "BULL";
         const inMomentum = !!macro.in_momentum;
@@ -2805,28 +2914,34 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_1",
                 shortTitle: "1. משטר מקרו",
                 fullTitle: "1. משטר שוק מקרו (Macro 150-SMA)",
-                criteria: `BTC Daily Close > SMA150 ($${(macro.btc_sma150||0).toLocaleString()})`,
+                criteria: `BTC Close > SMA150 ($${(macro.btc_sma150||0).toLocaleString()})`,
                 actual: isBull ? `BULL REGIME ($${(macro.btc_close||0).toLocaleString()} > $${(macro.btc_sma150||0).toLocaleString()})` : `BEAR REGIME ($${(macro.btc_close||0).toLocaleString()} < $${(macro.btc_sma150||0).toLocaleString()})`,
+                live_val: `$${(macro.btc_close||0).toLocaleString()}`,
+                badge: isBull ? "✓ שוורי" : "🐻 דובים",
                 met: isBull,
                 explanation: "אימות מגמת עלייה שורית ראשית בביטקוין מעל ממוצע 150 ימים. בלעדיו מושבתים כל הלונגים."
             },
             {
                 id: "dash_risk_2",
-                shortTitle: "2. מגן מפולת ושער מומנטום",
-                fullTitle: "2. שער מומנטום מוסדי ומגן מפולת (Crash Shield Gate)",
+                shortTitle: "2. מגן מפולת",
+                fullTitle: "2. שער מומנטום ומגן מפולת (Crash Shield Gate)",
                 criteria: `5d Pullback >= -2.0% & Close >= EMA9 ($${(ema9||0).toLocaleString()})`,
-                actual: `5d PB: ${dist5d.toFixed(2)}% | EMA9: $${(ema9||0).toLocaleString()} (${inMomentum ? '🚀 מומנטום פעיל' : '🛡️ Safe Haven'})`,
+                actual: `5d PB: ${dist5d.toFixed(2)}% | EMA9: $${(ema9||0).toLocaleString()} (${inMomentum ? '🚀 מומנטום' : '🛡️ Safe Haven'})`,
+                live_val: `5d: ${dist5d.toFixed(1)}%`,
+                badge: inMomentum ? "🚀 מומנטום" : "🛡️ Safe Haven",
                 met: inMomentum,
-                explanation: "שער הכניסה למינוף מוגבר (עד 10x): נסיגה של מעל 2%- משיא 5 ימים או שבירת EMA9 מפעילה מיד Safe Haven והורדה ל-1.0x ספוט!"
+                explanation: "שער הכניסה למינוף מוגבר: נסיגה מעל 2%- משיא 5 ימים מפעילה מיד Safe Haven והורדה ל-1.0x ספוט."
             },
             {
                 id: "dash_risk_3",
-                shortTitle: "3. מנוע מינוף ורקטת שכנוע",
-                fullTitle: "3. מנוע מינוף דינמי ורקטת שכנוע (10x Conviction Rocket)",
-                criteria: "ATR < 2.2% & ADX >= 24 (10.0x Rocket) | ATR < 2.8% (5.0x) | Base (2.5x)",
+                shortTitle: "3. מנוע מינוף",
+                fullTitle: "3. מנוע מינוף דינמי (Dynamic Conviction Engine)",
+                criteria: "ATR < 2.2% & ADX >= 24 (10x) | ATR < 2.8% (5x) | Base (2.5x)",
                 actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || `${effectiveLev.toFixed(1)}x Tier`}`,
+                live_val: `${effectiveLev.toFixed(1)}x Tier`,
+                badge: `${effectiveLev.toFixed(1)}x`,
                 met: isBull && inMomentum && effectiveLev >= 2.5,
-                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד פי 10 ברגיעה ומומנטום מובהק, ו-5.0x / 2.5x בתנודתיות מוגברת."
+                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 10x ברגיעה ומומנטום, ו-5.0x / 2.5x בתנודתיות."
             },
             {
                 id: "dash_risk_4",
@@ -2834,8 +2949,10 @@ function renderDashboardPipeline(data) {
                 fullTitle: "4. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
                 criteria: `Intraday Dip >= ${flashLimit.toFixed(1)}%`,
                 actual: `${intradayDip.toFixed(2)}% ${flashTriggered ? '⚠️ הופעל!' : '✓ תקין'}`,
+                live_val: `${intradayDip.toFixed(1)}%`,
+                badge: flashTriggered ? "⚡ הופעל!" : "✓ תקין",
                 met: !flashTriggered,
-                explanation: "מפסק הגנה תוך-יומי החותך מיידית את המינוף ל-1.0x אם נר יומי צונח מעל 3.8%- מפתיחה, לספיגת המכה ללא נזק."
+                explanation: "מפסק הגנה תוך-יומי החותך מיידית את המינוף ל-1.0x אם נר יומי צונח מעל 3.8%- מפתיחה."
             },
             {
                 id: "dash_risk_5",
@@ -2843,28 +2960,36 @@ function renderDashboardPipeline(data) {
                 fullTitle: "5. סולם כניסה מחדש מדורג (4-Step Re-Entry Ladder)",
                 criteria: "התאוששות 4 שלבים: 1.0x → 2.0x → 4.0x → 10.0x",
                 actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
+                live_val: ladderStep,
+                badge: `תקרה ${ladderCap.toFixed(0)}x`,
                 met: barsSinceTrip > 4,
-                explanation: "מניעת מלכודות שוורים: חזרה הדרגתית ומבוקרת למינוף מלא ב-4 שלבים מדודים לאחר הפעלת מפסק ביטחון."
+                explanation: "מניעת מלכודות שוורים: חזרה הדרגתית ומבוקרת למינוף מלא ב-4 שלבים מדודים."
             },
             {
                 id: "dash_risk_6",
-                shortTitle: "6. עוגן מזומן תשואה",
+                shortTitle: "6. עוגן מזומן",
                 fullTitle: "6. עוגן מזומן בתשואה חסרת סיכון (Safe Haven Cash Yield)",
                 criteria: "60% Cash @ 4.0% APY במצב הגנה | 100% מושקע במומנטום מלא",
-                actual: safeHavenActive ? "🛡️ 60% Cash Buffer (4% APY) + 30% Spot + 10% Micro" : "🚀 100% Capital Deployed (In Momentum)",
+                actual: safeHavenActive ? "🛡️ 60% Cash Buffer (4% APY) + 30% Spot" : "🚀 100% Capital Deployed",
+                live_val: safeHavenActive ? "60% Cash @ 4%" : "100% מושקע",
+                badge: safeHavenActive ? "4% APY" : "🚀 מומנטום",
                 met: true,
-                explanation: "הקצאת 60% מההון למזומן המניב תשואה של 4% בריבית שוק כשהשוק בתיקון, לשמירה מוחלטת על הקרן."
+                explanation: "הקצאת 60% מההון למזומן בריבית 4% כשהשוק בתיקון, לשמירה מוחלטת על הקרן."
             },
             {
                 id: "dash_risk_7",
-                shortTitle: "7. גידור שורט דובים",
+                shortTitle: "7. גידור שורט",
                 fullTitle: "7. גידור שורט שיטתי בשוק דובי (Systematic Bear Short Hedge)",
-                criteria: "BTC < SMA150 -> 35% Margin @ 2.0x Short BTC (70% Net Short) + 65% Cash APY",
-                actual: isBull ? "✓ משטר שוורים (שורט רדום)" : "🐻 שורט פעיל: 35% ממונף 2.0x (חשיפה -70%)",
+                criteria: "BTC < SMA150 -> 35% Margin @ 2.0x Short BTC (70% Net Short)",
+                actual: isBull ? "✓ משטר שוורים (שורט רדום)" : "🐻 שורט פעיל: 35% ממונף 2.0x",
+                live_val: isBull ? "לונגים מאושרים" : "-70% Net Short",
+                badge: isBull ? "✓ תקין" : "🐻 שורט פעיל",
                 met: isBull,
-                explanation: "הגנה אקטיבית ורווח בירידות: הקצאת 35% מההון לשורט ממונף 2.0x על ביטקוין כאשר השוק עובר למשטר דובים."
+                explanation: "הגנה אקטיבית: הקצאת 35% מההון לשורט ממונף 2.0x על ביטקוין כאשר השוק עובר למשטר דובים."
             }
         ];
+
+        const { evaluated, allPass, firstBlocker } = evaluateLadderCircuit(riskNodes);
 
         let outcomeText = "";
         let outcomeClass = "";
@@ -2876,11 +3001,11 @@ function renderDashboardPipeline(data) {
             outcomeIcon = "🐻";
         } else if (safeHavenActive) {
             outcomeText = `🛡️ SAFE HAVEN SHIELD (1.0x SPOT | 60% CASH @ 4% APY)`;
-            outcomeClass = "fail";
+            outcomeClass = "blocking";
             outcomeIcon = "🛡️";
         } else if (flashTriggered) {
             outcomeText = `⚡ FLASH BREAKER (1.0x SPOT)`;
-            outcomeClass = "fail";
+            outcomeClass = "blocking";
             outcomeIcon = "⚡";
         } else if (effectiveLev >= 10.0) {
             outcomeText = `🚀 CONVICTION ROCKET (10.0x | ${totalExposure}%)`;
@@ -2892,339 +3017,166 @@ function renderDashboardPipeline(data) {
             outcomeIcon = "⚡";
         }
 
+        const riskOutcomeMeta = {
+            circleClass: allPass ? "pass energized" : "blocking",
+            icon: outcomeIcon,
+            title: "מינוף אפקטיבי",
+            liveVal: `${effectiveLev.toFixed(1)}x (${totalExposure}%)`,
+            badgeClass: allPass ? "badge-pass" : "badge-blocking",
+            badgeText: outcomeText.split('(')[0].trim()
+        };
+
         html += `
             <div class="pipeline-card">
                 <div class="pipeline-card-header">
                     <div class="pipeline-coin-info">
                         <span class="pipeline-coin-badge">🛡️ INSTITUTIONAL CRASH SHIELD & 10x ENGINE</span>
-                        <span class="pipeline-type-tag risk">DYNAMIC RISK PIPELINE</span>
+                        <span class="pipeline-type-tag risk">LADDER סיכונים ומקרו</span>
                     </div>
                     <span class="pipeline-outcome-pill ${outcomeClass}">${outcomeIcon} ${outcomeText}</span>
                 </div>
-                <div class="pipeline-track">
-        `;
-
-        riskNodes.forEach((node, idx) => {
-            const isPass = node.met;
-            const circleClass = isPass ? "pass" : "fail";
-            const icon = isPass ? "✓" : "✗";
-            const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
-
-            html += `
-                <div class="pipeline-node-wrapper" data-node-id="${node.id}">
-                    <div class="pipeline-node-circle ${circleClass}">${icon}</div>
-                    <span class="pipeline-node-label">${node.shortTitle}</span>
-                    <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
-                    
-                    <div class="pipeline-popover-content" style="display:none;">
-                        <div class="popover-header">
-                            <span class="popover-title">${node.fullTitle}</span>
-                            <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
-                        </div>
-                        <div class="popover-grid">
-                            <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
-                            <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
-                        </div>
-                        <div class="popover-explanation">💡 ${node.explanation}</div>
-                    </div>
-                </div>
-            `;
-
-            if (idx < riskNodes.length - 1) {
-                html += `<div class="pipeline-connector ${isPass ? 'pass' : 'fail'}"></div>`;
-            }
-        });
-
-        const allRiskPass = riskNodes.every(n => n.met);
-        html += `
-                <div class="pipeline-connector ${allRiskPass ? 'pass' : 'fail'}"></div>
-                <div class="pipeline-node-wrapper">
-                    <div class="pipeline-node-circle ${allRiskPass ? 'pass' : 'fail'}">${outcomeIcon}</div>
-                    <span class="pipeline-node-label">מינוף אפקטיבי</span>
-                    <span class="pipeline-node-sub ${allRiskPass ? 'pass' : 'fail'}">${effectiveLev.toFixed(1)}x (${totalExposure}%)</span>
-                </div>
+                ${renderLadderTrackHtml(evaluated, allPass, firstBlocker, false, riskOutcomeMeta)}
             </div>
-        </div>
         `;
     }
 
-    // 2. Render Coin Pipelines (BUY / SELL for each selected coin)
+    // 2. COIN PIPELINES (BUY / SELL LADDERS)
     coinsToRender.forEach(coin => {
         const coinData = assets[coin];
         if (!coinData) return;
 
         const iconMap = { BTC: "₿", ETH: "⟠", SOL: "◎" };
         const coinIcon = iconMap[coin] || "🪙";
+        const isPosActive = !!(coinData.position && coinData.position.active);
+        const posInfo = coinData.position || {};
 
-        // BUY PIPELINE
+        // BUY PIPELINE LADDER
         if (modesToRender.includes("BUY")) {
-            const buyNodesRaw = coinData.buy_tree_nodes || [];
-            const buyConds = coinData.entry_conditions || {};
+            const rawNodes = coinData.buy_tree_nodes || [];
+            const { evaluated, allPass, firstBlocker } = evaluateLadderCircuit(rawNodes);
 
-            const nRegime = buyNodesRaw.find(n => n.id === "node_macro_regime") || buyNodesRaw[0] || {};
-            const nGate = buyNodesRaw.find(n => n.id === "node_crash_shield_momentum") || {};
-            const nLev = buyNodesRaw.find(n => n.id === "node_leverage_tier") || {};
-            const nEma = buyNodesRaw.find(n => n.id === "node_ema_alignment") || buyNodesRaw[1] || {};
-            const nDonchian = buyNodesRaw.find(n => n.id === "node_donchian_breakout") || buyNodesRaw[2] || {};
-            const nAdx = buyNodesRaw.find(n => n.id === "node_adx_filter") || buyNodesRaw[3] || {};
-            const nPyramid = buyNodesRaw.find(n => n.id === "node_pyramiding") || buyNodesRaw[4] || {};
+            let outcomeTitle = "";
+            let outcomePillClass = "";
+            let outcomeIcon = "";
 
-            const buyNodes = [
-                {
-                    id: `dash_${coin}_buy_1`,
-                    shortTitle: "1. Macro Regime",
-                    fullTitle: nRegime.title || "1. משטר שוק מקרו (Macro Regime)",
-                    criteria: nRegime.criteria || "BTC > SMA150",
-                    actual: nRegime.actual || "",
-                    met: !!nRegime.met,
-                    explanation: "בדיקת בסיס: האם השוק הכללי נמצא במשטר עולה (BULL REGIME). ללא אישור מקרו, לא נפתחות פוזיציות חדשות."
-                },
-                {
-                    id: `dash_${coin}_buy_2`,
-                    shortTitle: "2. Crash Shield Gate",
-                    fullTitle: nGate.title || "2. מגן מפולת ושער מומנטום (Crash Shield Gate)",
-                    criteria: nGate.criteria || "5d PB >= -2.0% & Close >= EMA9",
-                    actual: nGate.actual || "",
-                    met: !!nGate.met,
-                    explanation: "אימות שביטקוין לא נסוג מעל 2% משיא 5 ימים ומחזיק מעל EMA9 יומית לפתיחת מינוף מוגבר."
-                },
-                {
-                    id: `dash_${coin}_buy_3`,
-                    shortTitle: "3. Conviction Tier",
-                    fullTitle: nLev.title || "3. מדרגת מינוף ורקטת שכנוע (Dynamic Leverage)",
-                    criteria: nLev.criteria || `Dynamic Leverage: ${macro.effective_leverage || 10.0}x`,
-                    actual: nLev.actual || (macro.active_tier || "Active Tier"),
-                    met: !!nLev.met,
-                    explanation: "מינוף מותאם תנודתיות ושכנוע (עד 10x ברגיעה, 5.0x / 2.5x בתנודתיות) וסולם כניסה מחדש מבוקר."
-                },
-                {
-                    id: `dash_${coin}_buy_4`,
-                    shortTitle: "4. Trend Structure",
-                    fullTitle: nEma.title || "4. מבנה ממוצעים (EMA Alignment)",
-                    criteria: nEma.criteria || "Regime in [STRONG_BULL, TREND]",
-                    actual: nEma.actual || "",
-                    met: !!nEma.met,
-                    explanation: `בודק ש-${coin} נמצא במגמת עלייה טכנית מובהקת בממוצעים הנעים (EMA20 > EMA50 > EMA200).`
-                },
-                {
-                    id: `dash_${coin}_buy_5`,
-                    shortTitle: "5. Donchian 30",
-                    fullTitle: nDonchian.title || "5. פריצת דונצ'יאן 30 (Donchian High)",
-                    criteria: nDonchian.criteria || `Close >= $${coinData.donchian30}`,
-                    actual: nDonchian.actual || `$${coinData.close} (${buyConds.donchian_gap_pct >= 0 ? '+' : ''}${buyConds.donchian_gap_pct}%)`,
-                    met: !!nDonchian.met,
-                    explanation: `טריגר כניסה קלאסי! סגירת נר 4 שעות של ${coin} מעל שיא 30 הנרות האחרונים ($${coinData.donchian30}).`
-                },
-                {
-                    id: `dash_${coin}_buy_6`,
-                    shortTitle: "6. ADX Filter",
-                    fullTitle: nAdx.title || "6. עוצמת מגמה (ADX Filter)",
-                    criteria: nAdx.criteria || `ADX >= ${coinData.min_adx}`,
-                    actual: nAdx.actual || `${coinData.adx}`,
-                    met: !!nAdx.met,
-                    explanation: `סינון דשדוש! מדד ADX (${coinData.adx}) חייב להיות מעל ${coinData.min_adx} כדי למנוע כניסות סרק בשוק ללא מומנטום.`
-                },
-                {
-                    id: `dash_${coin}_buy_7`,
-                    shortTitle: "7. Pyramiding",
-                    fullTitle: nPyramid.title || "7. פירמידינג מוגן (Shielded Pyramiding)",
-                    criteria: nPyramid.criteria || "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull & In Momentum)",
-                    actual: nPyramid.actual || "Initial Entry Mode",
-                    met: !!nPyramid.met,
-                    explanation: `הוספת פוזיציה ב-${coin} בטרנד חזק (STRONG_BULL_TREND). מותר להוסיף עד 2 כניסות נוספות (נעול אוטומטית במצב Safe Haven להגנה על הקרן).`
-                }
-            ];
+            if (isPosActive) {
+                const rVal = posInfo.open_r !== undefined ? `${posInfo.open_r > 0 ? '+' : ''}${posInfo.open_r}R` : 'פעילה';
+                outcomeTitle = `✅ POS ACTIVE (${rVal})`;
+                outcomePillClass = "pass";
+                outcomeIcon = "✅";
+            } else if (allPass) {
+                outcomeTitle = "🚀 BUY SIGNAL — אות קנייה מופעל (LADDER סגור)!";
+                outcomePillClass = "pass";
+                outcomeIcon = "🚀";
+            } else {
+                const blockerName = firstBlocker ? firstBlocker.shortTitle : "תנאי סיכון";
+                outcomeTitle = `🛑 חסום: ${blockerName} (מעגל פתוח)`;
+                outcomePillClass = "blocking";
+                outcomeIcon = "🛑";
+            }
 
-            const isPosActive = coinData.position && coinData.position.active;
-            const allBuyPass = buyNodes.every(n => n.met);
+            let outcomeMeta = null;
+            if (isPosActive) {
+                outcomeMeta = {
+                    circleClass: "pass energized",
+                    icon: "✅",
+                    title: "סטטוס פוזיציה",
+                    liveVal: posInfo.open_r !== undefined ? `${posInfo.open_r > 0 ? '+' : ''}${posInfo.open_r}R` : "Active",
+                    badgeClass: "badge-pass",
+                    badgeText: "🛡️ פוזיציה מוגנת ומנוהלת"
+                };
+            } else if (allPass) {
+                outcomeMeta = {
+                    circleClass: "pass energized",
+                    icon: "🚀",
+                    title: "תוצאת קנייה",
+                    liveVal: "100% מעגל סגור",
+                    badgeClass: "badge-pass",
+                    badgeText: "🚀 פקודת קנייה מוכנה!"
+                };
+            } else {
+                const blockerShort = firstBlocker ? (firstBlocker.shortTitle || '').split('.')[0] : '';
+                outcomeMeta = {
+                    circleClass: "fail blocking",
+                    icon: "🛑",
+                    title: "תוצאת קנייה",
+                    liveVal: firstBlocker ? `חסום בשער ${blockerShort}` : "מעגל פתוח",
+                    badgeClass: "badge-blocking",
+                    badgeText: firstBlocker ? `🛑 חסם: ${firstBlocker.shortTitle}` : "🛑 חסום לקנייה"
+                };
+            }
 
-            let outcomeTitle = isPosActive ? "✅ POS ACTIVE" : (allBuyPass ? "🚀 BUY SIGNAL" : "⏳ WAITING");
-            let outcomePillClass = isPosActive || allBuyPass ? "pass" : "fail";
-            let outcomeIcon = isPosActive ? "✅" : (allBuyPass ? "🚀" : "⏳");
+            const ladderModeLabel = isPosActive ? "LADDER ניהול פוזיציה (IN-TRADE)" : "LADDER כניסה (ENTRY PIPELINE)";
 
             html += `
                 <div class="pipeline-card">
                     <div class="pipeline-card-header">
                         <div class="pipeline-coin-info">
                             <span class="pipeline-coin-badge">${coinIcon} ${coin}/USDT</span>
-                            <span class="pipeline-type-tag buy">BUY PIPELINE</span>
+                            <span class="pipeline-type-tag buy">${ladderModeLabel}</span>
                         </div>
                         <span class="pipeline-outcome-pill ${outcomePillClass}">${outcomeIcon} ${outcomeTitle}</span>
                     </div>
-                    <div class="pipeline-track">
-            `;
-
-            buyNodes.forEach((node, idx) => {
-                const isPass = node.met;
-                const circleClass = isPass ? "pass" : "fail";
-                const icon = isPass ? "✓" : "✗";
-                const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
-
-                html += `
-                    <div class="pipeline-node-wrapper" data-node-id="${node.id}">
-                        <div class="pipeline-node-circle ${circleClass}">${icon}</div>
-                        <span class="pipeline-node-label">${node.shortTitle}</span>
-                        <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
-                        
-                        <div class="pipeline-popover-content" style="display:none;">
-                            <div class="popover-header">
-                                <span class="popover-title">${node.fullTitle}</span>
-                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
-                            </div>
-                            <div class="popover-grid">
-                                <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
-                                <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
-                            </div>
-                            <div class="popover-explanation">💡 ${node.explanation}</div>
-                        </div>
-                    </div>
-                `;
-
-                if (idx < buyNodes.length - 1) {
-                    html += `<div class="pipeline-connector ${isPass ? 'pass' : 'fail'}"></div>`;
-                }
-            });
-
-            html += `
-                    <div class="pipeline-connector ${allBuyPass ? 'pass' : 'fail'}"></div>
-                    <div class="pipeline-node-wrapper">
-                        <div class="pipeline-node-circle ${allBuyPass || isPosActive ? 'pass' : 'fail'}">${outcomeIcon}</div>
-                        <span class="pipeline-node-label">תוצאת קנייה</span>
-                        <span class="pipeline-node-sub ${allBuyPass || isPosActive ? 'pass' : 'fail'}">${isPosActive ? 'פוזיציה פעילה' : (allBuyPass ? 'אות קנייה' : 'חסום לקנייה')}</span>
-                    </div>
+                    ${renderLadderTrackHtml(evaluated, allPass, firstBlocker, isPosActive, outcomeMeta)}
                 </div>
-            </div>
             `;
         }
 
-        // SELL PIPELINE
+        // SELL PIPELINE LADDER (Safety Exits & Short Protection)
         if (modesToRender.includes("SELL")) {
-            const sellNodesRaw = coinData.sell_tree_nodes || [];
-            const pos = coinData.position || {};
+            const rawSellNodes = coinData.sell_tree_nodes || [];
+            
+            // In SELL pipeline, each node is an emergency safety breaker
+            const evaluatedSell = rawSellNodes.map(node => {
+                const isTriggered = !!node.triggered;
+                return {
+                    ...node,
+                    met: !isTriggered, // Safe when NOT triggered
+                    circuitState: isTriggered ? "blocking" : "energized"
+                };
+            });
 
-            const nBear = sellNodesRaw.find(n => n.id === "node_bear_emergency") || sellNodesRaw[0] || {};
-            const nCrash = sellNodesRaw.find(n => n.id === "node_crash_shield") || {};
-            const nFlash = sellNodesRaw.find(n => n.id === "node_flash_circuit_breaker") || {};
-            const nInit = sellNodesRaw.find(n => n.id === "node_initial_risk_stop") || sellNodesRaw[1] || {};
-            const nTrail = sellNodesRaw.find(n => n.id === "node_atr_trailing_stop") || sellNodesRaw[2] || {};
-            const nEma = sellNodesRaw.find(n => n.id === "node_ema_breakdown") || sellNodesRaw[4] || {};
+            const anySellTrip = rawSellNodes.some(n => n.triggered);
+            const triggeredNode = rawSellNodes.find(n => n.triggered);
 
-            const sellNodes = [
-                {
-                    id: `dash_${coin}_sell_1`,
-                    shortTitle: "1. Bear Exit",
-                    fullTitle: nBear.title || "1. יציאת חירום דובים ושורט 35% (Bear Exit & Short Hedge)",
-                    criteria: nBear.criteria || "BTC < SMA150 -> 35% @ 2.0x Short BTC",
-                    actual: nBear.actual || "",
-                    triggered: !!nBear.triggered,
-                    explanation: "במשטר דובים (BEAR), הבוט מורה על סגירה מיידית של פוזיציות הלונג ופתיחת 35% שורט ממונף 2.0x על BTC להגנה ורווח."
-                },
-                {
-                    id: `dash_${coin}_sell_2`,
-                    shortTitle: "2. Crash Shield",
-                    fullTitle: nCrash.title || "2. מגן מפולת מוסדי (Institutional Crash Shield)",
-                    criteria: nCrash.criteria || "5d PB < -2.0% OR Close < EMA9",
-                    actual: nCrash.actual || "Safe",
-                    triggered: !!nCrash.triggered,
-                    explanation: "נסיגה משיא 5 ימים או ירידה מתחת ל-EMA9 מפעילה מיד Safe Haven: חיתוך ל-1.0x ספוט והעברת 60% מההון למזומן בריבית 4% APY!"
-                },
-                {
-                    id: `dash_${coin}_sell_3`,
-                    shortTitle: "3. Flash Breaker",
-                    fullTitle: nFlash.title || "3. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
-                    criteria: nFlash.criteria || "Intraday Dip < -3.8%",
-                    actual: nFlash.actual || "Safe",
-                    triggered: !!nFlash.triggered,
-                    explanation: "צניחה מהירה תוך-יומית מנר הפתיחה מעבר ל-3.8%- חותכת מיד את המינוף ל-1.0x ספוט ומספקת הגנת ספיגה מיידית."
-                },
-                {
-                    id: `dash_${coin}_sell_4`,
-                    shortTitle: "4. Initial Stop",
-                    fullTitle: nInit.title || "4. סטופ סיכון ראשוני (Initial Risk Stop)",
-                    criteria: nInit.criteria || `Initial Stop = $${pos.initial_stop || '--'}`,
-                    actual: nInit.actual || `Low $${coinData.low}`,
-                    triggered: !!nInit.triggered,
-                    explanation: "מגן מפני הפסד כבד בעסקה חדשה! אם המחיר צונח מתחת למחיר כניסה מינוס ATR, מבוצעת יציאה מבוקרת."
-                },
-                {
-                    id: `dash_${coin}_sell_5`,
-                    shortTitle: "5. ATR Trailing",
-                    fullTitle: nTrail.title || "5. סטופ נגרר דינמי (ATR Trailing Stop)",
-                    criteria: nTrail.criteria || `Trailing Stop = $${pos.trailing_stop || '--'}`,
-                    actual: nTrail.actual || `Low $${coinData.low}`,
-                    triggered: !!nTrail.triggered,
-                    explanation: "נעילת רווחים אוטומטית! הסטופ עולה יחד עם טיפוס המחיר לשיאים חדשים, וקוטע את הפוזיציה בעת תיקון."
-                },
-                {
-                    id: `dash_${coin}_sell_6`,
-                    shortTitle: "6. EMA Exit",
-                    fullTitle: nEma.title || "6. שבירת ממוצעים (EMA Breakdown Exit)",
-                    criteria: nEma.criteria || "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
-                    actual: nEma.actual || `Close $${coinData.close} vs EMA50 $${coinData.ema50}`,
-                    triggered: !!nEma.triggered,
-                    explanation: "אזהרת היפוך מגמה! סגירת נר מתחת ל-EMA50 כשה-Mode הוא TREND. יציאת EMA200 ב-Strong Bull מושבתת."
-                }
-            ];
+            let outcomeTitle = "";
+            let outcomePillClass = "";
+            let outcomeIcon = "";
 
-            const sellTriggered = sellNodes.some(n => n.triggered);
+            if (anySellTrip) {
+                outcomeTitle = `🚨 EXIT TRIGGERED: ${triggeredNode ? triggeredNode.shortTitle : 'פקודת יציאה מופעלת'}`;
+                outcomePillClass = "sell-triggered";
+                outcomeIcon = "🚨";
+            } else if (isPosActive) {
+                outcomeTitle = "🛡️ POSITION SAFE — כל מנגנוני הבטיחות תקינים";
+                outcomePillClass = "pass";
+                outcomeIcon = "🛡️";
+            } else {
+                outcomeTitle = "ℹ️ אין פוזיציה פתוחה בנכס (מעקב שורט מקרו בלבד)";
+                outcomePillClass = "pass";
+                outcomeIcon = "🛡️";
+            }
 
-            let outcomeTitle = sellTriggered ? "🚨 EXIT TRIGGERED" : "🛡️ POSITION SAFE";
-            let outcomePillClass = sellTriggered ? "sell-triggered" : "pass";
-            let outcomeIcon = sellTriggered ? "🚨" : "🛡️";
+            const sellOutcomeMeta = {
+                circleClass: anySellTrip ? "fail blocking" : "pass energized",
+                icon: anySellTrip ? "🚨" : "🛡️",
+                title: "תוצאת מכירה",
+                liveVal: anySellTrip ? (triggeredNode ? triggeredNode.shortTitle : "יציאה מופעלת") : (isPosActive ? "סטופים תקינים" : "אין פוזיציה"),
+                badgeClass: anySellTrip ? "badge-blocking" : "badge-pass",
+                badgeText: anySellTrip ? "🚨 פקודת יציאה מופעלת!" : "🛡️ פוזיציה מוגנת"
+            };
 
             html += `
                 <div class="pipeline-card">
                     <div class="pipeline-card-header">
                         <div class="pipeline-coin-info">
                             <span class="pipeline-coin-badge">${coinIcon} ${coin}/USDT</span>
-                            <span class="pipeline-type-tag sell">SELL PIPELINE</span>
+                            <span class="pipeline-type-tag sell">LADDER מכירה ובטיחות</span>
                         </div>
                         <span class="pipeline-outcome-pill ${outcomePillClass}">${outcomeIcon} ${outcomeTitle}</span>
                     </div>
-                    <div class="pipeline-track">
-            `;
-
-            sellNodes.forEach((node, idx) => {
-                const isTriggered = !!node.triggered;
-                const isPass = isTriggered;
-                const circleClass = isPass ? "pass" : "fail";
-                const icon = isPass ? "✓" : "✗";
-                const statusText = isPass ? "✓ מתקיים" : "✗ לא מתקיים";
-
-                html += `
-                    <div class="pipeline-node-wrapper" data-node-id="${node.id}">
-                        <div class="pipeline-node-circle ${circleClass}">${icon}</div>
-                        <span class="pipeline-node-label">${node.shortTitle}</span>
-                        <span class="pipeline-node-sub ${circleClass}">${statusText}</span>
-                        
-                        <div class="pipeline-popover-content" style="display:none;">
-                            <div class="popover-header">
-                                <span class="popover-title">${node.fullTitle}</span>
-                                <span class="popover-badge ${isPass ? 'badge-pass' : 'badge-fail'}">${isPass ? '✓ מתקיים' : '✗ לא מתקיים'}</span>
-                            </div>
-                            <div class="popover-grid">
-                                <div><span class="popover-item-label">🎯 תנאי מבוקש:</span> <span class="popover-item-val">${node.criteria}</span></div>
-                                <div><span class="popover-item-label">📊 נתון בלייב:</span> <span class="popover-item-val">${node.actual}</span></div>
-                            </div>
-                            <div class="popover-explanation">💡 ${node.explanation}</div>
-                        </div>
-                    </div>
-                `;
-
-                if (idx < sellNodes.length - 1) {
-                    html += `<div class="pipeline-connector ${isPass ? 'pass' : 'fail'}"></div>`;
-                }
-            });
-
-            html += `
-                    <div class="pipeline-connector ${sellTriggered ? 'pass' : 'fail'}"></div>
-                    <div class="pipeline-node-wrapper">
-                        <div class="pipeline-node-circle ${sellTriggered ? 'pass' : 'fail'}">${sellTriggered ? '🚨' : '🛡️'}</div>
-                        <span class="pipeline-node-label">תוצאת מכירה</span>
-                        <span class="pipeline-node-sub ${sellTriggered ? 'pass' : 'fail'}">${sellTriggered ? 'טריגר מכירה פעיל!' : 'אין טריגר מכירה'}</span>
-                    </div>
+                    ${renderLadderTrackHtml(evaluatedSell, !anySellTrip, triggeredNode, isPosActive, sellOutcomeMeta)}
                 </div>
-            </div>
             `;
         }
     });

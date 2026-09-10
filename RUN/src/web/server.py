@@ -1193,116 +1193,234 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     tb = trail_tuple[0] if entry_mode == "STRONG_BULL_TREND" else trail_tuple[1]
                     init_risk_atr = init_risk_atr_map.get(coin, 4.0)
 
-                    trailing_stop = round(high_water - tb * c_atr, 2) if is_active and high_water > 0 else None
-                    initial_stop = round(entry_px - init_risk_atr * atr_at_entry, 2) if is_active and entry_px > 0 else None
+                    # Active position metrics & true pyramiding check
+                    open_r = round((c_close - entry_px) / max(atr_at_entry, 1e-6), 2) if (is_active and entry_px > 0) else 0.0
+                    pullback_atr = round((high_water - c_low) / max(c_atr, 1e-6), 2) if (is_active and high_water > 0) else 0.0
+                    pyramid_met = bool(
+                        is_active
+                        and in_momentum
+                        and not safe_haven_active
+                        and (asset_regime == "STRONG_BULL_TREND")
+                        and (open_r >= 0.6)
+                        and (pullback_atr >= 1.5)
+                    )
 
-                    buy_tree_nodes = [
-                        {
-                            "id": "node_macro_regime",
-                            "title": "1. משטר שוק מקרו (Macro Regime)",
-                            "subtitle": "BTC מעל SMA-150 יומית (תנאי בסיס ללונג)",
-                            "criteria": f"BTC Close > SMA150 (${btc_sma150:,.0f})",
-                            "actual": f"${btc_daily_close:,.0f} vs ${btc_sma150:,.0f}",
-                            "met": macro_regime == "BULL",
-                        },
-                        {
-                            "id": "node_crash_shield_momentum",
-                            "title": "2. מגן מפולת ושער מומנטום (Crash Shield Gate)",
-                            "subtitle": "נסיגה עד 2%- משיא 5 ימים ומחיר מעל EMA9 יומית לפתיחת מינוף מוגבר",
-                            "criteria": f"5d PB >= {cutoff_pct:.1f}% & Close >= EMA9 (${btc_ema9_daily:,.0f})",
-                            "actual": f"5d PB: {btc_pb_from_5d:+.2f}% | EMA9: ${btc_ema9_daily:,.0f} ({'🚀 In Momentum' if in_momentum else '🛡️ Safe Haven'})",
-                            "met": in_momentum,
-                        },
-                        {
-                            "id": "node_leverage_tier",
-                            "title": "3. מדרג מינוף שוורית (Dynamic Conviction Tier)",
-                            "subtitle": "מינוף דינמי (10.0x / 5.0x / 2.5x) לפי ATR% ו-ADX וסולם התאוששות",
-                            "criteria": f"Dynamic Leverage: {leverage:.1f}x (חשיפה {total_crypto_exposure:.0f}%)",
-                            "actual": active_tier,
-                            "met": leverage >= 2.5,
-                        },
-                        {
-                            "id": "node_ema_alignment",
-                            "title": "4. מבנה ממוצעים (EMA Trend)",
-                            "subtitle": "מגמת עלייה בנכס (Strong Bull / Trend)",
-                            "criteria": "Regime in [STRONG_BULL, TREND]",
-                            "actual": asset_regime,
-                            "met": regime_ok,
-                        },
-                        {
-                            "id": "node_donchian_breakout",
-                            "title": "5. פריצת דונצ'יאן 30 / כניסה חוזרת EMA20",
-                            "subtitle": "סגירת 4H מעל שיא 30 נרות או תיקון ממוצע",
-                            "criteria": f"Close >= Donchian30 (${donchian30:,.2f}) OR EMA20 Re-entry",
-                            "actual": f"${c_close:,.2f} ({gap_pct:+.2f}%)",
-                            "met": donchian_ok,
-                        },
-                        {
-                            "id": "node_adx_filter",
-                            "title": "6. עוצמת מגמה (ADX Filter)",
-                            "subtitle": "מדד ADX מעל סף המינימום לעוצמה",
-                            "criteria": f"ADX >= {min_adx}",
-                            "actual": f"{c_adx:.1f}",
-                            "met": adx_ok,
-                        },
-                        {
-                            "id": "node_pyramiding",
-                            "title": "7. פירמידינג מוגן (Shielded Pyramiding Additions)",
-                            "subtitle": "הוספת 50%+ / 30%+ בטרנד חזק (נעול ומבוטל ב-Safe Haven)",
-                            "criteria": "Open PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull & In Momentum)",
-                            "actual": "Active Position Pyramiding Ready" if (is_active and in_momentum) else ("Safe Haven Locked" if safe_haven_active else "Initial Entry Mode"),
-                            "met": True if (not is_active or (asset_regime == "STRONG_BULL_TREND" and in_momentum)) else False,
-                        }
-                    ]
+                    macro_gap_pct = round(((btc_daily_close - btc_sma150) / btc_sma150) * 100.0, 1) if btc_sma150 > 0 else 0.0
+
+                    if is_active:
+                        # ACTIVE POSITION LADDER: Monitoring & Scaling
+                        init_stop_dist = round(((c_close - initial_stop) / initial_stop) * 100.0, 1) if (initial_stop and initial_stop > 0) else 0.0
+                        trail_stop_dist = round(((c_close - trailing_stop) / trailing_stop) * 100.0, 1) if (trailing_stop and trailing_stop > 0) else 0.0
+
+                        buy_tree_nodes = [
+                            {
+                                "id": "node_macro_regime",
+                                "shortTitle": "1. משטר מקרו",
+                                "title": "1. משטר שוק מקרו (Macro SMA150)",
+                                "criteria": f"BTC Close > SMA150 (${btc_sma150:,.0f})",
+                                "actual": f"${btc_daily_close:,.0f} vs ${btc_sma150:,.0f} ({macro_gap_pct:+.1f}%)",
+                                "live_val": f"${btc_daily_close:,.0f}",
+                                "badge": f"{macro_gap_pct:+.1f}% (BULL)" if macro_regime == "BULL" else "BEAR (אזהרה)",
+                                "met": macro_regime == "BULL",
+                                "explanation": "בדיקת בסיס: האם השוק הכללי שוורי להגנה על פוזיציות לונג קיימות."
+                            },
+                            {
+                                "id": "node_crash_shield_momentum",
+                                "shortTitle": "2. מגן מפולת",
+                                "title": "2. מגן מפולת ושער מומנטום (Crash Shield)",
+                                "criteria": f"5d PB >= {cutoff_pct:.1f}% & Close >= EMA9 (${btc_ema9_daily:,.0f})",
+                                "actual": f"5d PB: {btc_pb_from_5d:+.2f}% | EMA9: ${btc_ema9_daily:,.0f}",
+                                "live_val": f"5d: {btc_pb_from_5d:+.1f}%",
+                                "badge": "🚀 מומנטום" if in_momentum else "🛡️ Safe Haven (1.0x)",
+                                "met": in_momentum,
+                                "explanation": "בדיקת יציבות מומנטום. שבירת מומנטום מורידה מינוף ל-1.0x ומעבירה 60% למזומן."
+                            },
+                            {
+                                "id": "node_initial_risk_stop",
+                                "shortTitle": "3. סטופ ראשוני",
+                                "title": "3. סטופ סיכון ראשוני (Initial Risk Stop)",
+                                "criteria": f"Low > ${initial_stop:,.2f}" if initial_stop else "סטופ כניסה",
+                                "actual": f"Low ${c_low:,.2f} vs Stop ${initial_stop:,.2f}" if initial_stop else "מוגן",
+                                "live_val": f"${initial_stop:,.2f}" if initial_stop else "--",
+                                "badge": f"+{init_stop_dist:.1f}% מרווח" if initial_stop else "מוגן",
+                                "met": (c_low > initial_stop) if initial_stop else True,
+                                "explanation": "הגנה מפני הפסד מעבר לסיכון הכניסה המוגדר."
+                            },
+                            {
+                                "id": "node_atr_trailing_stop",
+                                "shortTitle": "4. סטופ נגרר",
+                                "title": "4. סטופ נגרר דינמי (ATR Trailing Stop)",
+                                "criteria": f"Low > ${trailing_stop:,.2f}" if trailing_stop else "סטופ נגרר",
+                                "actual": f"Low ${c_low:,.2f} vs Trail ${trailing_stop:,.2f}" if trailing_stop else "מוגן",
+                                "live_val": f"${trailing_stop:,.2f}" if trailing_stop else "--",
+                                "badge": f"+{trail_stop_dist:.1f}% מרווח" if trailing_stop else "מוגן",
+                                "met": (c_low > trailing_stop) if trailing_stop else True,
+                                "explanation": "נעילת רווחים! סטופ נגרר המתקדם עם שיאי המחיר החדשים."
+                            },
+                            {
+                                "id": "node_ema_breakdown",
+                                "shortTitle": "5. ממוצע EMA50",
+                                "title": "5. שמירת מגמת ממוצע (EMA50 Trend Exit)",
+                                "criteria": f"Close > EMA50 (${ema50:,.2f})",
+                                "actual": f"${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
+                                "live_val": f"EMA50: ${ema50:,.2f}",
+                                "badge": "✓ תקין מעל" if c_close >= ema50 else "⚠️ שבירה מתחת",
+                                "met": c_close >= ema50,
+                                "explanation": "אימות שהנכס לא שבר את ממוצע 50 בטרנד."
+                            },
+                            {
+                                "id": "node_pyramiding",
+                                "shortTitle": "6. פירמידינג (הוספה)",
+                                "title": "6. הוספת פירמידינג מוגנת (Shielded Pyramiding)",
+                                "criteria": "PnL >= 0.6 ATR & Pullback >= 1.5 ATR (Strong Bull & In Momentum)",
+                                "actual": f"PnL: {open_r:+.2f} ATR | Pullback: {pullback_atr:.2f} ATR",
+                                "live_val": f"{open_r:+.1f} ATR",
+                                "badge": "✓ מוכן להוספה!" if pyramid_met else ("נעול (Safe Haven)" if safe_haven_active else f"ממתין ({open_r:+.1f}R)"),
+                                "met": pyramid_met,
+                                "explanation": "הוספת פוזיציה מדורגת (50%+ / 30%+) רק בטרנד שוורים מובהק לאחר תיקון בריא."
+                            }
+                        ]
+                    else:
+                        # ENTRY LADDER: 6 Sequential Gates for Opening a New Position
+                        adx_diff = round(c_adx - min_adx, 1)
+                        adx_badge = f"+{adx_diff}" if adx_diff >= 0 else f"חסר {abs(adx_diff)}"
+                        gap_badge = f"+{gap_pct:.2f}% (נפרץ!)" if gap_pct >= 0 else f"{gap_pct:.2f}% לפריצה"
+
+                        buy_tree_nodes = [
+                            {
+                                "id": "node_macro_regime",
+                                "shortTitle": "1. משטר מקרו",
+                                "title": "1. משטר שוק מקרו (Macro SMA150)",
+                                "criteria": f"BTC Close > SMA150 (${btc_sma150:,.0f})",
+                                "actual": f"${btc_daily_close:,.0f} vs ${btc_sma150:,.0f} ({macro_gap_pct:+.1f}%)",
+                                "live_val": f"${btc_daily_close:,.0f}",
+                                "badge": f"{macro_gap_pct:+.1f}%" if macro_regime == "BULL" else "BEAR (חסום)",
+                                "met": macro_regime == "BULL",
+                                "explanation": "שער בסיס עליון: אימות מגמת עלייה שורית בביטקוין מעל ממוצע 150 ימים. בלעדיו כל הלונגים מושבתים."
+                            },
+                            {
+                                "id": "node_crash_shield_momentum",
+                                "shortTitle": "2. מגן מפולת",
+                                "title": "2. מגן מפולת ושער מומנטום (Crash Shield Gate)",
+                                "criteria": f"5d PB >= {cutoff_pct:.1f}% & Close >= EMA9 (${btc_ema9_daily:,.0f})",
+                                "actual": f"5d PB: {btc_pb_from_5d:+.2f}% | EMA9: ${btc_ema9_daily:,.0f}",
+                                "live_val": f"5d: {btc_pb_from_5d:+.1f}%",
+                                "badge": "🚀 מומנטום" if in_momentum else "🛡️ Safe Haven",
+                                "met": in_momentum,
+                                "explanation": "אימות שביטקוין לא נסוג מעל 2% משיא 5 ימים ומחזיק מעל EMA9 יומית לפתיחת מינוף מוגבר."
+                            },
+                            {
+                                "id": "node_leverage_tier",
+                                "shortTitle": "3. מנוע מינוף",
+                                "title": "3. מדרג מינוף וסייזינג (Dynamic Leverage)",
+                                "criteria": f"Leverage: {leverage:.1f}x (חשיפה {total_crypto_exposure:.0f}%)",
+                                "actual": active_tier,
+                                "live_val": f"{leverage:.1f}x ({total_crypto_exposure:.0f}%)",
+                                "badge": f"{leverage:.1f}x",
+                                "met": macro_regime == "BULL",
+                                "explanation": "קביעת המינוף האפקטיבי וכוח הקנייה (עד 10x ברגיעה, 5x/2.5x בתנודתיות, או 1.0x ספוט)."
+                            },
+                            {
+                                "id": "node_ema_alignment",
+                                "shortTitle": "4. מבנה מגמה",
+                                "title": "4. מבנה ממוצעים בנכס (EMA Trend Structure)",
+                                "criteria": "Regime in [STRONG_BULL, TREND]",
+                                "actual": asset_regime,
+                                "live_val": asset_regime,
+                                "badge": "✓ מגמה עולה" if regime_ok else "✗ דורש טרנד",
+                                "met": regime_ok,
+                                "explanation": f"אימות ש-{coin} נמצא במגמת עלייה טכנית מובהקת (EMA20 > EMA50 > EMA200)."
+                            },
+                            {
+                                "id": "node_donchian_breakout",
+                                "shortTitle": "5. פריצת Donchian 30",
+                                "title": "5. פריצת דונצ'יאן 30 (Donchian High Breakout)",
+                                "criteria": f"Close >= Donchian30 (${donchian30:,.2f})",
+                                "actual": f"${c_close:,.2f} / ${donchian30:,.2f} ({gap_pct:+.2f}%)",
+                                "live_val": f"${c_close:,.2f} / ${donchian30:,.2f}",
+                                "badge": gap_badge,
+                                "met": donchian_ok,
+                                "explanation": f"טריגר כניסה קלאסי! סגירת נר 4 שעות של {coin} מעל שיא 30 הנרות האחרונים (${donchian30:,.2f})."
+                            },
+                            {
+                                "id": "node_adx_filter",
+                                "shortTitle": "6. מסנן עוצמה",
+                                "title": "6. עוצמת תנופה (ADX Momentum Filter)",
+                                "criteria": f"ADX >= {min_adx}",
+                                "actual": f"{c_adx:.1f} vs {min_adx:.1f}",
+                                "live_val": f"{c_adx:.1f} / {min_adx:.1f}",
+                                "badge": adx_badge,
+                                "met": adx_ok,
+                                "explanation": f"סינון דשדוש! מדד ADX ({c_adx:.1f}) חייב להיות מעל {min_adx} לאימות עוצמת תנועה ומניעת מלכודות סרק."
+                            }
+                        ]
 
                     sell_tree_nodes = [
                         {
                             "id": "node_bear_emergency",
-                            "title": "1. יציאת דובים ושורט 35% (Bear Exit & 35% Short Hedge)",
-                            "subtitle": "מעבר למשטר דובים (BTC < SMA150) ופתיחת 35% שורט ממונף 2.0x על BTC (סה\"כ 70% שורט)",
-                            "criteria": "BTC < SMA150 or EMA20 < EMA50 -> Close Longs & Open 35% @ 2.0x BTC Short (65% Cash APY)",
-                            "actual": "BEAR ACTIVE (35% @ 2.0x Short BTC + 65% Cash APY)" if macro_regime == "BEAR" else "BULL ACTIVE (Safe)",
+                            "shortTitle": "1. יציאת דובים",
+                            "title": "1. יציאת דובים ושורט 35% (Bear Exit & Short Hedge)",
+                            "criteria": "BTC < SMA150 or EMA20 < EMA50 -> Close Longs & Open 35% @ 2.0x BTC Short",
+                            "actual": "BEAR ACTIVE (35% @ 2.0x Short BTC)" if macro_regime == "BEAR" else "BULL ACTIVE (תקין)",
+                            "live_val": "BEAR" if macro_regime == "BEAR" else "BULL",
+                            "badge": "🚨 שורט דובים!" if macro_regime == "BEAR" else "✓ תקין",
                             "triggered": macro_regime == "BEAR",
+                            "explanation": "סגירת כל הלונגים ומעבר לגידור שורט ממונף 2.0x על BTC במעבר למשטר דובים."
                         },
                         {
                             "id": "node_crash_shield",
-                            "title": "2. מגן מפולת מוסדי (Institutional Crash Shield)",
-                            "subtitle": "נסיגה של 2%- משיא 5 ימים או שבירת EMA9 מורידה מיד ל-1.0x ספוט (60% מזומן בתשואה 4%)",
+                            "shortTitle": "2. מגן מפולת",
+                            "title": "2. מגן מפולת מוסדי (Crash Shield Safe Haven)",
                             "criteria": f"5d Pullback < {cutoff_pct:.1f}% OR Close < EMA9 (${btc_ema9_daily:,.0f})",
-                            "actual": f"5d PB: {btc_pb_from_5d:+.2f}%, Under EMA9: {btc_daily_close < btc_ema9_daily} ({'🛡️ TRIGGERED' if safe_haven_active else 'SAFE'})",
+                            "actual": f"5d PB: {btc_pb_from_5d:+.2f}%, Under EMA9: {btc_daily_close < btc_ema9_daily}",
+                            "live_val": f"{btc_pb_from_5d:+.1f}%",
+                            "badge": "🛡️ הופעל (Safe Haven)" if safe_haven_active else "✓ מוגן",
                             "triggered": safe_haven_active,
+                            "explanation": "נסיגה משיא 5 ימים או שבירת EMA9 מורידה מיד ל-1.0x ספוט ומעבירה 60% למזומן בריבית."
                         },
                         {
                             "id": "node_flash_circuit_breaker",
+                            "shortTitle": "3. מפסק פלאש",
                             "title": "3. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
-                            "subtitle": f"צניחה תוך-יומית מנר הפתיחה מעבר ל-{flash_wick_limit_pct:.1f}%- חותכת מיד ל-1.0x",
                             "criteria": f"Intraday Dip < {flash_wick_limit_pct:.1f}% -> Cut to 1.0x",
-                            "actual": f"Intraday Dip: {btc_intraday_dip_pct:+.2f}% ({'TRIGGERED' if flash_triggered else 'SAFE'})",
+                            "actual": f"Intraday Dip: {btc_intraday_dip_pct:+.2f}%",
+                            "live_val": f"{btc_intraday_dip_pct:+.1f}%",
+                            "badge": "⚡ הופעל!" if flash_triggered else "✓ תקין",
                             "triggered": flash_triggered,
+                            "explanation": "צניחה תוך-יומית מנר הפתיחה חותכת מיד את המינוף ל-1.0x לספיגת המכה."
                         },
                         {
                             "id": "node_initial_risk_stop",
+                            "shortTitle": "4. סטופ ראשוני",
                             "title": "4. סטופ סיכון ראשוני (Initial Risk Stop)",
-                            "subtitle": "ירידה מתחת לסיכון הראשוני המורשה בכניסה",
                             "criteria": f"Low <= Initial Stop (${initial_stop:,.2f})" if initial_stop else f"Initial Stop = ${c_close - init_risk_atr * c_atr:,.2f}",
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${initial_stop:,.2f}" if initial_stop else ""),
+                            "live_val": f"${initial_stop:,.2f}" if initial_stop else "--",
+                            "badge": "🚨 נשבר!" if (c_low <= initial_stop and is_active and initial_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
                             "triggered": (c_low <= initial_stop) if (is_active and initial_stop) else False,
+                            "explanation": "יציאת חירום אם הנר שבר את רמת הסיכון הראשונית בכניסה."
                         },
                         {
                             "id": "node_atr_trailing_stop",
+                            "shortTitle": "5. סטופ נגרר",
                             "title": "5. סטופ נגרר דינמי (ATR Trailing Stop)",
-                            "subtitle": "נפילה משיא הפוזיציה מעבר למרחק ATR מורשה",
                             "criteria": f"Low <= Trailing Stop (${trailing_stop:,.2f})" if trailing_stop else f"Trailing Stop = ${c_high - tb * c_atr:,.2f}",
                             "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${trailing_stop:,.2f}" if trailing_stop else ""),
+                            "live_val": f"${trailing_stop:,.2f}" if trailing_stop else "--",
+                            "badge": "🚨 נשבר!" if (c_low <= trailing_stop and is_active and trailing_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
                             "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop) else False,
+                            "explanation": "נעילת רווחים: יציאה מיידית אם המחיר נסוג מתחת לסטופ הנגרר."
                         },
                         {
                             "id": "node_ema_breakdown",
+                            "shortTitle": "6. שבירת ממוצע",
                             "title": "6. שבירת ממוצעים (EMA Exit)",
-                            "subtitle": "סגירה מתחת ל-EMA50 (Trend בלבד — EMA200 לא פעיל ב-Strong Bull)",
-                            "criteria": "Close < EMA50 (Trend only, ema_exit_strong=DISABLED)",
-                            "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f} / EMA200 ${ema200:,.2f}",
-                            "triggered": (c_close < ema50) if (entry_mode == "TREND") else False,
+                            "criteria": "Close < EMA50 (Trend only)",
+                            "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
+                            "live_val": f"EMA50: ${ema50:,.2f}",
+                            "badge": "🚨 שבירה!" if ((c_close < ema50) and (entry_mode == "TREND")) else ("✓ מעל" if is_active else "אין פוזיציה"),
+                            "triggered": (c_close < ema50) if (entry_mode == "TREND" and is_active) else False,
+                            "explanation": "אזהרת היפוך מגמה: סגירת נר מתחת ל-EMA50 כשהמצב הוא TREND."
                         }
                     ]
 
@@ -1336,6 +1454,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             "initial_stop": initial_stop,
                             "ema50_exit_price": round(ema50, 2),
                             "ema200_exit_price": round(ema200, 2),
+                            "open_r": open_r,
+                            "pullback_atr": pullback_atr,
+                            "pyramid_met": pyramid_met,
                         },
                         "buy_tree_nodes": buy_tree_nodes,
                         "sell_tree_nodes": sell_tree_nodes,

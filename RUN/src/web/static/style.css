@@ -2630,22 +2630,65 @@ body {
     border-radius: 4px;
 }
 
+/* Ladder Power Rail (Left Inlet) */
+.ladder-power-rail {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(16, 185, 129, 0.18);
+    border: 1.5px solid rgba(16, 185, 129, 0.6);
+    color: #34d399;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+    align-self: center;
+    margin-top: -24px;
+    margin-right: 2px;
+    flex-shrink: 0;
+}
+
+.ladder-power-rail .rail-tag {
+    font-size: 0.62rem;
+    font-weight: 900;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
 /* Connecting Bar Line */
 .pipeline-connector {
     flex: 1;
-    min-width: 16px;
-    height: 3.5px;
+    min-width: 14px;
+    height: 4px;
     background: rgba(255, 255, 255, 0.1);
     position: relative;
     margin: 0 -2px;
     border-radius: 2px;
     transition: all 0.3s ease;
-    top: -12px;
+    top: -24px;
 }
 
-.pipeline-connector.pass {
-    background: linear-gradient(90deg, #10b981, #34d399);
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+.pipeline-connector.pass,
+.pipeline-connector.energized {
+    background: linear-gradient(90deg, #10b981, #06b6d4, #10b981);
+    background-size: 200% 100%;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.8), 0 0 4px #06b6d4;
+    animation: circuitFlow 2.5s linear infinite;
+}
+
+@keyframes circuitFlow {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+
+.pipeline-connector.blocking-lead {
+    background: linear-gradient(90deg, #10b981, #f43f5e);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.7);
+}
+
+.pipeline-connector.dormant {
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: none;
+    border-top: 1px dashed rgba(255, 255, 255, 0.18);
 }
 
 .pipeline-connector.fail {
@@ -2661,7 +2704,8 @@ body {
     position: relative;
     cursor: pointer;
     z-index: 20;
-    min-width: 62px;
+    min-width: 68px;
+    max-width: 95px;
     flex-shrink: 0;
 }
 
@@ -2671,13 +2715,13 @@ body {
 }
 
 .pipeline-node-circle {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     font-weight: 800;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     background: rgba(15, 23, 42, 0.95);
@@ -2686,22 +2730,38 @@ body {
     position: relative;
 }
 
-.pipeline-node-circle.pass {
+.pipeline-node-circle.pass,
+.pipeline-node-circle.energized {
     border-color: #10b981;
-    background: radial-gradient(circle, rgba(16, 185, 129, 0.3) 0%, rgba(15, 23, 42, 0.95) 100%);
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.35) 0%, rgba(15, 23, 42, 0.98) 100%);
     color: #34d399;
-    box-shadow: 0 0 16px rgba(16, 185, 129, 0.5), inset 0 0 8px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.6), inset 0 0 10px rgba(16, 185, 129, 0.3);
 }
 
-.pipeline-node-circle.fail {
+.pipeline-node-circle.fail,
+.pipeline-node-circle.blocking {
     border-color: #f43f5e;
-    background: radial-gradient(circle, rgba(244, 63, 94, 0.3) 0%, rgba(15, 23, 42, 0.95) 100%);
-    color: #fecdd3;
-    box-shadow: 0 0 16px rgba(244, 63, 94, 0.5), inset 0 0 8px rgba(244, 63, 94, 0.3);
+    background: radial-gradient(circle, rgba(244, 63, 94, 0.45) 0%, rgba(15, 23, 42, 0.98) 100%);
+    color: #fca5a5;
+    box-shadow: 0 0 22px rgba(244, 63, 94, 0.85), inset 0 0 10px rgba(244, 63, 94, 0.4);
+    animation: blockingGatePulse 1.8s infinite alternate ease-in-out;
+}
+
+@keyframes blockingGatePulse {
+    0% { box-shadow: 0 0 14px rgba(244, 63, 94, 0.6); transform: scale(1); }
+    100% { box-shadow: 0 0 28px rgba(244, 63, 94, 1), 0 0 40px rgba(244, 63, 94, 0.4); transform: scale(1.08); }
+}
+
+.pipeline-node-circle.dormant {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(15, 23, 42, 0.65);
+    color: #64748b;
+    box-shadow: none;
+    opacity: 0.7;
 }
 
 .pipeline-node-wrapper:hover .pipeline-node-circle {
-    transform: scale(1.12);
+    transform: scale(1.14);
 }
 
 .pipeline-node-label {
@@ -2713,8 +2773,67 @@ body {
     white-space: normal;
     word-break: break-word;
     overflow-wrap: break-word;
-    max-width: 68px;
+    max-width: 85px;
     line-height: 1.15;
+}
+
+.pipeline-node-live-val {
+    font-size: 0.64rem;
+    font-weight: 800;
+    color: #f8fafc;
+    margin-top: 3px;
+    background: rgba(15, 23, 42, 0.85);
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+    text-align: center;
+    letter-spacing: 0.2px;
+}
+
+.pipeline-node-badge {
+    font-size: 0.58rem;
+    font-weight: 800;
+    padding: 1.5px 6px;
+    border-radius: 9999px;
+    margin-top: 2.5px;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.pipeline-node-badge.badge-pass {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.5);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+
+.pipeline-node-badge.badge-blocking {
+    background: rgba(244, 63, 94, 0.22);
+    color: #fca5a5;
+    border: 1px solid rgba(244, 63, 94, 0.6);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.3);
+    font-weight: 900;
+}
+
+.pipeline-node-badge.badge-dormant {
+    background: rgba(100, 116, 139, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(100, 116, 139, 0.25);
+    opacity: 0.8;
+}
+
+.pipeline-outcome-pill.blocking {
+    background: rgba(244, 63, 94, 0.18);
+    border-color: rgba(244, 63, 94, 0.65);
+    color: #fca5a5;
+    box-shadow: 0 0 14px rgba(244, 63, 94, 0.35);
+}
+
+.ladder-output-coil .pipeline-node-circle {
+    width: 48px;
+    height: 48px;
 }
 
 .pipeline-node-sub {
