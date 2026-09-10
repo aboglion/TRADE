@@ -836,15 +836,15 @@
                     </div>
                 </div>
             </div>
-    <!-- Execution Mode Switching Modal (DRY_RUN <-> LIVE) -->
-    <div class="modal-backdrop" id="modeSwitchModal" style="display: none;">
-        <div class="modal glass shadow-2xl modal-mode-switch" style="max-width: 560px;">
+    <!-- Execution Mode Switching Modal (DRY_RUN <-> TESTNET <-> LIVE) -->
+    <div class="modal-backdrop" id="modeSwitchModal">
+        <div class="modal-content glass shadow-2xl modal-mode-switch" style="max-width: 600px;">
             <div class="modal-header">
-                <div class="modal-title-container">
-                    <span class="modal-icon" id="modeModalIcon">⚡</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.8rem;" id="modeModalIcon">⚡</span>
                     <div>
-                        <h3 id="modeModalTitle">שינוי מצב הפעלה (Execution Mode Switch)</h3>
-                        <p class="modal-subtitle" id="modeModalSubtitle">החלפה בטוחה בין סימולציה (DRY_RUN) לבין מסחר אמת (LIVE)</p>
+                        <h3 id="modeModalTitle" style="margin: 0; font-size: 1.2rem;">שינוי מצב הפעלה (Execution Mode)</h3>
+                        <p class="modal-subtitle" id="modeModalSubtitle" style="color: var(--text-muted); font-size: 0.85rem; margin: 2px 0 0 0;">החלפה בטוחה בין סימולציה (DRY_RUN), טסטנט (TESTNET) ומסחר אמת (LIVE)</p>
                     </div>
                 </div>
                 <button class="modal-close" onclick="closeModeSwitchModal()">&times;</button>
@@ -860,6 +860,15 @@
                         </div>
                         <div class="mode-opt-title">סימולציה (Simulation)</div>
                         <div class="mode-opt-desc">מסחר בדיקה על נתוני שוק חיים. אפס סיכון כספי.</div>
+                    </div>
+
+                    <div class="mode-option-card" id="modeOptTestnet" onclick="selectModeTarget('TESTNET')">
+                        <div class="mode-opt-header">
+                            <span class="mode-opt-badge testnet-badge">TESTNET</span>
+                            <span class="mode-opt-icon">🧪</span>
+                        </div>
+                        <div class="mode-opt-title">בדיקות (Sandbox)</div>
+                        <div class="mode-opt-desc">מסחר מול שרתי ה-Testnet של Binance.</div>
                     </div>
 
                     <div class="mode-option-card" id="modeOptLive" onclick="selectModeTarget('LIVE')">
@@ -891,6 +900,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=21"></script>
+    <script src="app.js?v=22"></script>
 </body>
 </html>

@@ -4021,7 +4021,7 @@ function handleRegimeHover(e, canvas, tooltip) {
     }
 }
 
-// ── Mode Switch Modal Functions (DRY_RUN <-> LIVE) ─────────────
+// ── Mode Switch Modal Functions (DRY_RUN <-> LIVE <-> TESTNET) ─────────────
 let targetSelectedMode = "LIVE";
 
 function openSwitchModeModal() {
@@ -4035,12 +4035,12 @@ function openSwitchModeModal() {
     }
 
     updateModeSwitchModalUI();
-    modal.style.display = "flex";
+    modal.classList.add("active");
 }
 
 function closeModeSwitchModal() {
     const modal = document.getElementById("modeSwitchModal");
-    if (modal) modal.style.display = "none";
+    if (modal) modal.classList.remove("active");
 }
 
 function selectModeTarget(mode) {
@@ -4050,22 +4050,33 @@ function selectModeTarget(mode) {
 
 function updateModeSwitchModalUI() {
     const dryCard = document.getElementById("modeOptDryRun");
+    const testnetCard = document.getElementById("modeOptTestnet");
     const liveCard = document.getElementById("modeOptLive");
     const alertTitle = document.getElementById("modeAlertTitle");
     const alertDesc = document.getElementById("modeAlertDesc");
+    const alertIcon = document.getElementById("modeAlertIcon");
     const btnText = document.getElementById("confirmModeBtnText");
     const confirmBtn = document.getElementById("confirmModeSwitchBtn");
 
     if (dryCard) dryCard.classList.toggle("selected", targetSelectedMode === "DRY_RUN");
+    if (testnetCard) testnetCard.classList.toggle("selected", targetSelectedMode === "TESTNET");
     if (liveCard) liveCard.classList.toggle("selected", targetSelectedMode === "LIVE");
 
     if (targetSelectedMode === "LIVE") {
-        if (alertTitle) alertTitle.textContent = "⚠️ מעבר למצב LIVE (מסחר אמיתי בכסף ריאלי)";
+        if (alertIcon) alertIcon.textContent = "⚠️";
+        if (alertTitle) alertTitle.textContent = "שים לב! מעבר למצב LIVE (מסחר אמיתי בכסף ריאלי)";
         if (alertDesc) alertDesc.textContent = "הפעלת מצב LIVE תבצע פקודות קנייה ומכירה אמיתיות בחשבון ה-Binance שלך. וודא שמפתחות ה-API מוגדרים בקובץ .env.";
         if (btnText) btnText.textContent = "אשר והפעל LIVE MODE 🔥";
         if (confirmBtn) confirmBtn.className = "btn btn-danger";
+    } else if (targetSelectedMode === "TESTNET") {
+        if (alertIcon) alertIcon.textContent = "🧪";
+        if (alertTitle) alertTitle.textContent = "מעבר למצב TESTNET (Binance Sandbox)";
+        if (alertDesc) alertDesc.textContent = "מסחר מול שרתי ה-Testnet של Binance עם יתרות בדיקה ללא סיכון כספי.";
+        if (btnText) btnText.textContent = "אשר והעבר ל-TESTNET 🧪";
+        if (confirmBtn) confirmBtn.className = "btn btn-warning";
     } else {
-        if (alertTitle) alertTitle.textContent = "🛡️ מעבר למצב DRY_RUN (סימולציית מסחר ללא סיכון)";
+        if (alertIcon) alertIcon.textContent = "🛡️";
+        if (alertTitle) alertTitle.textContent = "מעבר למצב DRY_RUN (סימולציית מסחר ללא סיכון)";
         if (alertDesc) alertDesc.textContent = "מעבר למצב DRY_RUN יפסיק את המסחר בכסף אמיתי ויעביר את המנוע לסימולטור מקומי בטוח על נתוני שוק בזמן אמת.";
         if (btnText) btnText.textContent = "אשר והעבר ל-DRY_RUN 🛡️";
         if (confirmBtn) confirmBtn.className = "btn btn-primary";
