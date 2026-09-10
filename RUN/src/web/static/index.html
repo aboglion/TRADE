@@ -559,6 +559,28 @@
         </div>
     </div>
 
+    <!-- Clear Orders Confirm Modal -->
+    <div class="modal-backdrop" id="clearOrdersConfirmModal">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 style="color: var(--accent-danger, #f43f5e);">🧹 מחיקת פקודות ועסקאות (Clear Orders)</h3>
+                <button class="modal-close" id="closeClearOrdersModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc" style="font-size: 0.95rem; line-height: 1.5; color: var(--text-main);">
+                    האם ברצונך למחוק לצמיתות את כל היסטוריית הפקודות והעסקאות (כולל עסקאות סימולציה של DRY RUN)?
+                </p>
+                <div style="background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); padding: 0.85rem; border-radius: 10px; margin-top: 0.85rem; font-size: 0.85rem; color: #fecdd3; line-height: 1.4;">
+                    ⚠️ <strong>פעולה זו תמחק:</strong> את כל העסקאות שבוצעו ונשמרו בקובץ המצב של המערכת (<code>bot_state.json</code>) ותאפס את מונה הפקודות ל-0.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="cancelClearOrdersBtn">ביטול (Cancel)</button>
+                <button class="btn btn-danger" id="confirmClearOrdersBtn">אישור ומחיקת כל הפקודות 🧹</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Server Offline & Downtime Diagnostics Modal -->
     <div class="modal-backdrop" id="serverOfflineModal" style="display: none; z-index: 100000;">
         <div class="modal-content glass modal-offline" style="max-width: 580px; border: 2px solid var(--accent-danger, #ef4444); box-shadow: 0 0 35px rgba(239, 68, 68, 0.35);">
@@ -903,6 +925,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=23"></script>
+    <script src="app.js?v=24"></script>
 </body>
 </html>

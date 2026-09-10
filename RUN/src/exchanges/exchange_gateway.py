@@ -550,48 +550,65 @@ class ExchangeGateway:
         for attempt in range(retries + 1):
             try:
                 return func()
-            except ccxt.AuthenticationError as e:
+            except (ccxt.AuthenticationError, ccxt.PermissionDenied) as e:
                 err_msg = str(e)
-                if "-2015" in err_msg and self._config.market_type == "future":
+                if "-2015" in err_msg or "Invalid API-key" in err_msg:
                     raise ExchangeAuthError(
-                        f"Binance Futures authentication failed (-2015: Invalid API-key/permissions).\n"
-                        f"-> Your API credentials are valid for Binance Spot, but Binance rejected Futures access.\n"
+                        f"Binance authentication failed (-2015: Invalid API-key, IP, or permissions).\n"
+                        f"Details: {err_msg}\n"
                         f"Action required on Binance:\n"
-                        f"  1. Go to Binance API Management -> Edit API Key -> Enable 'Enable Futures' permission.\n"
-                        f"  2. Ensure USDT-M Futures account is opened/activated on your Binance account.\n"
-                        f"  3. Check IP Whitelist restrictions on Binance if applicable.\n"
+                        f"  1. Go to Binance API Management -> Edit API Key.\n"
+                        f"  2. Enable 'Enable Futures' permission checkbox (if using Futures trading).\n"
+                        f"  3. Check IP Whitelist restrictions: if enabled, add server IP: 172.236.200.8\n"
+                        f"  4. Verify BINANCE_API_KEY and BINANCE_API_SECRET in your .env file.\n"
                         f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
                     )
                 raise ExchangeAuthError(f"Authentication failed: {e}")
-            except ccxt.RateLimitExceeded as e:
-                if attempt < retries:
-                    wait = (delay_ms * (2 ** attempt)) / 1000
-                    logger.warning(
-                        "Rate limited, waiting %.1fs (attempt %d/%d)",
-                        wait, attempt + 1, retries,
+            except Exception as e:
+                err_msg = str(e)
+                if "-2015" in err_msg or "Invalid API-key" in err_msg:
+                    raise ExchangeAuthError(
+                        f"Binance authentication failed (-2015: Invalid API-key, IP, or permissions).\n"
+                        f"Details: {err_msg}\n"
+                        f"Action required on Binance:\n"
+                        f"  1. Go to Binance API Management -> Edit API Key.\n"
+                        f"  2. Enable 'Enable Futures' permission checkbox (if using Futures trading).\n"
+                        f"  3. Check IP Whitelist restrictions: if enabled, add server IP: 172.236.200.8\n"
+                        f"  4. Verify BINANCE_API_KEY and BINANCE_API_SECRET in your .env file.\n"
+                        f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
                     )
-                    time.sleep(wait)
-                else:
-                    raise ExchangeRateLimitError(str(e))
-            except _TRANSIENT_ERRORS as e:
-                if attempt < retries:
-                    wait = (delay_ms * (2 ** attempt)) / 1000
-                    logger.warning(
-                        "Transient error: %s, retrying in %.1fs (attempt %d/%d)",
-                        type(e).__name__, wait, attempt + 1, retries,
-                    )
-                    time.sleep(wait)
-                else:
-                    raise ExchangeConnectionError(
-                        f"Exchange unreachable after {retries} retries: {e}"
-                    )
-            except (ccxt.BadSymbol, getattr(ccxt, 'SymbolNotFound', ccxt.BadSymbol)) as e:
-                raise InvalidOrderError(f"Symbol not supported or invalid: {e}")
-            except (ccxt.InsufficientFunds, ccxt.InvalidOrder, ccxt.BadRequest):
-                raise  # Permanent errors — don't retry
-            except ccxt.BaseError as e:
-                logger.error("Unexpected CCXT error: %s", e)
-                raise ExchangeConnectionError(str(e))
+                if isinstance(e, ccxt.RateLimitExceeded):
+                    if attempt < retries:
+                        wait = (delay_ms * (2 ** attempt)) / 1000
+                        logger.warning(
+                            "Rate limited, waiting %.1fs (attempt %d/%d)",
+                            wait, attempt + 1, retries,
+                        )
+                        time.sleep(wait)
+                        continue
+                    else:
+                        raise ExchangeRateLimitError(str(e))
+                elif isinstance(e, _TRANSIENT_ERRORS):
+                    if attempt < retries:
+                        wait = (delay_ms * (2 ** attempt)) / 1000
+                        logger.warning(
+                            "Transient error: %s, retrying in %.1fs (attempt %d/%d)",
+                            type(e).__name__, wait, attempt + 1, retries,
+                        )
+                        time.sleep(wait)
+                        continue
+                    else:
+                        raise ExchangeConnectionError(
+                            f"Exchange unreachable after {retries} retries: {e}"
+                        )
+                elif isinstance(e, (ccxt.BadSymbol, getattr(ccxt, 'SymbolNotFound', ccxt.BadSymbol))):
+                    raise InvalidOrderError(f"Symbol not supported or invalid: {e}")
+                elif isinstance(e, (ccxt.InsufficientFunds, ccxt.InvalidOrder, ccxt.BadRequest)):
+                    raise
+                elif isinstance(e, ccxt.BaseError):
+                    logger.error("Unexpected CCXT error: %s", e)
+                    raise ExchangeConnectionError(str(e))
+                raise
 
     @staticmethod
     def _map_order_status(status_str: str) -> OrderStatus:

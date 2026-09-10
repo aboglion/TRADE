@@ -435,7 +435,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (e.target.id === "clearLogsConfirmModal") closeClearLogsModal();
     });
     safeAddListener("copyOrdersBtn", "click", copyOrdersToClipboard);
-    safeAddListener("clearOrdersBtn", "click", clearOrdersTable);
+    safeAddListener("clearOrdersBtn", "click", openClearOrdersModal);
+    safeAddListener("closeClearOrdersModal", "click", closeClearOrdersModal);
+    safeAddListener("cancelClearOrdersBtn", "click", closeClearOrdersModal);
+    safeAddListener("confirmClearOrdersBtn", "click", confirmClearOrders);
+    safeAddListener("clearOrdersConfirmModal", "click", (e) => {
+        if (e.target.id === "clearOrdersConfirmModal") closeClearOrdersModal();
+    });
 
     // Trigger Cycle Confirm Modal listeners
     safeAddListener("closeTriggerCycleConfirmModal", "click", closeTriggerCycleConfirmModal);
@@ -955,7 +961,56 @@ async function fetchStatus() {
 async function fetchPortfolio() {
     try {
         const res = await apiFetch("/api/portfolio");
-        if (!res.ok) return;
+        if (!res.ok) {
+            let errorMsg = "Exchange connection unavailable";
+            let isAuthErr = false;
+            try {
+                const errData = await res.json();
+                if (errData.error) errorMsg = errData.error;
+                if (errData.is_auth_error || errorMsg.includes("-2015") || errorMsg.includes("Invalid API-key") || errorMsg.includes("permissions")) {
+                    isAuthErr = true;
+                }
+            } catch (_) {}
+
+            const container = document.getElementById("allocationBars");
+            if (container) {
+                let detailsHtml = "";
+                if (isAuthErr) {
+                    detailsHtml = `
+                        <div class="port-error-details" style="margin-top: 10px; font-size: 0.85rem; color: #fca5a5; line-height: 1.5; background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; text-align: right; direction: rtl;">
+                            <div style="font-weight: 600; color: #fecdd3; margin-bottom: 6px;">🔑 שגיאת אימות Binance (-2015: Invalid API-key, IP, or permissions):</div>
+                            <ul style="margin: 4px 0 4px 20px; padding: 0;">
+                                <li><strong>קובץ מפתחות (.env):</strong> וודא שקובץ <code>.env</code> מכיל <code>BINANCE_API_KEY</code> ו-<code>BINANCE_API_SECRET</code> תקינים.</li>
+                                <li><strong>כתובת IP מורשית (IP Whitelist):</strong> אם מוגדרת הגבלת IP בבינאנס, הוסף את ה-IP של השרת: <code>172.236.200.8</code>.</li>
+                                <li><strong>הרשאת חוזים (Futures):</strong> בניהול ה-API בבינאנס סמן ב-V את <code>Enable Futures</code> (וחשבון USDT-M פעיל).</li>
+                            </ul>
+                        </div>
+                    `;
+                } else {
+                    detailsHtml = `
+                        <div style="font-size: 0.82rem; color: #fca5a5; margin-top: 6px; word-break: break-all;">${escapeHtml(errorMsg)}</div>
+                    `;
+                }
+
+                container.innerHTML = `
+                    <div class="empty-state" style="border: 1px solid rgba(244, 63, 94, 0.4); background: rgba(244, 63, 94, 0.1); border-radius: 10px; padding: 18px 20px; color: #fecdd3; text-align: center;">
+                        <div style="font-size: 1.05rem; font-weight: 600; margin-bottom: 6px; color: #fda4af;">
+                            ⚠️ לא ניתן לחשב יתרות תיק (Exchange Connection Issue)
+                        </div>
+                        ${detailsHtml}
+                        <div style="margin-top: 14px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                            <button class="btn btn-sm btn-primary" onclick="fetchPortfolio()">
+                                <span>🔄</span> <span>נסה שוב (Retry)</span>
+                            </button>
+                            <button class="btn btn-sm btn-outline" onclick="openSwitchModeModal()">
+                                <span>🛡️</span> <span>החלף מצב (DRY_RUN / LIVE)</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+            return;
+        }
         const data = await res.json();
         latestPortfolioData = data;
 
@@ -1525,14 +1580,44 @@ async function copyOrdersToClipboard() {
     }
 }
 
-function clearOrdersTable() {
-    const tableBody = document.getElementById("ordersTableBody");
-    if (tableBody) {
-        tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">Orders display cleared by user</td></tr>`;
+function openClearOrdersModal() {
+    const modal = document.getElementById("clearOrdersConfirmModal");
+    if (modal) {
+        modal.classList.add("active");
+    } else {
+        confirmClearOrders();
     }
-    const orderCountEl = document.getElementById("orderCount");
-    if (orderCountEl) orderCountEl.textContent = "0 / 100+";
-    showToast("🧹 Orders display cleared!", "info");
+}
+
+function closeClearOrdersModal() {
+    const modal = document.getElementById("clearOrdersConfirmModal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function confirmClearOrders() {
+    closeClearOrdersModal();
+    try {
+        const res = await apiFetch("/api/orders/clear", { method: "POST" });
+        if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const tableBody = document.getElementById("ordersTableBody");
+            if (tableBody) {
+                tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">No orders executed yet</td></tr>`;
+            }
+            const orderCountEl = document.getElementById("orderCount");
+            if (orderCountEl) orderCountEl.textContent = "0";
+            latestOrdersList = [];
+            showToast("🧹 כל הפקודות וההיסטוריה נמחקו בהצלחה! (Orders cleared)", "success");
+            // Refresh dashboard data to sync UI
+            await fetchDashboardData();
+        } else {
+            const errData = await res.json().catch(() => ({}));
+            showToast(`❌ מחיקת פקודות נכשלה: ${errData.error || "Server error"}`, "error");
+        }
+    } catch (e) {
+        console.error("Failed to clear orders:", e);
+        showToast(`❌ שגיאה במחיקת פקודות: ${e.message}`, "error");
+    }
 }
 
 function escapeHtml(str) {

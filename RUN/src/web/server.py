@@ -357,6 +357,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_clear_errors()
         elif clean_path in ("/api/logs/clear", "/api/clear_logs"):
             self._handle_clear_logs()
+        elif clean_path in ("/api/orders/clear", "/api/clear_orders"):
+            self._handle_clear_orders()
         elif clean_path == "/api/reset_stats":
             self._handle_reset_stats()
         elif clean_path == "/api/updater/toggle":
@@ -665,7 +667,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(data)
         except Exception as e:
             logger.error("Failed to compute portfolio status: %s", e)
-            self._send_json({"error": str(e)}, status=500)
+            err_msg = str(e)
+            is_auth_err = ("-2015" in err_msg or "Invalid API-key" in err_msg or "Authentication failed" in err_msg or "permissions" in err_msg)
+            self._send_json({
+                "error": err_msg,
+                "is_auth_error": is_auth_err,
+                "code": -2015 if "-2015" in err_msg else 500,
+                "server_ip": "172.236.200.8",
+                "message": "Binance authentication rejected (-2015: Invalid API-key, IP whitelist, or Futures permission)." if is_auth_err else err_msg,
+            }, status=500)
 
     def _handle_orders(self) -> None:
         state = self.state_store.load_state() if self.state_store else None
@@ -1424,6 +1434,33 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._send_json({"success": True, "message": "Session stats reset successfully"})
         except Exception as e:
             logger.error("Failed to reset stats via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_clear_orders(self) -> None:
+        if not self.state_store:
+            self._send_json({"error": "State store unavailable"}, status=503)
+            return
+
+        try:
+            state = self.state_store.load_state()
+            completed_count = len(state.completed_orders) if hasattr(state, "completed_orders") else 0
+            pending_count = len(state.pending_orders) if hasattr(state, "pending_orders") else 0
+            total_count = completed_count + pending_count
+
+            if hasattr(state, "completed_orders"):
+                state.completed_orders.clear()
+            if hasattr(state, "pending_orders"):
+                state.pending_orders.clear()
+
+            self.state_store.save_state(state)
+            logger.info("Cleared %d orders from state via API", total_count)
+            self._send_json({
+                "success": True,
+                "message": f"Successfully cleared {total_count} orders from history",
+                "cleared_count": total_count,
+            })
+        except Exception as e:
+            logger.error("Failed to clear orders via API: %s", e)
             self._send_json({"error": str(e)}, status=500)
 
     def _handle_clear_errors(self) -> None:

@@ -176,3 +176,46 @@ def test_do_post_clear_logs(tmp_path):
     assert data.get("success") is True
     assert "Old log before post" not in log_file.read_text(encoding="utf-8")
 
+
+def test_handle_clear_orders():
+    from unittest.mock import MagicMock
+    from src.core.models import BotState
+
+    mock_state = BotState(
+        completed_orders=[{"id": 1, "symbol": "BTC/USDT"}, {"id": 2, "symbol": "ETH/USDT"}],
+        pending_orders=[{"id": 3, "symbol": "SOL/USDT"}],
+    )
+    mock_store = MagicMock()
+    mock_store.load_state.return_value = mock_state
+
+    DummyHandler.state_store = mock_store
+    handler = DummyHandler("/api/orders/clear")
+    handler._handle_clear_orders()
+
+    assert handler.sent_status == 200
+    data = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert data.get("success") is True
+    assert data.get("cleared_count") == 3
+    assert len(mock_state.completed_orders) == 0
+    assert len(mock_state.pending_orders) == 0
+    mock_store.save_state.assert_called_once_with(mock_state)
+
+
+def test_do_post_clear_orders():
+    from unittest.mock import MagicMock
+    from src.core.models import BotState
+
+    mock_state = BotState(completed_orders=[{"id": 1}], pending_orders=[])
+    mock_store = MagicMock()
+    mock_store.load_state.return_value = mock_state
+
+    DummyHandler.state_store = mock_store
+    handler = DummyHandler("/api/orders/clear")
+    handler.do_POST()
+
+    assert handler.sent_status == 200
+    data = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert data.get("success") is True
+    assert len(mock_state.completed_orders) == 0
+
+
