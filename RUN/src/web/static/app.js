@@ -817,6 +817,7 @@ async function fetchStatus() {
 
         const strat = data.strategy_state || {};
         const macroState = strat.macro_state || {};
+        const macro = macroState;
         const effLev = (typeof macroState.effective_leverage === "number") 
             ? macroState.effective_leverage 
             : (typeof strat.effective_leverage === "number" ? strat.effective_leverage : (isBull ? 2.4 : 0.0));
@@ -853,7 +854,9 @@ async function fetchStatus() {
                 regimeLevPill.textContent = isBull ? (isSafeHaven ? "1.0x SAFE HAVEN" : `${Number(effLev).toFixed(1)}x BULL`) : "2.0x SHORT (35% Hedge)";
                 regimeLevPill.className = isBull ? (isSafeHaven ? "pnl-pill pnl-pill-mid" : "pnl-pill pnl-pill-high") : "pnl-pill pnl-pill-low";
             }
-            recordRegimePoint(btcSmaGap, isBull);
+            if (typeof recordRegimePoint === "function") {
+                recordRegimePoint(btcSmaGap, isBull);
+            }
         } else if (regimeLevPill) {
             const isSafeHaven = !!(macro && macro.safe_haven_active);
             regimeLevPill.textContent = isBull ? (isSafeHaven ? "1.0x SAFE HAVEN" : `${Number(effLev).toFixed(1)}x BULL`) : "2.0x SHORT (35% Hedge)";
@@ -934,9 +937,23 @@ async function fetchStatus() {
             }
         }
 
-        if (data.last_run_ts) {
-            const date = new Date(data.last_run_ts);
-            document.getElementById("lastCycleTime").textContent = date.toLocaleTimeString();
+        const lastRunTs = data.last_run_ts || (data.strategy_state && data.strategy_state.last_run_ts) || (latestPortfolioData && latestPortfolioData.timestamp_ms);
+        const lastCycleEl = document.getElementById("lastCycleTime");
+        if (lastCycleEl) {
+            if (lastRunTs && lastRunTs > 0) {
+                const date = new Date(lastRunTs);
+                const diffSec = Math.max(0, Math.floor((Date.now() - lastRunTs) / 1000));
+                let agoStr = "Just now";
+                if (diffSec >= 60) {
+                    const min = Math.floor(diffSec / 60);
+                    agoStr = min < 60 ? `${min}m ago` : `${Math.floor(min / 60)}h ago`;
+                } else if (diffSec >= 5) {
+                    agoStr = `${diffSec}s ago`;
+                }
+                lastCycleEl.textContent = `${date.toLocaleTimeString()} (${agoStr})`;
+            } else {
+                lastCycleEl.textContent = "Never";
+            }
         }
 
         // Kill switch button style

@@ -85,20 +85,49 @@ _ensure_venv()
 
 
 def load_dotenv(path: str = ".env") -> None:
-    """Load .env file into environment variables (no external dependency)."""
-    env_path = Path(path)
-    if not env_path.exists():
-        return
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+    """Load .env files into environment variables from multiple candidate locations."""
+    candidates = []
+    if path:
+        candidates.append(Path(path))
+
+    cur_dir = Path.cwd()
+    run_dir = Path(__file__).resolve().parent
+    proj_dir = run_dir.parent
+
+    candidates.extend([
+        run_dir / ".env",
+        proj_dir / ".env",
+        cur_dir / "RUN" / ".env",
+        cur_dir / ".env",
+        Path("/root/TRADE/RUN/.env"),
+        Path("/root/TRADE/.env"),
+    ])
+
+    seen = set()
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+            if resolved in seen:
                 continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip("'\"")
-            if key and key not in os.environ:
-                os.environ[key] = value
+            seen.add(resolved)
+            if cand.is_file():
+                with open(cand, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        value = value.strip().strip("'\"")
+                        if not key or not value:
+                            continue
+                        # Never overwrite a real key with a placeholder dummy value
+                        if value in ("your_api_key_here", "your_api_secret_here"):
+                            continue
+                        if key not in os.environ or not os.environ[key] or os.environ[key] in ("your_api_key_here", "your_api_secret_here"):
+                            os.environ[key] = value
+        except Exception:
+            pass
 
 
 def parse_args() -> argparse.Namespace:

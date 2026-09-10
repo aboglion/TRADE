@@ -529,6 +529,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "kill_switch": self.config.risk.kill_switch if self.config else False,
             "assets": list(self.config.strategy.assets.keys()) if self.config else [],
             "market_metrics": metrics,
+            "strategy_state": state.strategy_state if state else {},
         }
         self._send_json(data)
 
