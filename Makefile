@@ -63,7 +63,8 @@ pull-safe:
 	@RUN/scripts/safe_pull.sh
 
 restart: pull-safe
-	@MODE=$$(grep -E '^\s*run_mode:' RUN/config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'" || cat logs/last_mode 2>/dev/null); \
+	@MODE=$$(grep -E '^\s*run_mode:' RUN/config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'"); \
+	MODE=$${MODE:-$$(cat logs/last_mode 2>/dev/null)}; \
 	MODE=$${MODE:-DRY_RUN}; \
 	echo "🔄 Detected run mode: $$MODE"; \
 	echo "$$MODE" > logs/last_mode; \

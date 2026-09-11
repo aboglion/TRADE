@@ -105,12 +105,14 @@ class ReconciliationService:
                             local_order["status"] = res.status.value
                             local_order["filled_amount"] = res.filled_amount
                             local_order["average_price"] = res.average_price
-                            if res.fees and res.fees > 0 and not local_order.get("fees_recorded"):
-                                local_order["fees"] = res.fees
-                                curr = (res.fee_currency or "USDT").upper()
+                            fee_val = float(res.fees or 0.0) if (res.fees and res.fees > 0) else float(local_order.get("fees", 0.0) or 0.0)
+                            curr = str(res.fee_currency or local_order.get("fee_currency") or "USDT").strip().upper() or "USDT"
+                            if fee_val > 0:
+                                local_order["fees"] = fee_val
                                 local_order["fee_currency"] = curr
-                                self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + res.fees
-                                local_order["fees_recorded"] = True
+                                if not local_order.get("fees_recorded"):
+                                    self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
+                                    local_order["fees_recorded"] = True
                             if res.status in (OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.FAILED):
                                 self._append_completed_order(local_order)
                                 has_fill = (res.status == OrderStatus.FILLED) or bool(res.filled_amount and res.filled_amount > 0)
@@ -160,12 +162,14 @@ class ReconciliationService:
                     local_order["status"] = result.status.value
                     local_order["filled_amount"] = result.filled_amount
                     local_order["average_price"] = result.average_price
-                    if result.fees and result.fees > 0 and not local_order.get("fees_recorded"):
-                        local_order["fees"] = result.fees
-                        curr = (result.fee_currency or "USDT").upper()
+                    fee_val = float(result.fees or 0.0) if (result.fees and result.fees > 0) else float(local_order.get("fees", 0.0) or 0.0)
+                    curr = str(result.fee_currency or local_order.get("fee_currency") or "USDT").strip().upper() or "USDT"
+                    if fee_val > 0:
+                        local_order["fees"] = fee_val
                         local_order["fee_currency"] = curr
-                        self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
-                        local_order["fees_recorded"] = True
+                        if not local_order.get("fees_recorded"):
+                            self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
+                            local_order["fees_recorded"] = True
                     logger.info(
                         "Resolved order %s: %s (filled=%.8f)",
                         lookup_id, result.status.value, result.filled_amount,
@@ -205,9 +209,17 @@ class ReconciliationService:
             for o in self._state.pending_orders + self._state.completed_orders
             if o.get("exchange_order_id")
         }
+        local_client_ids = {
+            o.get("client_order_id")
+            for o in self._state.pending_orders + self._state.completed_orders
+            if o.get("client_order_id")
+        }
 
         for exc_order in exchange_open:
-            if exc_order.exchange_order_id not in local_exc_ids:
+            if (
+                exc_order.exchange_order_id not in local_exc_ids
+                and (not exc_order.client_order_id or exc_order.client_order_id not in local_client_ids)
+            ):
                 logger.warning(
                     "ORPHANED order found on exchange: %s (%s) — "
                     "not in local state! Adding to tracking.",

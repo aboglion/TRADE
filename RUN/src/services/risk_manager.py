@@ -73,10 +73,11 @@ class RiskManager(IRiskManager):
         for check in checks:
             approved, reason = check(intent, portfolio)
             if not approved:
+                side_display = intent.side.value if hasattr(intent.side, "value") else str(intent.side)
                 logger.warning(
                     "Order REJECTED by risk manager: %s | Order: %s %s %.8f",
                     reason,
-                    intent.side.value,
+                    side_display,
                     intent.symbol,
                     intent.amount,
                 )
@@ -89,9 +90,10 @@ class RiskManager(IRiskManager):
         if not self._is_position_reducing_order(intent, portfolio):
             self._cycle_total_value += order_value
 
+        side_display = intent.side.value if hasattr(intent.side, "value") else str(intent.side)
         logger.info(
             "Order APPROVED by risk manager: %s %s %.8f ($%.2f)",
-            intent.side.value,
+            side_display,
             intent.symbol,
             intent.amount,
             order_value,
@@ -196,9 +198,10 @@ class RiskManager(IRiskManager):
         if holding is None:
             return False
         current_qty = holding.total
-        if current_qty > 1e-8 and intent.side.value.upper() == "SELL":
+        side_str = (intent.side.value if hasattr(intent.side, "value") else str(intent.side)).upper()
+        if current_qty > 1e-8 and side_str == "SELL":
             return intent.amount <= (current_qty + 1e-5)
-        if current_qty < -1e-8 and intent.side.value.upper() == "BUY":
+        if current_qty < -1e-8 and side_str == "BUY":
             return intent.amount <= (abs(current_qty) + 1e-5)
         return False
 
@@ -259,8 +262,10 @@ class RiskManager(IRiskManager):
         order_value = self._get_order_value(intent)
         is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
 
+        side_str = (intent.side.value if hasattr(intent.side, "value") else str(intent.side)).upper()
+
         # Spot sell requires sufficient free tokens
-        if intent.side.value.upper() == "SELL" and (holding is None or holding.total >= 0):
+        if side_str == "SELL" and (holding is None or holding.total >= 0):
             available_qty = holding.free if holding else 0.0
             if (
                 intent.amount > (available_qty + 1e-6)
@@ -273,7 +278,7 @@ class RiskManager(IRiskManager):
                 )
 
         # Expanding BUY in spot requires 100% notional cash
-        if intent.side.value.upper() == "BUY":
+        if side_str == "BUY":
             if free_quote <= 0.0 and order_value > 0.0:
                 return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
 

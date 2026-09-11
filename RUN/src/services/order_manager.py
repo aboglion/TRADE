@@ -191,10 +191,14 @@ class OrderManager:
                     self._append_completed_order(order_data)
                     has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
                     if has_fill:
-                        if not order_data.get("fees_recorded") and result.fees > 0 and result.fee_currency:
-                            curr = (result.fee_currency or "USDT").upper()
-                            self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
-                            order_data["fees_recorded"] = True
+                        fee_val = float(result.fees or 0.0) if (result.fees and result.fees > 0) else float(order_data.get("fees", 0.0) or 0.0)
+                        curr = str(result.fee_currency or order_data.get("fee_currency") or "USDT").strip().upper() or "USDT"
+                        if fee_val > 0:
+                            order_data["fees"] = fee_val
+                            order_data["fee_currency"] = curr
+                            if not order_data.get("fees_recorded"):
+                                self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
+                                order_data["fees_recorded"] = True
                         if self._telegram_service:
                             try:
                                 mode_str = self._run_mode.name if hasattr(self._run_mode, "name") else str(self._run_mode)
@@ -365,10 +369,14 @@ class OrderManager:
                     self._append_completed_order(order_data)
                     has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
                     if has_fill and not str(result.exchange_order_id or "").startswith("closed_"):
-                        if not order_data.get("fees_recorded") and result.fees > 0 and result.fee_currency:
-                            curr = (result.fee_currency or "USDT").upper()
-                            self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + float(result.fees)
-                            order_data["fees_recorded"] = True
+                        fee_val = float(result.fees or 0.0) if (result.fees and result.fees > 0) else float(order_data.get("fees", 0.0) or 0.0)
+                        curr = str(result.fee_currency or order_data.get("fee_currency") or "USDT").strip().upper() or "USDT"
+                        if fee_val > 0:
+                            order_data["fees"] = fee_val
+                            order_data["fee_currency"] = curr
+                            if not order_data.get("fees_recorded"):
+                                self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
+                                order_data["fees_recorded"] = True
                         
                         # Send Telegram trade alert (safe, never fails execution)
                         if self._telegram_service:

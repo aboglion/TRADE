@@ -244,11 +244,17 @@ class PortfolioService:
         """
         total_value = portfolio.total_value_usd
         if total_value <= 0:
-            logger.warning("Portfolio value is zero, no rebalance possible")
-            return RebalancePlan(
-                orders=[], current_snapshot=portfolio,
-                target_allocation=target, total_deviation_pct=0.0,
+            has_positions = any(
+                abs(h.total) > 1e-6
+                for sym, h in portfolio.holdings.items()
+                if sym not in ("USDT", "USD", "BUSD", "USDC", "BNB")
             )
+            if not has_positions:
+                logger.warning("Portfolio value is zero and no active positions, no rebalance possible")
+                return RebalancePlan(
+                    orders=[], current_snapshot=portfolio,
+                    target_allocation=target, total_deviation_pct=0.0,
+                )
 
         # Compute deviations for all target weights AND untracked portfolio holdings
         all_symbols = set(target.weights.keys())
@@ -299,7 +305,8 @@ class PortfolioService:
             current_weight = portfolio.get_weight(base)
 
             # Skip small deviations unless target is 0.0 and we have an active position to liquidate (long or short)
-            has_position = abs(current_weight) > 1e-6
+            holding = portfolio.holdings.get(base)
+            has_position = (holding is not None and abs(holding.total) > 1e-6) or abs(current_weight) > 1e-6
             is_full_liquidation = (target_weight == 0.0 and has_position)
             if abs(deviation) < self._deviation_threshold and not is_full_liquidation:
                 continue
@@ -480,6 +487,18 @@ class PortfolioService:
                     if not is_above_min_order(amount, price, constraints["min_amount"], constraints["min_notional"]):
                         logger.debug("Available balance for %s ($%.2f) below exchange minimums, skipping", symbol, amount * price)
                         continue
+            elif deviation > 0 and not self._is_futures:  # Budget buys in Spot
+                quote_key = symbol.split("/")[1].split(":")[0] if "/" in symbol else "USDT"
+                quote_holding = portfolio.holdings.get(quote_key) or portfolio.holdings.get("USDT")
+                avail_quote = quote_holding.free if quote_holding else 0.0
+                max_quote_spend = max(0.0, avail_quote * 0.998)
+                if (amount * price) > max_quote_spend:
+                    capped_amount = truncate_to_precision(max_quote_spend / price, constraints["amount_precision"])
+                    if is_above_min_order(capped_amount, price, constraints["min_amount"], constraints["min_notional"]):
+                        amount = capped_amount
+                    else:
+                        logger.debug("Available quote balance ($%.2f) below minimum order for %s, skipping", avail_quote, symbol)
+                        continue
 
             order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
             order_price = None if order_type == OrderType.MARKET else price
@@ -501,10 +520,15 @@ class PortfolioService:
                         logger.debug("Reduce quantity for %s ($%.2f) below exchange minimums, skipping", symbol, amount * price)
                         continue
 
+            if is_full_liquidation and holding:
+                order_side = OrderSide.SELL if holding.total > 0 else OrderSide.BUY
+            else:
+                order_side = OrderSide.SELL if deviation < 0 else OrderSide.BUY
+
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
                 symbol=pair_symbol,
-                side=OrderSide.SELL if deviation < 0 else OrderSide.BUY,
+                side=order_side,
                 order_type=order_type,
                 amount=amount,
                 price=order_price,
@@ -515,7 +539,7 @@ class PortfolioService:
                 leverage=pos_lev,
             )
 
-            if deviation < 0:
+            if order_side == OrderSide.SELL:
                 sell_orders.append(intent)
             else:
                 buy_orders.append(intent)

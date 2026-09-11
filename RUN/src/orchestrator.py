@@ -97,6 +97,7 @@ class BotOrchestrator:
 
         self._consecutive_errors = 0
         self._last_scan_time: float | None = None
+        self._is_futures = (getattr(config.exchange, "market_type", "") == "future")
         import threading
         self._cycle_lock = threading.Lock()
 
@@ -375,7 +376,13 @@ class BotOrchestrator:
                         # max_portfolio_change_pct checks on later orders use the original
                         # total. The impact is minimal since the check is cumulative.
                         filled_qty = result.filled_amount if (result.filled_amount and result.filled_amount > 0) else intent.amount
-                        fill_price = result.average_price or intent.price or intent.estimated_price or prices.get(intent.symbol, 0.0)
+                        fill_price = (
+                            result.average_price
+                            or intent.price
+                            or intent.estimated_price
+                            or prices.get(intent.symbol, 0.0)
+                            or prices.get(intent.symbol.split(":")[0], 0.0)
+                        )
                         fill_val = filled_qty * fill_price
 
                         is_fut = (
@@ -383,8 +390,11 @@ class BotOrchestrator:
                             or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
                             or intent.symbol.endswith(":USDT")
                         )
-                        # Leverage fallback: use strategy-synced leverage when no prior position exists.
-                        lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else (short_lev if (intent.side == OrderSide.SELL and is_bear_regime) else clamped_lev)))
+                        # Target leverage for new positions, side flips, or fallback
+                        intent_lev = float(getattr(intent, "leverage", 0.0) or 0.0)
+                        fallback_lev = short_lev if (intent.side == OrderSide.SELL and is_bear_regime) else clamped_lev
+                        target_lev = max(1.0, intent_lev if intent_lev > 1.0 else fallback_lev)
+                        lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0 and abs(old_base.total) > 1e-8) else target_lev))
 
                         clean_sym = intent.symbol.split(":")[0]
                         quote_sym = clean_sym.split("/")[1] if "/" in clean_sym else "USDT"
@@ -406,29 +416,33 @@ class BotOrchestrator:
                                 new_free = max(0.0, min(new_total, old_base.free + delta_qty))
                             new_val = 0.0 if is_closed_pos else abs(new_total) * fill_price
 
-                            # Handle position side flip (long <-> short)
+                            # Handle position side flip (long <-> short) or opening from flat
                             is_side_flip = (old_base.total > 1e-8 and new_total < -1e-8) or (old_base.total < -1e-8 and new_total > 1e-8)
+                            is_from_flat = abs(old_base.total) <= 1e-8 and not is_closed_pos
                             if is_closed_pos:
                                 new_entry_px = 0.0
                                 new_unrealized_pnl = 0.0
-                            elif is_side_flip:
+                                new_pos_lev = 1.0
+                            elif is_side_flip or is_from_flat:
                                 new_entry_px = fill_price
                                 new_unrealized_pnl = 0.0
+                                new_pos_lev = target_lev
                             elif old_base.total > 1e-8 and intent.side == OrderSide.BUY and new_total > 1e-8:
                                 # Adding to long position (pyramiding): weighted average entry price
                                 old_entry = old_base.entry_price if old_base.entry_price > 0 else fill_price
                                 new_entry_px = ((old_base.total * old_entry) + (net_filled_qty * fill_price)) / new_total
                                 new_unrealized_pnl = (fill_price - new_entry_px) * new_total
+                                new_pos_lev = old_base.leverage if old_base.leverage > 1.0 else lev
                             elif old_base.total < -1e-8 and intent.side == OrderSide.SELL and new_total < -1e-8:
                                 # Adding to short position: weighted average entry price
                                 old_entry = old_base.entry_price if old_base.entry_price > 0 else fill_price
                                 new_entry_px = ((abs(old_base.total) * old_entry) + (filled_qty * fill_price)) / abs(new_total)
                                 new_unrealized_pnl = (new_entry_px - fill_price) * abs(new_total)
+                                new_pos_lev = old_base.leverage if old_base.leverage > 1.0 else lev
                             else:
                                 new_entry_px = old_base.entry_price
                                 new_unrealized_pnl = ((fill_price - new_entry_px) * new_total) if new_total > 0 else ((new_entry_px - fill_price) * abs(new_total))
-
-                            new_pos_lev = lev if (is_side_flip or old_base.leverage <= 1.0) else old_base.leverage
+                                new_pos_lev = old_base.leverage
 
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,

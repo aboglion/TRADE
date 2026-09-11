@@ -66,7 +66,9 @@ balance:
 	$(PYTHON) scripts/show_balances.py
 
 restart: pull-safe
-	@MODE=$$(grep -E '^\s*run_mode:' config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'" || cat ../logs/last_mode 2>/dev/null); \
+	@MODE=$$(grep -E '^\s*run_mode:' config.yaml 2>/dev/null | awk '{print $$2}' | tr -d '"' | tr -d "'"); \
+	MODE=$${MODE:-$$(cat ../logs/last_mode 2>/dev/null)}; \
+	MODE=$${MODE:-$$(cat logs/last_mode 2>/dev/null)}; \
 	MODE=$${MODE:-DRY_RUN}; \
 	echo "🔄 Detected run mode: $$MODE"; \
 	echo "$$MODE" > ../logs/last_mode; \

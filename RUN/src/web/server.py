@@ -1680,7 +1680,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if self.orchestrator:
             try:
                 success = self.orchestrator.run_once(force=True)
-                self._send_json({"success": success, "message": "Cycle completed (forced evaluation)"})
+                msg = "Cycle completed (forced evaluation)" if success else "Cycle skipped or aborted (market inactive or lock held)"
+                self._send_json({"success": success, "message": msg})
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, status=500)
         else:
@@ -1792,7 +1793,11 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
             if self.gateway:
                 from src.services.portfolio_service import PortfolioService
-                is_futures = getattr(self.orchestrator, "_is_futures", False) if self.orchestrator else False
+                is_futures = (
+                    (getattr(self.config.exchange, "market_type", "") == "future")
+                    if (self.config and hasattr(self.config, "exchange"))
+                    else (getattr(self.orchestrator, "_is_futures", False) if self.orchestrator else False)
+                )
                 ps = PortfolioService(self.gateway, is_futures=is_futures)
                 snapshot = ps.get_portfolio()
                 crypto_val = sum(
