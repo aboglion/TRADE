@@ -72,7 +72,9 @@ class DryRunExchange:
     def _notify_balance_change(self) -> None:
         if callable(self._on_balance_change):
             try:
-                simplified = {k: round(v["total"], 8) for k, v in self._balances.items() if v["total"] >= 0}
+                # Report all balances including negative ones (realized losses
+                # in futures mode can temporarily make USDT balance negative).
+                simplified = {k: round(v["total"], 8) for k, v in self._balances.items() if abs(v["total"]) > 1e-10}
                 self._on_balance_change(simplified)
             except Exception as e:
                 logger.error("Error in on_balance_change callback: %s", e)
@@ -377,8 +379,11 @@ class DryRunExchange:
                 
             self._positions[intent.symbol] = pos
             
-            # Apply realized PnL and fees to USDT balance
-            self._adjust_balance("USDT", realized_pnl - fee)
+            # Apply realized PnL and fees to USDT balance.
+            # Fee is computed ONLY on the futures portion to avoid double-charging
+            # (spot sell already deducted fee from spot_proceeds above).
+            futures_fee = (futures_amount * price) * self._fee_rate
+            self._adjust_balance("USDT", realized_pnl - futures_fee)
             quote = "USDT"
 
         exchange_id = f"dry_{uuid.uuid4().hex[:12]}"

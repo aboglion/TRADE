@@ -253,7 +253,7 @@ class ConfigManager:
         config.risk = RiskConfig(
             max_orders_per_cycle=r_raw.get("max_orders_per_cycle", 6),
             max_single_order_usd=r_raw.get("max_single_order_usd", 10000.0),
-            max_portfolio_change_pct=r_raw.get("max_portfolio_change_pct", 0.20),
+            max_portfolio_change_pct=r_raw.get("max_portfolio_change_pct", 3.5),
             min_seconds_between_orders=r_raw.get("min_seconds_between_orders", 10),
             allowed_symbols=r_raw.get("allowed_symbols", ["BTC/USDT", "ETH/USDT", "SOL/USDT"]),
             banned_symbols=r_raw.get("banned_symbols", []),

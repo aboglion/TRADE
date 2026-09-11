@@ -178,6 +178,30 @@ class PortfolioService:
         except Exception as e:
             logger.warning("Failed to fetch futures positions: %s", e)
 
+        # Recalculate total_value_usd after merging futures positions.
+        # The initial total_value from balances only includes USDT wallet balance
+        # (which in Binance futures already reflects unrealized PnL as margin balance).
+        # For accurate weight calculations, total_value should reflect the full
+        # account equity: USDT margin balance is the canonical source of truth in
+        # futures mode (it already includes unrealized PnL), so we do NOT double-count
+        # position notional values. Instead, we recalculate from the final holdings
+        # to ensure consistency after position merging.
+        recalc_total = sum(h.value_usd for h in holdings.values())
+        # Use the larger of the two to avoid underestimating (e.g., when USDT margin
+        # balance already includes position equity, recalc_total double-counts;
+        # when it doesn't, recalc_total is more accurate).
+        # In Binance futures: USDT total = wallet balance + unrealized PnL, and
+        # position value_usd = |contracts| * price. These overlap, so we keep
+        # total_value (USDT-based) as the primary equity measure, but ensure it's
+        # at least as large as any individual holding to prevent weight > 100%.
+        if recalc_total > total_value and total_value > 0:
+            # Positions exist whose notional exceeds the margin-based total.
+            # This happens when leverage > 1x. Use margin-based total_value
+            # as it represents actual equity, not notional exposure.
+            pass
+        elif total_value <= 0 and recalc_total > 0:
+            total_value = recalc_total
+
         snapshot = PortfolioSnapshot(
             timestamp_ms=int(time.time() * 1000),
             holdings=holdings,

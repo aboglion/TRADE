@@ -95,10 +95,8 @@ class OrderManager:
         )
 
         try:
-            if self._run_mode == RunMode.DRY_RUN:
-                result = self._gateway.create_order(intent)
-            else:
-                result = self._gateway.create_order(intent)
+            # Gateway is polymorphic: DryRunExchange or ExchangeGateway
+            result = self._gateway.create_order(intent)
 
             self._submitted_ids.add(intent.client_order_id)
 

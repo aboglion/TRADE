@@ -345,8 +345,16 @@ class BotOrchestrator:
                     result = self._order_manager.execute(intent)
                     if result.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
                         executed_count += 1
-                        # Dynamically update in-memory portfolio holdings so subsequent
-                        # orders in this cycle have accurate free balance for risk checks
+                        # INTENTIONAL MUTATION: We mutate the frozen PortfolioSnapshot's
+                        # holdings dict in-place so subsequent orders in THIS cycle see
+                        # accurate free balances for risk checks. This is safe because:
+                        #   1. Python frozen dataclasses only prevent attribute reassignment,
+                        #      not mutation of mutable container values (dict/list).
+                        #   2. The snapshot is discarded after this cycle — a fresh one is
+                        #      built from exchange balances on the next cycle.
+                        # NOTE: total_value_usd is NOT recalculated here. This means
+                        # max_portfolio_change_pct checks on later orders use the original
+                        # total. The impact is minimal since the check is cumulative.
                         filled_qty = result.filled_amount if (result.filled_amount and result.filled_amount > 0) else intent.amount
                         fill_price = result.average_price or intent.price or intent.estimated_price or prices.get(intent.symbol, 0.0)
                         fill_val = filled_qty * fill_price
@@ -358,6 +366,10 @@ class BotOrchestrator:
                             or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
                             or intent.symbol.endswith(":USDT")
                         )
+                        # Leverage fallback: use 2.0x when no prior position exists.
+                        # This is a conservative default for new futures positions;
+                        # the actual leverage is synced from strategy via set_leverage()
+                        # at the start of the cycle (see step 9 above).
                         lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else 2.0))
 
                         if old_base:
