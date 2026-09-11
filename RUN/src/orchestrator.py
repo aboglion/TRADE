@@ -382,6 +382,9 @@ class BotOrchestrator:
                             or intent.estimated_price
                             or prices.get(intent.symbol, 0.0)
                             or prices.get(intent.symbol.split(":")[0], 0.0)
+                            or prices.get(f"{intent.symbol}:USDT", 0.0)
+                            or prices.get(f"{base_sym}/USDT", 0.0)
+                            or prices.get(base_sym, 0.0)
                         )
                         fill_val = filled_qty * fill_price
 
@@ -519,13 +522,15 @@ class BotOrchestrator:
                                 total=new_quote_total,
                                 value_usd=new_quote_total,
                             )
-                        elif intent.side == OrderSide.SELL and not is_fut:
+                        else:
+                            new_quote_free = max(0.0, delta_quote)
+                            new_quote_total = max(0.0, total_quote_delta)
                             portfolio.holdings[quote_key] = AssetHolding(
                                 symbol=quote_key,
-                                free=max(0.0, delta_quote),
+                                free=new_quote_free,
                                 locked=0.0,
-                                total=max(0.0, delta_quote),
-                                value_usd=max(0.0, delta_quote),
+                                total=new_quote_total,
+                                value_usd=new_quote_total,
                             )
                     elif result.status == OrderStatus.OPEN:
                         executed_count += 1

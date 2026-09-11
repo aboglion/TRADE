@@ -664,7 +664,8 @@ class RegimeAdaptiveStrategy(IStrategy):
                 trail_atr = tb
                 if cfg.get("adaptive_trail", True) and open_r > cfg.get("parabolic_r", 3.0):
                     tm = cfg.get("trail_max_strong", 10.0) if entry_mode == "STRONG_BULL_TREND" else cfg.get("trail_max_trend", 4.5)
-                    extra = min(tm - tb, (open_r - cfg.get("parabolic_r", 3.0)) * 0.4)
+                    tm = max(tm, tb)
+                    extra = max(0.0, min(tm - tb, (open_r - cfg.get("parabolic_r", 3.0)) * 0.4))
                     trail_atr = tb + extra
 
                 trail_stop = current_high_water - trail_atr * c_atr

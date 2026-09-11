@@ -296,6 +296,14 @@ class PortfolioService:
         sell_orders: list[OrderIntent] = []
         buy_orders: list[OrderIntent] = []
 
+        # Track remaining available quote currency across multiple spot buy orders
+        spot_quote_budget: dict[str, float] = {}
+        if not self._is_futures:
+            for qk in ("USDT", "USD", "BUSD", "USDC"):
+                qh = portfolio.holdings.get(qk)
+                if qh:
+                    spot_quote_budget[qk] = max(0.0, qh.free * 0.998)
+
         for symbol, deviation in deviations.items():
             pair_symbol = symbol if "/" in symbol else f"{symbol}/USDT"
             target_weight = target.weights.get(symbol, 0.0)
@@ -316,6 +324,8 @@ class PortfolioService:
                 price = prices.get(pair_symbol, 0.0)
             if price <= 0 and ":" in symbol:
                 price = prices.get(symbol.split(":")[0], 0.0)
+            if price <= 0:
+                price = prices.get(f"{pair_symbol}:USDT", 0.0) or prices.get(f"{base}/USDT", 0.0) or prices.get(base, 0.0)
             if price <= 0 and self._gateway:
                 try:
                     price = self._gateway.fetch_ticker_price(pair_symbol)
@@ -489,16 +499,19 @@ class PortfolioService:
                         continue
             elif deviation > 0 and not self._is_futures:  # Budget buys in Spot
                 quote_key = symbol.split("/")[1].split(":")[0] if "/" in symbol else "USDT"
-                quote_holding = portfolio.holdings.get(quote_key) or portfolio.holdings.get("USDT")
-                avail_quote = quote_holding.free if quote_holding else 0.0
-                max_quote_spend = max(0.0, avail_quote * 0.998)
-                if (amount * price) > max_quote_spend:
-                    capped_amount = truncate_to_precision(max_quote_spend / price, constraints["amount_precision"])
+                avail_quote = spot_quote_budget.get(quote_key, spot_quote_budget.get("USDT", 0.0))
+                if (amount * price) > avail_quote:
+                    capped_amount = truncate_to_precision(avail_quote / price, constraints["amount_precision"])
                     if is_above_min_order(capped_amount, price, constraints["min_amount"], constraints["min_notional"]):
                         amount = capped_amount
                     else:
                         logger.debug("Available quote balance ($%.2f) below minimum order for %s, skipping", avail_quote, symbol)
                         continue
+                used_budget = amount * price
+                if quote_key in spot_quote_budget:
+                    spot_quote_budget[quote_key] = max(0.0, spot_quote_budget[quote_key] - used_budget)
+                elif "USDT" in spot_quote_budget:
+                    spot_quote_budget["USDT"] = max(0.0, spot_quote_budget["USDT"] - used_budget)
 
             order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
             order_price = None if order_type == OrderType.MARKET else price
