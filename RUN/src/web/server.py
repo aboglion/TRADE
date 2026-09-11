@@ -1897,10 +1897,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     is_running = False
 
             if is_running:
-                subprocess.run([str(script_path), "stop"], cwd=str(project_dir), capture_output=True)
+                subprocess.run([str(script_path), "stop"], cwd=str(project_dir), capture_output=True, check=False)
                 action_msg = "Git Auto-Updater paused"
             else:
-                subprocess.run([str(script_path), "start"], cwd=str(project_dir), capture_output=True)
+                subprocess.run([str(script_path), "start"], cwd=str(project_dir), capture_output=True, check=False)
                 action_msg = "Git Auto-Updater started"
 
             time.sleep(0.3)
@@ -1941,6 +1941,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 capture_output=True,
                 text=True,
                 timeout=60,
+                check=False,
             )
             stdout = res.stdout.strip() if res.stdout else ""
             stderr = res.stderr.strip() if res.stderr else ""

@@ -64,9 +64,9 @@ scheduler:
   max_consecutive_errors: 10
 dry_run:
   initial_balances:
-    USDT: 2291.47889956
-    BTC: 0.00455012
-    ETH: 0.10716519
+    USDT: 2299.18390299
+    BTC: 0.00454624
+    ETH: 0.10713016
     SOL: 0.0
 telegram:
   enabled: true

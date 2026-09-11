@@ -421,10 +421,17 @@ class DryRunExchange:
 
     def fetch_order(self, symbol: str, order_id: str) -> OrderResult:
         entry = self._orders.get(order_id)
+        if not entry:
+            for ord_data in self._orders.values():
+                res = ord_data.get("result")
+                intent = ord_data.get("intent")
+                if (res and res.client_order_id == order_id) or (intent and intent.client_order_id == order_id):
+                    entry = ord_data
+                    break
         if entry:
             return entry["result"]
         return OrderResult(
-            client_order_id="",
+            client_order_id=order_id if not str(order_id).startswith("dry_") else "",
             exchange_order_id=order_id,
             status=OrderStatus.UNKNOWN,
             error_message="Order not found in dry-run store",

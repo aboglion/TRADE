@@ -379,6 +379,11 @@ class ExchangeGateway:
 
         if formatted_amount is not None:
             try:
+                fa_float = float(formatted_amount)
+                if intent.side.value.upper() == "SELL" and fa_float > (intent.amount + 1e-9):
+                    from src.utils.math_utils import truncate_to_precision
+                    prec = self.get_market_info(resolved_sym).get("precision", {}).get("amount", 8)
+                    formatted_amount = truncate_to_precision(intent.amount, prec)
                 if float(formatted_amount) <= 0.0:
                     raise InvalidOrderError(
                         f"Order amount {intent.amount} formatted to 0.0 for {resolved_sym} due to exchange lot size/precision"
@@ -443,7 +448,67 @@ class ExchangeGateway:
             )
         except ccxt.InsufficientFunds as e:
             raise InsufficientBalanceError(str(e)) from e
-        except (ccxt.InvalidOrder, ccxt.BadRequest) as e:
+        except (ccxt.InvalidOrder, ccxt.BadRequest, InvalidOrderError) as e:
+            err_msg = str(e)
+            if "-2022" in err_msg and params.get("reduceOnly"):
+                logger.warning("ReduceOnly order rejected by Binance (-2022). Checking active positions on exchange...")
+                try:
+                    positions = self.fetch_positions()
+                    active_pos = None
+                    for p in positions:
+                        p_sym = p.get("symbol", "")
+                        if p_sym == resolved_sym or p_sym.split(":")[0] == resolved_sym.split(":")[0]:
+                            active_pos = p
+                            break
+
+                    # If position is already completely closed on Binance:
+                    if not active_pos or abs(float(active_pos.get("contracts", 0.0) or 0.0)) < 1e-8:
+                        logger.info("Position for %s is already completely closed on Binance. Resolving order as closed.", resolved_sym)
+                        return OrderResult(
+                            client_order_id=intent.client_order_id,
+                            exchange_order_id=f"closed_{intent.client_order_id}",
+                            status=OrderStatus.FILLED,
+                            filled_amount=0.0,
+                            average_price=float(intent.estimated_price or intent.price or 0.0),
+                            fees=0.0,
+                            fee_currency="USDT",
+                            timestamp_ms=int(time.time() * 1000),
+                            error_message="Position already closed on exchange (-2022 resolved)",
+                        )
+
+                    # If position still exists but remaining amount is smaller than requested formatted_amount:
+                    rem_qty = abs(float(active_pos.get("contracts", 0.0) or 0.0))
+                    try:
+                        new_formatted_amt = self.amount_to_precision(resolved_sym, rem_qty)
+                    except Exception:
+                        new_formatted_amt = rem_qty
+
+                    if 0 < float(new_formatted_amt) < float(formatted_amount):
+                        logger.info("Retrying reduceOnly order with exact remaining position amount: %.8f -> %.8f", float(formatted_amount), float(new_formatted_amt))
+                        raw = self._retry(lambda: self.exchange.create_order(
+                            symbol=resolved_sym,
+                            type=intent.order_type.value,
+                            side=intent.side.value,
+                            amount=new_formatted_amt,
+                            price=formatted_price,
+                            params=params,
+                        ))
+                        avg_px = float(raw.get("average") or raw.get("price") or intent.estimated_price or intent.price or 0.0)
+                        filled_amt = float(raw.get("filled", 0) or raw.get("amount", 0) or new_formatted_amt)
+                        fee_cost, fee_curr = self._extract_fee(raw)
+                        return OrderResult(
+                            client_order_id=intent.client_order_id,
+                            exchange_order_id=str(raw.get("id", "")),
+                            status=self._map_order_status(raw.get("status", "closed")),
+                            filled_amount=filled_amt,
+                            average_price=avg_px,
+                            fees=fee_cost,
+                            fee_currency=fee_curr,
+                            timestamp_ms=int(raw.get("timestamp", time.time() * 1000)),
+                            raw_response=raw,
+                        )
+                except Exception as retry_err:
+                    logger.error("Failed handling -2022 reduce-only recovery: %s", retry_err)
             raise InvalidOrderError(str(e)) from e
 
     @staticmethod

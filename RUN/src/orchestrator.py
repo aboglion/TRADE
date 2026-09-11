@@ -353,10 +353,20 @@ class BotOrchestrator:
                         fees_usd = (result.fees or 0.0) * (fill_price if (result.fee_currency and result.fee_currency.upper() == base_sym.upper()) else 1.0)
 
                         old_base = portfolio.holdings.get(base_sym)
+                        is_fut = (
+                            getattr(self._config.exchange, "market_type", "") == "future"
+                            or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
+                            or intent.symbol.endswith(":USDT")
+                        )
+                        lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else 2.0))
+
                         if old_base:
                             delta_qty = -filled_qty if intent.side == OrderSide.SELL else filled_qty
                             new_total = old_base.total + delta_qty
-                            new_free = max(0.0, old_base.free + delta_qty)
+                            if new_total <= 0:
+                                new_free = 0.0
+                            else:
+                                new_free = max(0.0, min(new_total, old_base.free + delta_qty)) if not is_fut else 0.0
                             new_val = abs(new_total) * fill_price
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
@@ -364,17 +374,19 @@ class BotOrchestrator:
                                 locked=old_base.locked,
                                 total=new_total,
                                 value_usd=new_val,
-                                unrealized_pnl=old_base.unrealized_pnl,
-                                entry_price=old_base.entry_price,
+                                unrealized_pnl=old_base.unrealized_pnl if abs(new_total) > 1e-8 else 0.0,
+                                entry_price=old_base.entry_price if abs(new_total) > 1e-8 else 0.0,
                                 leverage=old_base.leverage,
                             )
                         elif intent.side == OrderSide.BUY:
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
-                                free=filled_qty,
+                                free=0.0 if is_fut else filled_qty,
                                 locked=0.0,
                                 total=filled_qty,
                                 value_usd=fill_val,
+                                entry_price=fill_price if is_fut else 0.0,
+                                leverage=lev if is_fut else 1.0,
                             )
                         elif intent.side == OrderSide.SELL:
                             # New short position opened
@@ -384,16 +396,12 @@ class BotOrchestrator:
                                 locked=0.0,
                                 total=-filled_qty,
                                 value_usd=fill_val,
+                                entry_price=fill_price if is_fut else 0.0,
+                                leverage=lev if is_fut else 1.0,
                             )
 
                         old_usdt = portfolio.holdings.get("USDT")
-                        is_fut = (
-                            getattr(self._config.exchange, "market_type", "") == "future"
-                            or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
-                            or intent.symbol.endswith(":USDT")
-                        )
                         if is_fut:
-                            lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else 2.0))
                             is_reducing = getattr(intent, "reduce_only", False) or (old_base and (
                                 (old_base.total > 0 and intent.side == OrderSide.SELL) or
                                 (old_base.total < 0 and intent.side == OrderSide.BUY)

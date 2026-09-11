@@ -239,32 +239,44 @@ class RiskManager(IRiskManager):
         base = intent.symbol.split("/")[0].split(":")[0]
         holding = portfolio.holdings.get(base)
 
+        parts = intent.symbol.split("/")
+        quote = parts[1].split(":")[0] if len(parts) > 1 else "USDT"
+        quote_holding = portfolio.holdings.get(quote) or portfolio.holdings.get("USDT") or portfolio.holdings.get("USD")
+        free_quote = quote_holding.free if quote_holding else 0.0
+        order_value = self._get_order_value(intent)
+        is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
+
         # Spot sell requires sufficient free tokens
         if intent.side.value.upper() == "SELL" and (holding is None or holding.total >= 0):
             available_qty = holding.free if holding else 0.0
             if intent.amount > (available_qty + 1e-6) and not getattr(intent, "reduce_only", False):
-                is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
                 if not is_futures_portfolio:
                     return (
                         False,
                         f"Insufficient free balance for {base}: need {intent.amount:.8f}, available {available_qty:.8f}",
                     )
 
-        # Buy orders require sufficient quote currency (USDT, USDC, etc.)
+        # Expanding BUY in spot requires 100% notional cash
         if intent.side.value.upper() == "BUY":
-            parts = intent.symbol.split("/")
-            quote = parts[1].split(":")[0] if len(parts) > 1 else "USDT"
-            quote_holding = portfolio.holdings.get(quote) or portfolio.holdings.get("USDT") or portfolio.holdings.get("USD")
-            free_quote = quote_holding.free if quote_holding else 0.0
-            order_value = self._get_order_value(intent)
             if free_quote <= 0.0 and order_value > 0.0:
                 return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
 
-            is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
             if not is_futures_portfolio and order_value > (free_quote + 1e-4):
                 return (
                     False,
                     f"Insufficient balance: need ${order_value:.2f}, free {quote} is ${free_quote:.2f}",
+                )
+
+        # Futures margin check for expanding orders (both BUY and SELL)
+        if is_futures_portfolio and order_value > 0.0 and not self._is_position_reducing_order(intent, portfolio) and not getattr(intent, "reduce_only", False):
+            if free_quote <= 0.0:
+                return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
+            lev = float(holding.leverage if (holding and holding.leverage > 1.0) else 10.0)
+            margin_req = order_value / max(1.0, lev)
+            if free_quote < (margin_req - 1e-4):
+                return (
+                    False,
+                    f"Insufficient margin: need ${margin_req:.2f} {quote} margin, free {quote} is ${free_quote:.2f}",
                 )
 
         return True, ""

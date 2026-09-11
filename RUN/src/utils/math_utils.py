@@ -35,7 +35,7 @@ def parse_precision_to_decimals(precision: Any) -> int:
                 return len(s.split(".")[1])
             return 0
         except Exception:
-            return int(round(abs(math.log10(val))))
+            return round(abs(math.log10(val)))
     return int(val)
 
 
@@ -85,11 +85,7 @@ def is_above_min_order(
         min_amount: Minimum order amount (e.g., 0.00001 BTC).
         min_notional: Minimum order value in USD (e.g., $10).
     """
-    if amount < min_amount:
-        return False
-    if amount * price < min_notional:
-        return False
-    return True
+    return amount >= min_amount and (amount * price) >= min_notional
 
 
 def compute_order_amount(

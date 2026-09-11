@@ -152,7 +152,7 @@ class OrderManager:
         results: list[OrderResult] = []
         pending = [
             o for o in self._state.pending_orders
-            if o.get("status") in ("submitted", "unknown", "open", "intent")
+            if o.get("status") in ("submitted", "unknown", "open", "intent", "partially_filled")
         ]
 
         if not pending:
@@ -192,7 +192,8 @@ class OrderManager:
                     OrderStatus.EXPIRED,
                 ):
                     self._state.completed_orders.append(order_data)
-                    if result.status == OrderStatus.FILLED:
+                    has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
+                    if has_fill:
                         if result.fees > 0 and result.fee_currency:
                             curr = result.fee_currency
                             self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
@@ -212,7 +213,7 @@ class OrderManager:
         # Remove resolved orders from pending
         self._state.pending_orders = [
             o for o in self._state.pending_orders
-            if o.get("status") in ("submitted", "unknown", "open", "intent")
+            if o.get("status") in ("submitted", "unknown", "open", "intent", "partially_filled")
         ]
 
         return results
@@ -322,7 +323,8 @@ class OrderManager:
                     OrderStatus.EXPIRED,
                 ):
                     self._state.completed_orders.append(order_data)
-                    if result.status == OrderStatus.FILLED:
+                    has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
+                    if has_fill:
                         if result.fees > 0 and result.fee_currency:
                             curr = result.fee_currency
                             self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
@@ -339,7 +341,7 @@ class OrderManager:
         # Clean up pending list
         self._state.pending_orders = [
             o for o in self._state.pending_orders
-            if o.get("status") in ("intent", "submitted", "unknown", "open")
+            if o.get("status") in ("intent", "submitted", "unknown", "open", "partially_filled")
         ]
 
         # Cap completed_orders in memory to prevent unbounded growth
