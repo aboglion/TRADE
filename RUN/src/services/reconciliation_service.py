@@ -35,6 +35,16 @@ class ReconciliationService:
         self._telegram_service = telegram_service
         self._run_mode = run_mode
 
+    def _append_completed_order(self, order_data: dict[str, Any]) -> None:
+        """Safely append or update an order in completed_orders to prevent duplicates."""
+        cid = order_data.get("client_order_id")
+        eid = order_data.get("exchange_order_id")
+        for existing in self._state.completed_orders:
+            if (cid and existing.get("client_order_id") == cid) or (eid and existing.get("exchange_order_id") == eid):
+                existing.update(order_data)
+                return
+        self._state.completed_orders.append(order_data)
+
     def reconcile(self) -> bool:
         """
         Full reconciliation cycle.
@@ -95,13 +105,14 @@ class ReconciliationService:
                             local_order["status"] = res.status.value
                             local_order["filled_amount"] = res.filled_amount
                             local_order["average_price"] = res.average_price
-                            if res.fees and res.fees > 0:
+                            if res.fees and res.fees > 0 and not local_order.get("fees_recorded"):
                                 local_order["fees"] = res.fees
                                 curr = (res.fee_currency or "USDT").upper()
                                 local_order["fee_currency"] = curr
                                 self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + res.fees
+                                local_order["fees_recorded"] = True
                             if res.status in (OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.FAILED):
-                                self._state.completed_orders.append(local_order)
+                                self._append_completed_order(local_order)
                                 has_fill = (res.status == OrderStatus.FILLED) or bool(res.filled_amount and res.filled_amount > 0)
                                 if has_fill and self._telegram_service:
                                     try:
@@ -123,7 +134,7 @@ class ReconciliationService:
                     client_id,
                 )
                 local_order["status"] = "cancelled_pre_send"
-                self._state.completed_orders.append(local_order)
+                self._append_completed_order(local_order)
                 clean = False
                 continue
 
@@ -139,11 +150,12 @@ class ReconciliationService:
                     local_order["status"] = result.status.value
                     local_order["filled_amount"] = result.filled_amount
                     local_order["average_price"] = result.average_price
-                    if result.fees and result.fees > 0:
+                    if result.fees and result.fees > 0 and not local_order.get("fees_recorded"):
                         local_order["fees"] = result.fees
                         curr = (result.fee_currency or "USDT").upper()
                         local_order["fee_currency"] = curr
                         self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                        local_order["fees_recorded"] = True
                     logger.info(
                         "Resolved order %s: %s (filled=%.8f)",
                         exc_id, result.status.value, result.filled_amount,
@@ -154,7 +166,7 @@ class ReconciliationService:
                         OrderStatus.EXPIRED,
                         OrderStatus.FAILED,
                     ):
-                        self._state.completed_orders.append(local_order)
+                        self._append_completed_order(local_order)
                         has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
                         if has_fill and self._telegram_service:
                             try:
@@ -191,10 +203,19 @@ class ReconciliationService:
                     amount = float(exc_order.raw_response.get("amount", 0.0) or 0.0)
                     side = str(exc_order.raw_response.get("side", "buy") or "buy").lower()
 
+                sym = exc_order.symbol or ""
+                if sym and "/" not in sym:
+                    if sym.endswith("USDT"):
+                        sym = f"{sym[:-4]}/USDT"
+                    elif sym.endswith("USD"):
+                        sym = f"{sym[:-3]}/USD"
+                    elif sym.endswith("USDC"):
+                        sym = f"{sym[:-4]}/USDC"
+
                 self._state.pending_orders.append({
                     "client_order_id": exc_order.client_order_id,
                     "exchange_order_id": exc_order.exchange_order_id,
-                    "symbol": exc_order.symbol,
+                    "symbol": sym,
                     "side": side,
                     "amount": amount,
                     "status": exc_order.status.value,

@@ -189,16 +189,18 @@ class OrderManager:
                     OrderStatus.FAILED,
                     OrderStatus.EXPIRED,
                 ):
-                    self._state.completed_orders.append(order_data)
+                    self._append_completed_order(order_data)
                     has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
                     if has_fill:
-                        if result.fees > 0 and result.fee_currency:
-                            curr = result.fee_currency
+                        if not order_data.get("fees_recorded") and result.fees > 0 and result.fee_currency:
+                            curr = (result.fee_currency or "USDT").upper()
                             self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                            order_data["fees_recorded"] = True
                         if self._telegram_service:
                             try:
+                                mode_str = self._run_mode.name if hasattr(self._run_mode, "name") else str(self._run_mode)
                                 self._telegram_service.send_trade_notification(
-                                    order_data, run_mode=self._run_mode
+                                    order_data, run_mode=mode_str
                                 )
                             except Exception as tel_err:
                                 logger.warning("Failed to send telegram notification for filled order: %s", tel_err)
@@ -278,12 +280,32 @@ class OrderManager:
                     logger.warning("Canceling stale open order %s (%s)...", o.exchange_order_id, sym)
                     self._gateway.cancel_order(symbol=sym, order_id=o.exchange_order_id)
                     canceled_count += 1
+                    # Update local state immediately so pending_orders reflects cancellation
+                    for p in self._state.pending_orders:
+                        if p.get("exchange_order_id") == o.exchange_order_id or (o.client_order_id and p.get("client_order_id") == o.client_order_id):
+                            p["status"] = OrderStatus.CANCELLED.value
+                            self._append_completed_order(p)
+                            break
+                    self._state.pending_orders = [
+                        p for p in self._state.pending_orders
+                        if p.get("status") in ("submitted", "unknown", "open", "partially_filled", "intent")
+                    ]
                     break
                 except Exception as e:
                     logger.error("Failed to cancel open order %s (%s): %s", o.exchange_order_id, sym, e)
         return canceled_count
 
     # ── Internal helpers ─────────────────────────────────────
+
+    def _append_completed_order(self, order_data: dict[str, Any]) -> None:
+        """Safely append or update an order in completed_orders to prevent duplicates."""
+        cid = order_data.get("client_order_id")
+        eid = order_data.get("exchange_order_id")
+        for existing in self._state.completed_orders:
+            if (cid and existing.get("client_order_id") == cid) or (eid and existing.get("exchange_order_id") == eid):
+                existing.update(order_data)
+                return
+        self._state.completed_orders.append(order_data)
 
     def _save_intent(self, intent: OrderIntent) -> None:
         """Save order intent to state before submission."""
@@ -324,12 +346,13 @@ class OrderManager:
                     OrderStatus.FAILED,
                     OrderStatus.EXPIRED,
                 ):
-                    self._state.completed_orders.append(order_data)
+                    self._append_completed_order(order_data)
                     has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
                     if has_fill:
-                        if result.fees > 0 and result.fee_currency:
-                            curr = result.fee_currency
+                        if not order_data.get("fees_recorded") and result.fees > 0 and result.fee_currency:
+                            curr = (result.fee_currency or "USDT").upper()
                             self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                            order_data["fees_recorded"] = True
                         
                         # Send Telegram trade alert (safe, never fails execution)
                         if self._telegram_service:

@@ -8,6 +8,7 @@ on trading logic or process stability if Telegram API requests fail.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import urllib.request
@@ -113,6 +114,18 @@ class TelegramService:
             fee_curr = str(order_data.get("fee_currency", "") or "").strip()
             reason = str(order_data.get("reason", "Strategy rebalance") or "Strategy rebalance").strip()
 
+            if hasattr(run_mode, "name"):
+                mode_str = str(run_mode.name)
+            elif hasattr(run_mode, "value"):
+                mode_str = str(run_mode.value)
+            else:
+                mode_str = str(run_mode or "LIVE")
+
+            safe_symbol = html.escape(symbol)
+            safe_reason = html.escape(reason)
+            safe_fee_curr = html.escape(fee_curr)
+            safe_mode = html.escape(mode_str)
+
             total_usd = amount * price
             price_str = f"${price:,.4f}" if (0 < price < 10) else f"${price:,.2f}"
             side_is_buy = "BUY" in side_str
@@ -130,13 +143,13 @@ class TelegramService:
             msg = (
                 f"{header}\n\n"
                 f"{side_emoji} <b>Order Type:</b> {action_text}\n"
-                f"🪙 <b>Asset:</b> <code>{symbol}</code>\n"
+                f"🪙 <b>Asset:</b> <code>{safe_symbol}</code>\n"
                 f"📊 <b>Amount:</b> <code>{amount:.6f}</code>\n"
                 f"💵 <b>Execution Price:</b> <code>{price_str}</code>\n"
                 f"💰 <b>Total Value:</b> <code>${total_usd:,.2f}</code>\n"
-                f"🏷️ <b>Fee:</b> <code>{fees:.6f} {fee_curr}</code>\n"
-                f"🎯 <b>Reason/Strategy:</b> {reason}\n"
-                f"⚙️ <b>Engine Mode:</b> <code>{run_mode}</code>\n"
+                f"🏷️ <b>Fee:</b> <code>{fees:.6f} {safe_fee_curr}</code>\n"
+                f"🎯 <b>Reason/Strategy:</b> {safe_reason}\n"
+                f"⚙️ <b>Engine Mode:</b> <code>{safe_mode}</code>\n"
                 f"⏱️ <b>Time:</b> {time_str}\n\n"
                 f"🌐 <b><a href=\"{url_to_link}\">Click here to open live dashboard</a></b>"
             )
@@ -190,8 +203,15 @@ class TelegramService:
             return False, "Please configure Bot Token and Chat ID in system settings"
 
         try:
+            if hasattr(run_mode, "name"):
+                mode_str = str(run_mode.name)
+            elif hasattr(run_mode, "value"):
+                mode_str = str(run_mode.value)
+            else:
+                mode_str = str(run_mode or "DRY_RUN")
+
             if last_trade:
-                success = self.send_trade_notification(last_trade, run_mode=run_mode, is_test=True)
+                success = self.send_trade_notification(last_trade, run_mode=mode_str, is_test=True)
                 if success:
                     return True, "Test message with last trade sent successfully to Telegram!"
                 else:
@@ -202,12 +222,13 @@ class TelegramService:
                     url_to_link = f"http://{url_to_link}"
 
                 time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                safe_mode = html.escape(mode_str)
 
                 msg = (
                     f"🧪 <b>TEST / SYSTEM CHECK</b>\n\n"
                     f"<b>Status:</b> Telegram alert pipeline is active and working properly.\n"
                     f"<b>Notice:</b> No recorded trades executed yet in system state.\n"
-                    f"<b>Engine Mode:</b> <code>{run_mode}</code>\n"
+                    f"<b>Engine Mode:</b> <code>{safe_mode}</code>\n"
                     f"<b>Timestamp:</b> {time_str}\n\n"
                     f"🌐 <b><a href=\"{url_to_link}\">Click here to open live dashboard</a></b>"
                 )

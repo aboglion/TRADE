@@ -274,6 +274,7 @@ class DryRunExchange:
         if price <= 0:
             return OrderResult(
                 client_order_id=intent.client_order_id,
+                symbol=intent.symbol,
                 status=OrderStatus.FAILED,
                 error_message=f"No price available for {intent.symbol}",
             )
@@ -290,7 +291,7 @@ class DryRunExchange:
         available_margin = max(self._get_free(quote), total_collateral)
 
         # Determine expanding amount for margin requirement
-        existing_pos = self._positions.get(intent.symbol, {})
+        existing_pos = self._get_pos(intent.symbol)
         existing_contracts = float(existing_pos.get("contracts", 0.0) or 0.0)
         
         if intent.side == OrderSide.BUY:
@@ -310,6 +311,7 @@ class DryRunExchange:
         if expanding_qty > 0 and margin_req > (available_margin + 1e-4):
              return OrderResult(
                  client_order_id=intent.client_order_id,
+                 symbol=intent.symbol,
                  status=OrderStatus.FAILED,
                  error_message=f"Insufficient balance: need {margin_req:.2f} {quote} margin (available={available_margin:.2f}, cost={expanding_cost:.2f})",
              )
@@ -333,14 +335,16 @@ class DryRunExchange:
         
         if is_futures and futures_amount > 0:
             active_lev = self._get_active_leverage(intent.symbol)
-            pos = self._positions.get(intent.symbol, {
-                "symbol": intent.symbol,
-                "contracts": 0.0,
-                "entryPrice": 0.0,
-                "side": "neutral",
-                "unrealizedPnl": 0.0,
-                "leverage": active_lev,
-            })
+            pos = dict(self._get_pos(intent.symbol))
+            if not pos:
+                pos = {
+                    "symbol": intent.symbol,
+                    "contracts": 0.0,
+                    "entryPrice": 0.0,
+                    "side": "neutral",
+                    "unrealizedPnl": 0.0,
+                    "leverage": active_lev,
+                }
             pos["leverage"] = active_lev
             
             # Calculate realized PnL if closing/reducing
@@ -390,6 +394,7 @@ class DryRunExchange:
         result = OrderResult(
             client_order_id=intent.client_order_id,
             exchange_order_id=exchange_id,
+            symbol=intent.symbol,
             status=OrderStatus.FILLED,
             filled_amount=intent.amount,
             average_price=price,
@@ -421,6 +426,7 @@ class DryRunExchange:
         return OrderResult(
             client_order_id="",
             exchange_order_id=order_id,
+            symbol=symbol,
             status=OrderStatus.CANCELLED,
         )
 
@@ -438,6 +444,7 @@ class DryRunExchange:
         return OrderResult(
             client_order_id=order_id if not str(order_id).startswith("dry_") else "",
             exchange_order_id=order_id,
+            symbol=symbol,
             status=OrderStatus.UNKNOWN,
             error_message="Order not found in dry-run store",
         )
@@ -466,6 +473,18 @@ class DryRunExchange:
         })
 
     # ── Internal ─────────────────────────────────────────────
+
+    def _get_pos(self, symbol: str) -> dict[str, Any]:
+        """Look up position by exact symbol or base symbol without :USDT suffix."""
+        if symbol in self._positions:
+            return self._positions[symbol]
+        clean_sym = symbol.split(":")[0] if ":" in symbol else symbol
+        if clean_sym in self._positions:
+            return self._positions[clean_sym]
+        for k, v in self._positions.items():
+            if k.split(":")[0] == clean_sym:
+                return v
+        return {}
 
     def _get_free(self, currency: str) -> float:
         bal = self._balances.get(currency)

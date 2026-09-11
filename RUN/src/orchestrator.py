@@ -417,7 +417,11 @@ class BotOrchestrator:
                                 leverage=lev if is_fut else 1.0,
                             )
 
-                        old_usdt = portfolio.holdings.get("USDT")
+                        clean_sym = intent.symbol.split(":")[0]
+                        quote_sym = clean_sym.split("/")[1] if "/" in clean_sym else "USDT"
+                        old_quote = portfolio.holdings.get(quote_sym) or portfolio.holdings.get("USDT")
+                        quote_key = quote_sym if quote_sym in portfolio.holdings else ("USDT" if "USDT" in portfolio.holdings else quote_sym)
+
                         if is_fut:
                             old_qty = old_base.total if old_base else 0.0
                             if old_qty > 1e-8 and intent.side == OrderSide.SELL:
@@ -439,29 +443,29 @@ class BotOrchestrator:
                                 real_pnl = 0.0
                                 margin_delta = -((opened_qty * fill_price) / lev)
 
-                            delta_usdt = margin_delta + real_pnl - fees_usd
-                            total_usdt_delta = real_pnl - fees_usd
+                            delta_quote = margin_delta + real_pnl - fees_usd
+                            total_quote_delta = real_pnl - fees_usd
                         else:
-                            delta_usdt = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
-                            total_usdt_delta = delta_usdt
+                            delta_quote = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
+                            total_quote_delta = delta_quote
 
-                        if old_usdt:
-                            new_usdt_free = max(0.0, old_usdt.free + delta_usdt)
-                            new_usdt_total = max(0.0, old_usdt.total + total_usdt_delta)
-                            portfolio.holdings["USDT"] = AssetHolding(
-                                symbol="USDT",
-                                free=new_usdt_free,
-                                locked=old_usdt.locked,
-                                total=new_usdt_total,
-                                value_usd=new_usdt_total,
+                        if old_quote:
+                            new_quote_free = max(0.0, old_quote.free + delta_quote)
+                            new_quote_total = max(0.0, old_quote.total + total_quote_delta)
+                            portfolio.holdings[quote_key] = AssetHolding(
+                                symbol=quote_key,
+                                free=new_quote_free,
+                                locked=old_quote.locked,
+                                total=new_quote_total,
+                                value_usd=new_quote_total,
                             )
                         elif intent.side == OrderSide.SELL and not is_fut:
-                            portfolio.holdings["USDT"] = AssetHolding(
-                                symbol="USDT",
-                                free=max(0.0, delta_usdt),
+                            portfolio.holdings[quote_key] = AssetHolding(
+                                symbol=quote_key,
+                                free=max(0.0, delta_quote),
                                 locked=0.0,
-                                total=max(0.0, delta_usdt),
-                                value_usd=max(0.0, delta_usdt),
+                                total=max(0.0, delta_quote),
+                                value_usd=max(0.0, delta_quote),
                             )
                     elif result.status == OrderStatus.OPEN:
                         executed_count += 1

@@ -1789,7 +1789,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
             if self.gateway:
                 from src.services.portfolio_service import PortfolioService
-                ps = PortfolioService(self.gateway)
+                is_futures = getattr(self.orchestrator, "_is_futures", False) if self.orchestrator else False
+                ps = PortfolioService(self.gateway, is_futures=is_futures)
                 snapshot = ps.get_portfolio()
                 crypto_val = sum(
                     h.value_usd for sym, h in snapshot.holdings.items()

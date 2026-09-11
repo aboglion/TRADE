@@ -53,6 +53,11 @@ class RiskManager(IRiskManager):
         Returns:
             (approved, reason) — reason is empty if approved.
         """
+        if intent.amount <= 0:
+            return False, f"Order amount must be positive, got {intent.amount}"
+        if intent.order_type == OrderType.LIMIT and (intent.price is None or intent.price <= 0):
+            return False, "Limit order requires a valid positive price"
+
         checks = [
             self._check_kill_switch,
             lambda i, p: self._check_symbol_allowed(i, p),
@@ -217,6 +222,9 @@ class RiskManager(IRiskManager):
     def _check_min_order_value(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> tuple[bool, str]:
+        # Position reduction/liquidation orders must never be trapped by minimum order value
+        if self._is_position_reducing_order(intent, portfolio):
+            return True, ""
         order_value = self._get_order_value(intent)
         if order_value < self._config.min_order_value_usd:
             return (
