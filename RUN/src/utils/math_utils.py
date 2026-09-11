@@ -17,10 +17,12 @@ def parse_precision_to_decimals(precision: Any) -> int:
 
     CCXT returns precision in two formats:
     - Decimal places as int/str: 4, 8, "4" -> 4
-    - Tick / step size as float/str: 0.0001, 1e-05 -> 4, 5
+    - Tick / step size as float/str: 0.0001, 1e-05, 1.0 -> 4, 5, 0
     """
     if precision is None:
         return 8
+    if isinstance(precision, int):
+        return max(0, precision)
     try:
         val = float(precision)
     except (ValueError, TypeError):
@@ -47,6 +49,8 @@ def truncate_to_precision(value: float, precision: Any) -> float:
     where exceeding available balance causes rejection. Symmetrically truncates
     negative numbers towards zero (e.g. -1.2345 with prec 2 -> -1.23).
     """
+    if math.isnan(value) or math.isinf(value):
+        return 0.0
     dec_places = parse_precision_to_decimals(precision)
     if dec_places <= 0:
         sign = -1.0 if value < 0 else 1.0
@@ -85,6 +89,8 @@ def is_above_min_order(
         min_amount: Minimum order amount (e.g., 0.00001 BTC).
         min_notional: Minimum order value in USD (e.g., $10).
     """
+    if amount <= 0.0 or price <= 0.0:
+        return False
     notional = amount * price
     # Use 1e-8 tolerance for notional and 1e-10 for amount to avoid floating point precision traps
     return (amount >= (min_amount - 1e-10)) and (notional >= (min_notional - 1e-8))
@@ -102,7 +108,7 @@ def compute_order_amount(
 
     Returns None if the amount is below exchange minimums.
     """
-    if price <= 0:
+    if price <= 0.0 or target_value_usd <= 0.0:
         return None
     raw_amount = target_value_usd / price
     amount = truncate_to_precision(raw_amount, amount_precision)

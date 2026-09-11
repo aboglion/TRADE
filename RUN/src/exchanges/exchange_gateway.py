@@ -151,8 +151,7 @@ class ExchangeGateway:
         """Set leverage for a futures market symbol."""
         if self._config.market_type != "future":
             return
-        lev_int = int(round(leverage))
-        lev_int = max(lev_int, 1)
+        lev_int = max(1, int(round(leverage)))
         if self._current_leverage.get(symbol) == lev_int:
             return
 

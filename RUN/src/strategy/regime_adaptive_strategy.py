@@ -220,6 +220,11 @@ class RegimeAdaptiveStrategy(IStrategy):
             weights=target_weights,
             regime=effective_regime,
             timestamp_ms=now_ms,
+            leverage=self._effective_leverage,
+            metadata={
+                "short_leverage": self._short_leverage,
+                "effective_leverage": self._effective_leverage,
+            },
         )
 
         decision = StrategyDecision(

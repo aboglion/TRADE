@@ -85,9 +85,11 @@ class PortfolioSnapshot:
 @dataclass(frozen=True)
 class TargetAllocation:
     """Desired portfolio allocation."""
-    weights: dict[str, float]           # symbol → target weight (0.0–1.0)
+    weights: dict[str, float]           # symbol -> target weight (0.0-1.0)
     regime: Regime
     timestamp_ms: int
+    leverage: float = 1.0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Orders ───────────────────────────────────────────────────
@@ -144,7 +146,7 @@ class StrategySignal:
     symbol: str
     action: PositionAction
     asset_regime: AssetRegime
-    target_weight: float        # Desired allocation (0.0–1.0)
+    target_weight: float        # Desired allocation (0.0-1.0)
     reason: str = ""
 
 

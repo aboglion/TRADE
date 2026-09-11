@@ -120,10 +120,14 @@ class RiskManager(IRiskManager):
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> tuple[bool, str]:
         clean_sym = intent.symbol.split(":")[0] if ":" in intent.symbol else intent.symbol
-        if intent.symbol in self._config.banned_symbols or clean_sym in self._config.banned_symbols:
+        base_sym = clean_sym.split("/")[0]
+        pair_sym = f"{base_sym}/USDT"
+        banned = self._config.banned_symbols
+        if any(s in banned for s in (intent.symbol, clean_sym, base_sym, pair_sym)):
             return False, f"Symbol {intent.symbol} is banned"
-        if self._config.allowed_symbols:
-            if intent.symbol not in self._config.allowed_symbols and clean_sym not in self._config.allowed_symbols:
+        allowed = self._config.allowed_symbols
+        if allowed:
+            if not any(s in allowed for s in (intent.symbol, clean_sym, base_sym, pair_sym)):
                 return False, f"Symbol {intent.symbol} not in allowed list"
         return True, ""
 
@@ -150,8 +154,7 @@ class RiskManager(IRiskManager):
         if order_value > self._config.max_single_order_usd:
             return (
                 False,
-                f"Order value ${order_value:.2f} exceeds max "
-                f"${self._config.max_single_order_usd:.2f}",
+                f"Order value ${order_value:.2f} exceeds max ${self._config.max_single_order_usd:.2f}",
             )
         return True, ""
 
@@ -179,8 +182,7 @@ class RiskManager(IRiskManager):
             if elapsed < (self._config.min_seconds_between_orders - 0.05):
                 return (
                     False,
-                    f"Only {elapsed:.1f}s since last order "
-                    f"(min={self._config.min_seconds_between_orders}s)",
+                    f"Only {elapsed:.1f}s since last order (min={self._config.min_seconds_between_orders}s)",
                 )
         return True, ""
 
@@ -211,11 +213,16 @@ class RiskManager(IRiskManager):
             return True, ""
         order_value = self._get_order_value(intent)
         total_change = (self._cycle_total_value + order_value) / portfolio.total_value_usd
-        if total_change > self._config.max_portfolio_change_pct:
+        order_lev = getattr(intent, "leverage", 1.0)
+        base = intent.symbol.split("/")[0].split(":")[0]
+        holding = portfolio.holdings.get(base)
+        h_lev = holding.leverage if holding else 1.0
+        lev = max(1.0, float(order_lev if order_lev > 1.0 else (h_lev if h_lev > 1.0 else 1.0)))
+        allowed_max_change = max(self._config.max_portfolio_change_pct, self._config.max_portfolio_change_pct * (lev / 2.0), lev * 1.2)
+        if total_change > allowed_max_change:
             return (
                 False,
-                f"Cumulative portfolio change {total_change:.1%} exceeds "
-                f"max {self._config.max_portfolio_change_pct:.1%}",
+                f"Cumulative portfolio change {total_change:.1%} exceeds max {allowed_max_change:.1%}",
             )
         return True, ""
 
@@ -229,8 +236,7 @@ class RiskManager(IRiskManager):
         if order_value < self._config.min_order_value_usd:
             return (
                 False,
-                f"Order value ${order_value:.2f} below minimum "
-                f"${self._config.min_order_value_usd:.2f}",
+                f"Order value ${order_value:.2f} below minimum ${self._config.min_order_value_usd:.2f}",
             )
         return True, ""
 

@@ -221,6 +221,8 @@ class PortfolioService:
         portfolio: PortfolioSnapshot,
         target: TargetAllocation,
         prices: dict[str, float],
+        leverage: float | None = None,
+        short_leverage: float | None = None,
     ) -> RebalancePlan:
         """
         Compute the minimal set of orders to reach target allocation.
@@ -232,6 +234,8 @@ class PortfolioService:
             portfolio: Current portfolio state.
             target: Desired allocation.
             prices: Current prices by pair.
+            leverage: Active leverage from strategy decision (e.g. 10.0x).
+            short_leverage: Leverage for bear short hedge (e.g. 2.0x).
         """
         total_value = portfolio.total_value_usd
         if total_value <= 0:
@@ -243,10 +247,10 @@ class PortfolioService:
 
         # Compute deviations for all target weights AND untracked portfolio holdings
         all_symbols = set(target.weights.keys())
-        for base_asset, holding in portfolio.holdings.items():
+        for base_asset, h_item in portfolio.holdings.items():
             if base_asset in ("USDT", "USD", "BUSD", "USDC", "BNB"):
                 continue
-            if abs(holding.total) > 1e-6:
+            if abs(h_item.total) > 1e-6:
                 # Find matching symbol in target weights (e.g. "BTC/USDT" or "BTC")
                 matching_sym = None
                 for s in target.weights:
@@ -324,7 +328,16 @@ class PortfolioService:
                 }
 
             holding = portfolio.holdings.get(base)
-            pos_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))
+            target_meta = getattr(target, "metadata", {}) or {}
+            eff_lev = leverage or getattr(target, "leverage", None) or target_meta.get("effective_leverage")
+            s_lev = short_leverage or target_meta.get("short_leverage") or (eff_lev if eff_lev is not None and eff_lev > 1.0 else (holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0)))
+            is_target_bear = (getattr(target.regime, "value", target.regime) == "bear")
+
+            if (deviation < 0 or target_weight < 0) and is_target_bear:
+                pos_lev = float(s_lev)
+            else:
+                pos_lev = float(eff_lev if eff_lev is not None and eff_lev > 1.0 else (holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0)))
+
             is_flip = (
                 holding is not None
                 and abs(holding.total) > 1e-6
@@ -338,6 +351,7 @@ class PortfolioService:
                 close_side = OrderSide.SELL if current_weight > 0 else OrderSide.BUY
                 order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
                 order_price = None if order_type == OrderType.MARKET else price
+                close_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))
 
                 if is_above_min_order(close_amount, price, constraints["min_amount"], constraints["min_notional"]):
                     intent_close = OrderIntent(
@@ -351,7 +365,7 @@ class PortfolioService:
                         reason=f"Close previous {current_weight:+.2%} position for regime reversal",
                         candle_ts=target.timestamp_ms,
                         reduce_only=self._is_futures,
-                        leverage=pos_lev,
+                        leverage=close_lev,
                     )
                     if close_side == OrderSide.SELL:
                         sell_orders.append(intent_close)
@@ -368,6 +382,7 @@ class PortfolioService:
                     min_notional=constraints["min_notional"],
                 )
                 open_side = OrderSide.SELL if target_weight < 0 else OrderSide.BUY
+                open_lev = float(s_lev if (target_weight < 0 and is_target_bear) else (eff_lev if eff_lev is not None and eff_lev > 1.0 else (holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))))
                 if open_amount is not None:
                     intent_open = OrderIntent(
                         client_order_id=OrderIntent.generate_id(),
@@ -379,7 +394,7 @@ class PortfolioService:
                         estimated_price=price,
                         reason=f"Open new {target_weight:+.2%} position in {pair_symbol}",
                         candle_ts=target.timestamp_ms,
-                        leverage=pos_lev,
+                        leverage=open_lev,
                     )
                     if open_side == OrderSide.SELL:
                         sell_orders.append(intent_open)
@@ -450,7 +465,6 @@ class PortfolioService:
                 )
             )
 
-            pos_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
                 symbol=pair_symbol,

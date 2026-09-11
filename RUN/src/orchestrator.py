@@ -183,7 +183,7 @@ class BotOrchestrator:
             has_new_candles = False
             new_candles_by_pair: dict[str, list] = {}
 
-            for _asset_name, pair in pairs.items():
+            for pair in pairs.values():
                 last_ts = self._state.last_processed_candle_ts.get(pair)
                 new_candles = self._candle_service.get_new_closed_candles(
                     symbol=pair,
@@ -220,7 +220,7 @@ class BotOrchestrator:
             target_up_to_ts = max(all_latest_ts) if all_latest_ts else now_ms
 
             candles_by_asset: dict[str, list] = {}
-            for _asset_name, pair in pairs.items():
+            for pair in pairs.values():
                 try:
                     full_history = self._candle_service.get_full_history(
                         symbol=pair,
@@ -275,22 +275,7 @@ class BotOrchestrator:
 
             self._state.last_regime = decision.regime.value
 
-            # 8. Compute rebalance plan
-            plan = self._portfolio_service.compute_rebalance_plan(
-                portfolio=portfolio,
-                target=decision.target_allocation,
-                prices=prices,
-            )
-
-            # If rebalance plan requires orders and not forced, emit cycle banner at INFO
-            if plan.orders and not force:
-                logger.info("=" * 60)
-                logger.info("CYCLE START | %s | Mode: %s — Action Plan: %d order(s) to execute", ms_to_iso(now_ms), self._config.run_mode.name, len(plan.orders))
-
-            # 9. Dynamic Leverage Sync & Risk-check execute each order
-            self._risk_manager.reset_cycle()
-            executed_count = 0
-
+            # 8. Dynamic Leverage Sync & Compute rebalance plan
             target_lev = decision.metadata.get("effective_leverage", 1.0) if decision.metadata else 1.0
             clamped_lev = max(1.0, float(target_lev))
 
@@ -310,6 +295,23 @@ class BotOrchestrator:
                         self._gateway.set_leverage(lev_to_set, p)
                     except Exception as ex:
                         logger.warning("Could not sync leverage=%.1fx for %s: %s", lev_to_set, p, ex)
+
+            plan = self._portfolio_service.compute_rebalance_plan(
+                portfolio=portfolio,
+                target=decision.target_allocation,
+                prices=prices,
+                leverage=clamped_lev,
+                short_leverage=short_lev,
+            )
+
+            # If rebalance plan requires orders and not forced, emit cycle banner at INFO
+            if plan.orders and not force:
+                logger.info("=" * 60)
+                logger.info("CYCLE START | %s | Mode: %s — Action Plan: %d order(s) to execute", ms_to_iso(now_ms), self._config.run_mode.name, len(plan.orders))
+
+            # 9. Risk-check & execute each order
+            self._risk_manager.reset_cycle()
+            executed_count = 0
 
             failed_symbols: set[str] = set()
             for idx, intent in enumerate(plan.orders):
@@ -372,9 +374,7 @@ class BotOrchestrator:
                         if old_base:
                             delta_qty = -filled_qty if intent.side == OrderSide.SELL else filled_qty
                             new_total = old_base.total + delta_qty
-                            if new_total <= 0 and not is_fut:
-                                new_free = 0.0
-                            elif is_fut:
+                            if is_fut or new_total <= 0:
                                 new_free = 0.0
                             else:
                                 new_free = max(0.0, min(new_total, old_base.free + delta_qty))
