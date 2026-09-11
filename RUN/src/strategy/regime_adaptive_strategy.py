@@ -36,37 +36,37 @@ logger = logging.getLogger("bot.strategy")
 
 # ── Default per-asset configs (matching BACK_TEST/engine.py) ───
 
-_BASE_CFG = dict(
-    entry_score_min=0,
-    rsi_overbought_max=100.0,
-    dip_rsi_max=0.0,
-    dip_vol_mult=1.5,
-    vol_filter_mult=1.0,
-    trend_adx_min=22.0,
-    trail_base_strong=8.0,
-    trail_base_trend=2.5,
-    trail_max_strong=10.0,
-    trail_max_trend=4.5,
-    parabolic_r=3.0,
-    adaptive_trail=True,
-    ema_exit_strong=False,
-    ema_exit_trend=True,
-    tp1_enabled=False,
-    tp1_trigger_atr=4.5,
-    tp1_fraction=0.30,
-    tp1_be_floor_atr=1.0,
-    init_risk_atr=1.8,
-    init_risk_modes=("STRONG_BULL_TREND", "TREND"),
-    cooldown_bars=0,
-    highvol_alloc=0.0,
-    base_alloc=0.0,
-    strong_alloc=1.5,
-    max_add_entries=2,
-    pyramid_profit_r=0.6,
-    pyramid_pullback_atr=1.5,
-    add1_frac=0.50,
-    add2_frac=0.30,
-)
+_BASE_CFG = {
+    "entry_score_min": 0,
+    "rsi_overbought_max": 100.0,
+    "dip_rsi_max": 0.0,
+    "dip_vol_mult": 1.5,
+    "vol_filter_mult": 1.0,
+    "trend_adx_min": 22.0,
+    "trail_base_strong": 8.0,
+    "trail_base_trend": 2.5,
+    "trail_max_strong": 10.0,
+    "trail_max_trend": 4.5,
+    "parabolic_r": 3.0,
+    "adaptive_trail": True,
+    "ema_exit_strong": False,
+    "ema_exit_trend": True,
+    "tp1_enabled": False,
+    "tp1_trigger_atr": 4.5,
+    "tp1_fraction": 0.30,
+    "tp1_be_floor_atr": 1.0,
+    "init_risk_atr": 1.8,
+    "init_risk_modes": ("STRONG_BULL_TREND", "TREND"),
+    "cooldown_bars": 0,
+    "highvol_alloc": 0.0,
+    "base_alloc": 0.0,
+    "strong_alloc": 1.5,
+    "max_add_entries": 2,
+    "pyramid_profit_r": 0.6,
+    "pyramid_pullback_atr": 1.5,
+    "add1_frac": 0.50,
+    "add2_frac": 0.30,
+}
 
 _CFG_BTC = dict(
     _BASE_CFG,
@@ -526,12 +526,15 @@ class RegimeAdaptiveStrategy(IStrategy):
             self._in_momentum = (selected_lev > 1.0)
 
         # Re-entry ladder capping after circuit trip
-        if self._ladder_steps and len(self._ladder_steps) > 0 and not self._safe_haven_active:
-            if 1 <= self._bars_since_circuit_trip <= len(self._ladder_steps):
-                ladder_cap = self._ladder_steps[self._bars_since_circuit_trip - 1]
-                if selected_lev > ladder_cap:
-                    selected_lev = ladder_cap
-                    lev_reason += f" | Re-Entry Ladder step {self._bars_since_circuit_trip} (cap={ladder_cap:.1f}x)"
+        if (
+            self._ladder_steps
+            and not self._safe_haven_active
+            and 1 <= self._bars_since_circuit_trip <= len(self._ladder_steps)
+        ):
+            ladder_cap = self._ladder_steps[self._bars_since_circuit_trip - 1]
+            if selected_lev > ladder_cap:
+                selected_lev = ladder_cap
+                lev_reason += f" | Re-Entry Ladder step {self._bars_since_circuit_trip} (cap={ladder_cap:.1f}x)"
 
         # Flash circuit breaker override
         if not self._safe_haven_active:
@@ -623,18 +626,22 @@ class RegimeAdaptiveStrategy(IStrategy):
                 pyramid_profit_r = cfg.get("pyramid_profit_r", 0.6)
                 pyramid_pullback_atr = cfg.get("pyramid_pullback_atr", 1.5)
 
-                if not self._safe_haven_active and len(entries) < max_adds + 1 and entry_mode == "STRONG_BULL_TREND":
-                    if open_r >= pyramid_profit_r:
-                        # Pullback from the last entry price (matching engine.py line 365-366)
-                        last_px = entries[-1]["px"]
-                        pullback = (last_px - c_low) / max(c_atr, 1e-6)
-                        if pullback >= pyramid_pullback_atr and c_close > r_last["EMA20"]:
-                            entries.append({"px": c_close, "atr": c_atr})
-                            pos["entries"] = entries
-                            logger.info(
-                                "PYRAMID ADD TRIGGERED for %s (entry #%d @ %.2f, pullback=%.1f ATR)",
-                                symbol, len(entries), c_close, pullback
-                            )
+                if (
+                    not self._safe_haven_active
+                    and len(entries) < max_adds + 1
+                    and entry_mode == "STRONG_BULL_TREND"
+                    and open_r >= pyramid_profit_r
+                ):
+                    # Pullback from the last entry price (matching engine.py line 365-366)
+                    last_px = entries[-1]["px"]
+                    pullback = (last_px - c_low) / max(c_atr, 1e-6)
+                    if pullback >= pyramid_pullback_atr and c_close > r_last["EMA20"]:
+                        entries.append({"px": c_close, "atr": c_atr})
+                        pos["entries"] = entries
+                        logger.info(
+                            "PYRAMID ADD TRIGGERED for %s (entry #%d @ %.2f, pullback=%.1f ATR)",
+                            symbol, len(entries), c_close, pullback
+                        )
 
                 # Pyramiding weight multiplier using config add1_frac and add2_frac
                 add1_frac = cfg.get("add1_frac", 0.50)

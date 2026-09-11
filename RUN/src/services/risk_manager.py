@@ -126,9 +126,8 @@ class RiskManager(IRiskManager):
         if any(s in banned for s in (intent.symbol, clean_sym, base_sym, pair_sym)):
             return False, f"Symbol {intent.symbol} is banned"
         allowed = self._config.allowed_symbols
-        if allowed:
-            if not any(s in allowed for s in (intent.symbol, clean_sym, base_sym, pair_sym)):
-                return False, f"Symbol {intent.symbol} not in allowed list"
+        if allowed and not any(s in allowed for s in (intent.symbol, clean_sym, base_sym, pair_sym)):
+            return False, f"Symbol {intent.symbol} not in allowed list"
         return True, ""
 
     def _check_market_order(
@@ -217,7 +216,7 @@ class RiskManager(IRiskManager):
         base = intent.symbol.split("/")[0].split(":")[0]
         holding = portfolio.holdings.get(base)
         h_lev = holding.leverage if holding else 1.0
-        lev = max(1.0, float(order_lev if order_lev > 1.0 else (h_lev if h_lev > 1.0 else 1.0)))
+        lev = max(1.0, float(order_lev if order_lev > 1.0 else max(1.0, h_lev)))
         allowed_max_change = max(self._config.max_portfolio_change_pct, self._config.max_portfolio_change_pct * (lev / 2.0), lev * 1.2)
         if total_change > allowed_max_change:
             return (
@@ -263,12 +262,15 @@ class RiskManager(IRiskManager):
         # Spot sell requires sufficient free tokens
         if intent.side.value.upper() == "SELL" and (holding is None or holding.total >= 0):
             available_qty = holding.free if holding else 0.0
-            if intent.amount > (available_qty + 1e-6) and not getattr(intent, "reduce_only", False):
-                if not is_futures_portfolio:
-                    return (
-                        False,
-                        f"Insufficient free balance for {base}: need {intent.amount:.8f}, available {available_qty:.8f}",
-                    )
+            if (
+                intent.amount > (available_qty + 1e-6)
+                and not getattr(intent, "reduce_only", False)
+                and not is_futures_portfolio
+            ):
+                return (
+                    False,
+                    f"Insufficient free balance for {base}: need {intent.amount:.8f}, available {available_qty:.8f}",
+                )
 
         # Expanding BUY in spot requires 100% notional cash
         if intent.side.value.upper() == "BUY":
@@ -287,7 +289,7 @@ class RiskManager(IRiskManager):
                 return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
             order_lev = getattr(intent, "leverage", 1.0)
             holding_lev = holding.leverage if holding else 1.0
-            lev = max(1.0, float(order_lev if order_lev > 1.0 else (holding_lev if holding_lev > 1.0 else 2.0)))
+            lev = max(1.0, float(order_lev if order_lev > 1.0 else (holding_lev if holding_lev > 1.0 else getattr(intent, "leverage", 1.0))))
             margin_req = order_value / max(1.0, lev)
             if free_quote < (margin_req - 1e-4):
                 return (

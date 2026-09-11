@@ -371,8 +371,18 @@ class BotOrchestrator:
                         # Leverage fallback: use strategy-synced leverage when no prior position exists.
                         lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else (short_lev if (intent.side == OrderSide.SELL and is_bear_regime) else clamped_lev)))
 
+                        clean_sym = intent.symbol.split(":")[0]
+                        quote_sym = clean_sym.split("/")[1] if "/" in clean_sym else "USDT"
+                        fee_curr = (result.fee_currency or "").upper()
+                        is_fee_base = bool(fee_curr and fee_curr == base_sym.upper())
+                        is_fee_quote = bool(fee_curr in (quote_sym.upper(), "USDT", "USD"))
+
+                        # Spot base-asset fee deduction (e.g. Binance charges BTC on BTC/USDT spot buy)
+                        base_fee_deduction = (result.fees or 0.0) if (not is_fut and intent.side == OrderSide.BUY and is_fee_base) else 0.0
+                        net_filled_qty = max(0.0, filled_qty - base_fee_deduction)
+
                         if old_base:
-                            delta_qty = -filled_qty if intent.side == OrderSide.SELL else filled_qty
+                            delta_qty = -filled_qty if intent.side == OrderSide.SELL else net_filled_qty
                             new_total = old_base.total + delta_qty
                             if is_fut or new_total <= 0:
                                 new_free = 0.0
@@ -398,10 +408,10 @@ class BotOrchestrator:
                         elif intent.side == OrderSide.BUY:
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
-                                free=0.0 if is_fut else filled_qty,
+                                free=0.0 if is_fut else net_filled_qty,
                                 locked=0.0,
-                                total=filled_qty,
-                                value_usd=fill_val,
+                                total=net_filled_qty,
+                                value_usd=net_filled_qty * fill_price,
                                 entry_price=fill_price if is_fut else 0.0,
                                 leverage=lev if is_fut else 1.0,
                             )
@@ -417,10 +427,10 @@ class BotOrchestrator:
                                 leverage=lev if is_fut else 1.0,
                             )
 
-                        clean_sym = intent.symbol.split(":")[0]
-                        quote_sym = clean_sym.split("/")[1] if "/" in clean_sym else "USDT"
                         old_quote = portfolio.holdings.get(quote_sym) or portfolio.holdings.get("USDT")
                         quote_key = quote_sym if quote_sym in portfolio.holdings else ("USDT" if "USDT" in portfolio.holdings else quote_sym)
+
+                        quote_fee_deduction = (result.fees or 0.0) if (is_fee_quote or not fee_curr) else 0.0
 
                         if is_fut:
                             old_qty = old_base.total if old_base else 0.0
@@ -443,10 +453,10 @@ class BotOrchestrator:
                                 real_pnl = 0.0
                                 margin_delta = -((opened_qty * fill_price) / lev)
 
-                            delta_quote = margin_delta + real_pnl - fees_usd
-                            total_quote_delta = real_pnl - fees_usd
+                            delta_quote = margin_delta + real_pnl - quote_fee_deduction
+                            total_quote_delta = real_pnl - quote_fee_deduction
                         else:
-                            delta_quote = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
+                            delta_quote = (fill_val - quote_fee_deduction) if intent.side == OrderSide.SELL else (-fill_val - quote_fee_deduction)
                             total_quote_delta = delta_quote
 
                         if old_quote:
@@ -540,10 +550,9 @@ class BotOrchestrator:
 
         except Exception as e:
             self._consecutive_errors += 1
-            logger.error(
+            logger.exception(
                 "Cycle error (%d consecutive): %s",
                 self._consecutive_errors, e,
-                exc_info=True,
             )
             self._state.critical_errors.append(
                 f"Cycle error: {type(e).__name__}: {e}"

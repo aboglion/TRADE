@@ -194,7 +194,7 @@ class PortfolioService:
         # position value_usd = |contracts| * price. These overlap, so we keep
         # total_value (USDT-based) as the primary equity measure, but ensure it's
         # at least as large as any individual holding to prevent weight > 100%.
-        if recalc_total > total_value and total_value > 0:
+        if recalc_total > total_value > 0:
             # Positions exist whose notional exceeds the margin-based total.
             # This happens when leverage > 1x. Use margin-based total_value
             # as it represents actual equity, not notional exposure.
@@ -329,14 +329,37 @@ class PortfolioService:
 
             holding = portfolio.holdings.get(base)
             target_meta = getattr(target, "metadata", {}) or {}
-            eff_lev = leverage or getattr(target, "leverage", None) or target_meta.get("effective_leverage")
-            s_lev = short_leverage or target_meta.get("short_leverage") or (eff_lev if eff_lev is not None and eff_lev > 1.0 else (holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0)))
+            # Check explicit leverage passed to method first, then target metadata, then target.leverage (if > 1.0)
+            if leverage is not None:
+                eff_lev = float(leverage)
+            elif target_meta.get("effective_leverage") is not None:
+                eff_lev = float(target_meta["effective_leverage"])
+            elif getattr(target, "leverage", None) is not None and target.leverage > 1.0:
+                eff_lev = float(target.leverage)
+            else:
+                eff_lev = None
+
+            if short_leverage is not None:
+                s_lev = float(short_leverage)
+            elif target_meta.get("short_leverage") is not None:
+                s_lev = float(target_meta["short_leverage"])
+            elif eff_lev is not None and eff_lev >= 1.0:
+                s_lev = float(eff_lev)
+            elif holding and holding.leverage > 1.0:
+                s_lev = float(holding.leverage)
+            else:
+                s_lev = 2.0 if self._is_futures else 1.0
+
             is_target_bear = (getattr(target.regime, "value", target.regime) == "bear")
 
             if (deviation < 0 or target_weight < 0) and is_target_bear:
-                pos_lev = float(s_lev)
+                pos_lev = s_lev
+            elif eff_lev is not None:
+                pos_lev = eff_lev
+            elif holding and holding.leverage > 1.0:
+                pos_lev = float(holding.leverage)
             else:
-                pos_lev = float(eff_lev if eff_lev is not None and eff_lev > 1.0 else (holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0)))
+                pos_lev = 2.0 if self._is_futures else 1.0
 
             is_flip = (
                 holding is not None
@@ -351,7 +374,7 @@ class PortfolioService:
                 close_side = OrderSide.SELL if current_weight > 0 else OrderSide.BUY
                 order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
                 order_price = None if order_type == OrderType.MARKET else price
-                close_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))
+                close_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else pos_lev)
 
                 if is_above_min_order(close_amount, price, constraints["min_amount"], constraints["min_notional"]):
                     intent_close = OrderIntent(
@@ -382,7 +405,7 @@ class PortfolioService:
                     min_notional=constraints["min_notional"],
                 )
                 open_side = OrderSide.SELL if target_weight < 0 else OrderSide.BUY
-                open_lev = float(s_lev if (target_weight < 0 and is_target_bear) else (eff_lev if eff_lev is not None and eff_lev > 1.0 else (holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))))
+                open_lev = float(s_lev if (target_weight < 0 and is_target_bear) else pos_lev)
                 if open_amount is not None:
                     intent_open = OrderIntent(
                         client_order_id=OrderIntent.generate_id(),
@@ -515,7 +538,8 @@ class PortfolioService:
             else:
                 expanding_buys.append(o)
 
-        # Sells first (reducing before expanding), then buys (covering before expanding)
+        # Sells first (reducing before expanding) to maximize cash proceeds,
+        # then buys (covering shorts before expanding longs).
         sorted_sells = reducing_sells + expanding_sells
         sorted_buys = reducing_buys + expanding_buys
         all_orders = sorted_sells + sorted_buys

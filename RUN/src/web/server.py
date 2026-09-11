@@ -268,9 +268,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         cookie_header = self.headers.get("Cookie", "")
         if f"dash_auth={expected_pass}" in cookie_header:
             return True
-        if f"token={expected_pass}" in self.path or f"password={expected_pass}" in self.path:
-            return True
-        return False
+        return bool(f"token={expected_pass}" in self.path or f"password={expected_pass}" in self.path)
 
     def _require_auth(self) -> bool:
         ip = rate_limiter.get_client_ip(self)

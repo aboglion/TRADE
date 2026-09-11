@@ -151,7 +151,7 @@ class ExchangeGateway:
         """Set leverage for a futures market symbol."""
         if self._config.market_type != "future":
             return
-        lev_int = max(1, int(round(leverage)))
+        lev_int = max(1, round(leverage))
         if self._current_leverage.get(symbol) == lev_int:
             return
 
@@ -381,7 +381,11 @@ class ExchangeGateway:
                 fa_float = float(formatted_amount)
                 if intent.side.value.upper() == "SELL" and fa_float > (intent.amount + 1e-9):
                     from src.utils.math_utils import truncate_to_precision
-                    prec = self.get_market_info(resolved_sym).get("precision", {}).get("amount", 8)
+                    prec = 8
+                    try:
+                        prec = self.get_market_info(resolved_sym).get("precision", {}).get("amount", 8)
+                    except Exception:
+                        pass
                     formatted_amount = truncate_to_precision(intent.amount, prec)
                 if float(formatted_amount) <= 0.0:
                     raise InvalidOrderError(

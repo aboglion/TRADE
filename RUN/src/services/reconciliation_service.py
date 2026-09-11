@@ -138,15 +138,25 @@ class ReconciliationService:
                 clean = False
                 continue
 
+            lookup_id = exc_id or client_id
             if exc_id and exc_id in exchange_ids:
                 # Order exists on exchange — good
                 continue
 
-            if exc_id and exc_id not in exchange_ids:
-                # Order was submitted but no longer open on exchange
-                # It was either filled or cancelled
+            if not exc_id and client_id:
+                matching_open = next((o for o in exchange_open if o.client_order_id == client_id), None)
+                if matching_open:
+                    local_order["exchange_order_id"] = matching_open.exchange_order_id
+                    local_order["status"] = matching_open.status.value
+                    local_order["filled_amount"] = matching_open.filled_amount
+                    continue
+
+            if lookup_id:
+                # Order was submitted but no longer open on exchange (or exc_id was missing)
+                # It was either filled, cancelled, or failed
                 try:
-                    result = self._gateway.fetch_order(symbol, exc_id)
+                    result = self._gateway.fetch_order(symbol, lookup_id)
+                    local_order["exchange_order_id"] = result.exchange_order_id or local_order.get("exchange_order_id")
                     local_order["status"] = result.status.value
                     local_order["filled_amount"] = result.filled_amount
                     local_order["average_price"] = result.average_price
@@ -158,7 +168,7 @@ class ReconciliationService:
                         local_order["fees_recorded"] = True
                     logger.info(
                         "Resolved order %s: %s (filled=%.8f)",
-                        exc_id, result.status.value, result.filled_amount,
+                        lookup_id, result.status.value, result.filled_amount,
                     )
                     if result.status in (
                         OrderStatus.FILLED,
@@ -175,11 +185,18 @@ class ReconciliationService:
                             except Exception as ex:
                                 logger.warning("Telegram trade notification failed during reconciliation: %s", ex)
                 except Exception as e:
-                    logger.warning(
-                        "Cannot resolve order %s: %s — marking unknown",
-                        exc_id, e,
-                    )
-                    local_order["status"] = "unknown"
+                    err_str = str(e)
+                    if "Order does not exist" in err_str or "-2013" in err_str or "OrderNotFound" in type(e).__name__:
+                        logger.warning("Order %s does not exist on exchange — marking FAILED", lookup_id)
+                        local_order["status"] = OrderStatus.FAILED.value
+                        local_order["error_message"] = f"Order not found on exchange: {e}"
+                        self._append_completed_order(local_order)
+                    else:
+                        logger.warning(
+                            "Cannot resolve order %s: %s — marking unknown",
+                            lookup_id, e,
+                        )
+                        local_order["status"] = "unknown"
                     clean = False
 
         # 3. Check for orphaned exchange orders (not in our local state)
