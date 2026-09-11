@@ -378,6 +378,15 @@ class ExchangeGateway:
         except Exception:
             formatted_amount = intent.amount
 
+        if formatted_amount is not None:
+            try:
+                if float(formatted_amount) <= 0.0:
+                    raise InvalidOrderError(
+                        f"Order amount {intent.amount} formatted to 0.0 for {resolved_sym} due to exchange lot size/precision"
+                    )
+            except (ValueError, TypeError):
+                pass
+
         formatted_price = None
         if intent.order_type.value != "market" and intent.price is not None:
             try:
@@ -413,12 +422,20 @@ class ExchangeGateway:
             if avg_px == 0.0:
                 avg_px = float(intent.estimated_price or intent.price or 0.0)
 
+            mapped_status = self._map_order_status(raw.get("status", ""))
+            filled_amt = float(raw.get("filled", 0) or 0)
+            if filled_amt == 0.0 and isinstance(raw.get("info"), dict):
+                info = raw["info"]
+                filled_amt = float(info.get("cumQty", 0) or info.get("executedQty", 0) or 0)
+            if filled_amt == 0.0 and mapped_status == OrderStatus.FILLED:
+                filled_amt = float(raw.get("amount", 0) or formatted_amount or intent.amount or 0)
+
             fee_cost, fee_curr = self._extract_fee(raw)
             return OrderResult(
                 client_order_id=intent.client_order_id,
                 exchange_order_id=str(raw.get("id", "")),
-                status=self._map_order_status(raw.get("status", "")),
-                filled_amount=float(raw.get("filled", 0) or 0),
+                status=mapped_status,
+                filled_amount=filled_amt,
                 average_price=avg_px,
                 fees=fee_cost,
                 fee_currency=fee_curr,
@@ -451,19 +468,24 @@ class ExchangeGateway:
         return 0.0, ""
 
     def cancel_order(self, symbol: str, order_id: str) -> OrderResult:
-        """Cancel an open order."""
+        """Cancel an open order, supporting numeric exchange order IDs and client order IDs."""
         sym = self._resolve_market_symbol(symbol)
+        params: Dict[str, Any] = {}
+        target_id: Optional[str] = order_id
+        if order_id and not str(order_id).isdigit():
+            params["origClientOrderId"] = str(order_id)
+            target_id = None
         try:
-            raw = self._retry(lambda: self.exchange.cancel_order(order_id, sym))
+            raw = self._retry(lambda: self.exchange.cancel_order(target_id, sym, params=params))
             return OrderResult(
-                client_order_id=raw.get("clientOrderId", ""),
+                client_order_id=raw.get("clientOrderId", "") or (order_id if not str(order_id).isdigit() else ""),
                 exchange_order_id=str(raw.get("id", order_id)),
                 status=OrderStatus.CANCELLED,
                 raw_response=raw,
             )
         except ccxt.OrderNotFound:
             return OrderResult(
-                client_order_id="",
+                client_order_id=order_id if not str(order_id).isdigit() else "",
                 exchange_order_id=order_id,
                 status=OrderStatus.CANCELLED,
                 error_message="Order not found (already cancelled or filled)",
@@ -472,7 +494,7 @@ class ExchangeGateway:
             err_str = str(e).lower()
             if any(k in err_str for k in ("-2011", "unknown order", "not found", "already filled", "already canceled", "already cancelled", "does not exist")):
                 return OrderResult(
-                    client_order_id="",
+                    client_order_id=order_id if not str(order_id).isdigit() else "",
                     exchange_order_id=order_id,
                     status=OrderStatus.CANCELLED,
                     error_message=f"Order already inactive ({e})",
@@ -480,9 +502,14 @@ class ExchangeGateway:
             raise
 
     def fetch_order(self, symbol: str, order_id: str) -> OrderResult:
-        """Get current status of an order."""
+        """Get current status of an order, supporting numeric exchange order IDs and client order IDs."""
         sym = self._resolve_market_symbol(symbol)
-        raw = self._retry(lambda: self.exchange.fetch_order(order_id, sym))
+        params: Dict[str, Any] = {}
+        target_id: Optional[str] = order_id
+        if order_id and not str(order_id).isdigit():
+            params["origClientOrderId"] = str(order_id)
+            target_id = None
+        raw = self._retry(lambda: self.exchange.fetch_order(target_id, sym, params=params))
         avg_px = float(raw.get("average") or raw.get("price") or 0)
         if avg_px == 0.0 and raw.get("trades"):
             trades = raw.get("trades", [])
@@ -499,12 +526,20 @@ class ExchangeGateway:
             elif float(info.get("avgPrice", 0) or 0) > 0:
                 avg_px = float(info.get("avgPrice"))
 
+        mapped_status = self._map_order_status(raw.get("status", ""))
+        filled_amt = float(raw.get("filled", 0) or 0)
+        if filled_amt == 0.0 and isinstance(raw.get("info"), dict):
+            info = raw["info"]
+            filled_amt = float(info.get("cumQty", 0) or info.get("executedQty", 0) or 0)
+        if filled_amt == 0.0 and mapped_status == OrderStatus.FILLED:
+            filled_amt = float(raw.get("amount", 0) or 0)
+
         fee_cost, fee_curr = self._extract_fee(raw)
         return OrderResult(
-            client_order_id=raw.get("clientOrderId", ""),
+            client_order_id=raw.get("clientOrderId", "") or (order_id if not str(order_id).isdigit() else ""),
             exchange_order_id=str(raw.get("id", "")),
-            status=self._map_order_status(raw.get("status", "")),
-            filled_amount=float(raw.get("filled", 0) or 0),
+            status=mapped_status,
+            filled_amount=filled_amt,
             average_price=avg_px,
             fees=fee_cost,
             fee_currency=fee_curr,

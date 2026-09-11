@@ -36,8 +36,9 @@ class RiskManager(IRiskManager):
     - Sufficient balance
     """
 
-    def __init__(self, config: RiskConfig):
+    def __init__(self, config: RiskConfig, is_futures: bool = False):
         self._config = config
+        self._is_futures = is_futures
         self._cycle_order_count = 0
         self._last_order_time: float = 0.0
         self._cycle_total_value: float = 0.0
@@ -153,6 +154,8 @@ class RiskManager(IRiskManager):
     def _check_max_orders_per_cycle(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> Tuple[bool, str]:
+        if self._is_position_reducing_order(intent, portfolio):
+            return True, ""
         if self._cycle_order_count >= self._config.max_orders_per_cycle:
             return (
                 False,
@@ -236,7 +239,7 @@ class RiskManager(IRiskManager):
         if intent.side.value.upper() == "SELL" and (holding is None or holding.total >= 0):
             available_qty = holding.free if holding else 0.0
             if intent.amount > (available_qty + 1e-6) and not getattr(intent, "reduce_only", False):
-                is_futures_portfolio = any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
+                is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
                 if not is_futures_portfolio:
                     return (
                         False,
@@ -250,5 +253,12 @@ class RiskManager(IRiskManager):
             order_value = self._get_order_value(intent)
             if free_usdt <= 0.0 and order_value > 0.0:
                 return False, f"Insufficient balance: free USDT is ${free_usdt:.2f}"
+
+            is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
+            if not is_futures_portfolio and order_value > (free_usdt + 1e-4):
+                return (
+                    False,
+                    f"Insufficient balance: need ${order_value:.2f}, free USDT is ${free_usdt:.2f}",
+                )
 
         return True, ""

@@ -24,14 +24,14 @@ import time
 from typing import Any, Dict, Optional
 
 from src.config.config_manager import BotConfig
-from src.core.enums import OrderStatus, Regime
+from src.core.enums import OrderSide, OrderStatus, Regime
 from src.core.exceptions import (
     DataGapError,
     InsufficientDataError,
     KillSwitchActiveError,
     SafeStopRequired,
 )
-from src.core.models import BotState
+from src.core.models import AssetHolding, BotState
 from src.data.candle_service import CandleService
 from src.services.order_manager import OrderManager
 from src.services.portfolio_service import PortfolioService
@@ -91,7 +91,9 @@ class BotOrchestrator:
         self._order_manager = OrderManager(
             gateway, state, config.run_mode, telegram_service=self._telegram_service
         )
-        self._reconciliation = ReconciliationService(gateway, state)
+        self._reconciliation = ReconciliationService(
+            gateway, state, telegram_service=self._telegram_service, run_mode=config.run_mode
+        )
 
         self._consecutive_errors = 0
         self._last_scan_time: Optional[float] = None
@@ -341,7 +343,61 @@ class BotOrchestrator:
 
                 try:
                     result = self._order_manager.execute(intent)
-                    if result.status in (OrderStatus.FILLED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED):
+                    if result.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+                        executed_count += 1
+                        # Dynamically update in-memory portfolio holdings so subsequent
+                        # orders in this cycle have accurate free balance for risk checks
+                        filled_qty = result.filled_amount if (result.filled_amount and result.filled_amount > 0) else intent.amount
+                        fill_price = result.average_price or intent.price or intent.estimated_price or prices.get(intent.symbol, 0.0)
+                        fill_val = filled_qty * fill_price
+                        fees_usd = (result.fees or 0.0) * (fill_price if (result.fee_currency and result.fee_currency.upper() == base_sym.upper()) else 1.0)
+
+                        old_base = portfolio.holdings.get(base_sym)
+                        if old_base:
+                            delta_qty = -filled_qty if intent.side == OrderSide.SELL else filled_qty
+                            new_total = old_base.total + delta_qty
+                            new_free = max(0.0, old_base.free + delta_qty)
+                            new_val = max(0.0, new_total * fill_price)
+                            portfolio.holdings[base_sym] = AssetHolding(
+                                symbol=base_sym,
+                                free=new_free,
+                                locked=old_base.locked,
+                                total=new_total,
+                                value_usd=new_val,
+                                unrealized_pnl=old_base.unrealized_pnl,
+                                entry_price=old_base.entry_price,
+                                leverage=old_base.leverage,
+                            )
+                        elif intent.side == OrderSide.BUY:
+                            portfolio.holdings[base_sym] = AssetHolding(
+                                symbol=base_sym,
+                                free=filled_qty,
+                                locked=0.0,
+                                total=filled_qty,
+                                value_usd=fill_val,
+                            )
+
+                        old_usdt = portfolio.holdings.get("USDT")
+                        delta_usdt = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
+                        if old_usdt:
+                            new_usdt_free = max(0.0, old_usdt.free + delta_usdt)
+                            new_usdt_total = max(0.0, old_usdt.total + delta_usdt)
+                            portfolio.holdings["USDT"] = AssetHolding(
+                                symbol="USDT",
+                                free=new_usdt_free,
+                                locked=old_usdt.locked,
+                                total=new_usdt_total,
+                                value_usd=new_usdt_total,
+                            )
+                        elif intent.side == OrderSide.SELL:
+                            portfolio.holdings["USDT"] = AssetHolding(
+                                symbol="USDT",
+                                free=max(0.0, delta_usdt),
+                                locked=0.0,
+                                total=max(0.0, delta_usdt),
+                                value_usd=max(0.0, delta_usdt),
+                            )
+                    elif result.status == OrderStatus.OPEN:
                         executed_count += 1
                     elif result.status in (OrderStatus.FAILED, OrderStatus.CANCELLED):
                         failed_symbols.add(intent.symbol)

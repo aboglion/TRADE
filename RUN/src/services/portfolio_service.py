@@ -133,7 +133,12 @@ class PortfolioService:
                 leverage = float(pos.get("leverage", 1) or 1)
                 
                 clean_sym = sym.split(":")[0] if ":" in sym else sym
-                price = prices.get(sym, 0.0) or prices.get(clean_sym, 0.0)
+                price = (
+                    prices.get(sym, 0.0)
+                    or prices.get(clean_sym, 0.0)
+                    or prices.get(f"{base}/USDT", 0.0)
+                    or prices.get(base, 0.0)
+                )
                 if price <= 0:
                     try:
                         price = self._gateway.fetch_ticker_price(sym)
@@ -394,7 +399,7 @@ class PortfolioService:
                 continue
 
             # Check available balance for sells (skip if Futures, as shorts are allowed)
-            base = symbol.split("/")[0]
+            base = symbol.split("/")[0].split(":")[0]
             if deviation < 0 and not self._is_futures:  # Need to sell in Spot
                 holding = portfolio.holdings.get(base)
                 available = holding.free if holding else 0.0
@@ -441,7 +446,7 @@ class PortfolioService:
         reducing_sells: List[OrderIntent] = []
         expanding_sells: List[OrderIntent] = []
         for o in sell_orders:
-            base = o.symbol.split("/")[0] if "/" in o.symbol else o.symbol
+            base = o.symbol.split("/")[0].split(":")[0]
             holding = portfolio.holdings.get(base)
             if "Close previous" in o.reason:
                 reducing_sells.append(o)
@@ -456,7 +461,7 @@ class PortfolioService:
         reducing_buys: List[OrderIntent] = []
         expanding_buys: List[OrderIntent] = []
         for o in buy_orders:
-            base = o.symbol.split("/")[0] if "/" in o.symbol else o.symbol
+            base = o.symbol.split("/")[0].split(":")[0]
             holding = portfolio.holdings.get(base)
             if "Close previous" in o.reason:
                 reducing_buys.append(o)

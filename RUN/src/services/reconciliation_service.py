@@ -8,6 +8,7 @@ inconsistencies.  The exchange is ALWAYS the source of truth.
 from __future__ import annotations
 
 import logging
+from typing import Any, Optional
 
 from src.core.enums import OrderStatus
 from src.core.models import BotState
@@ -22,9 +23,17 @@ class ReconciliationService:
     Run on every startup and periodically during operation.
     """
 
-    def __init__(self, gateway, state: BotState):
+    def __init__(
+        self,
+        gateway,
+        state: BotState,
+        telegram_service: Optional[Any] = None,
+        run_mode: Optional[Any] = None,
+    ):
         self._gateway = gateway
         self._state = state
+        self._telegram_service = telegram_service
+        self._run_mode = run_mode
 
     def reconcile(self) -> bool:
         """
@@ -90,6 +99,11 @@ class ReconciliationService:
                     local_order["status"] = result.status.value
                     local_order["filled_amount"] = result.filled_amount
                     local_order["average_price"] = result.average_price
+                    if result.fees and result.fees > 0:
+                        local_order["fees"] = result.fees
+                        curr = (result.fee_currency or "USDT").upper()
+                        local_order["fee_currency"] = curr
+                        self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
                     logger.info(
                         "Resolved order %s: %s (filled=%.8f)",
                         exc_id, result.status.value, result.filled_amount,
@@ -100,6 +114,12 @@ class ReconciliationService:
                         OrderStatus.EXPIRED,
                     ):
                         self._state.completed_orders.append(local_order)
+                        if result.status == OrderStatus.FILLED and self._telegram_service:
+                            try:
+                                mode_str = self._run_mode.name if hasattr(self._run_mode, "name") else str(self._run_mode or "LIVE")
+                                self._telegram_service.send_trade_notification(local_order, run_mode=mode_str)
+                            except Exception as ex:
+                                logger.warning("Telegram trade notification failed during reconciliation: %s", ex)
                 except Exception as e:
                     logger.warning(
                         "Cannot resolve order %s: %s — marking unknown",

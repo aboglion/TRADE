@@ -296,7 +296,10 @@ def main() -> None:
         allow_market_orders=config.risk.allow_market_orders,
         is_futures=(config.exchange.market_type == "future"),
     )
-    risk_manager = RiskManager(config.risk)
+    risk_manager = RiskManager(
+        config.risk,
+        is_futures=(config.exchange.market_type == "future"),
+    )
 
     # Initialize strategy
     asset_weights = {
