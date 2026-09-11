@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(0, '/home/uns/TRADE/RUN')
 from src.services.portfolio_service import PortfolioService
-from src.core.models import PortfolioSnapshot, AssetHolding, TargetAllocation, OrderType, Regime
+from src.core.models import PortfolioSnapshot, AssetHolding, TargetAllocation, Regime
 import logging
 
 logging.basicConfig(level=logging.DEBUG)

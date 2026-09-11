@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from src.core.enums import OrderStatus, RunMode
 from src.core.exceptions import (
@@ -140,7 +140,7 @@ class OrderManager:
                 "will check on next cycle",
                 e,
             )
-            raise UnknownOrderStateError(str(e))
+            raise UnknownOrderStateError(str(e)) from e
 
     def check_pending_orders(self) -> List[OrderResult]:
         """

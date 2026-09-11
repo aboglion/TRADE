@@ -6,8 +6,6 @@ import time
 import pytest
 from src.core.enums import OrderSide, Regime
 from src.core.models import (
-    AssetHolding,
-    OrderIntent,
     PortfolioSnapshot,
     TargetAllocation,
 )

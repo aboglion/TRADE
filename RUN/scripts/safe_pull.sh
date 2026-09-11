@@ -26,6 +26,16 @@ echo "🔄 Safe Git Pull initiated (Branch: $BRANCH)"
 echo "📍 Repository: $PROJECT_DIR"
 echo "=================================================================="
 
+log_bot() {
+    local iso_ts="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    for bot_log in "${PROJECT_DIR}/logs/bot.log" "${PROJECT_DIR}/RUN/logs/bot.log"; do
+        if [ -d "$(dirname "$bot_log")" ]; then
+            echo "$iso_ts | INFO     | bot.git.pull | $1" >> "$bot_log" 2>/dev/null || true
+        fi
+    done
+}
+log_bot "Safe Git Pull initiated (Branch: $BRANCH)"
+
 STASH_CREATED=0
 BACKUP_DIR=""
 
@@ -91,6 +101,7 @@ fi
 
 if [ "$PULL_SUCCESS" -ne 1 ]; then
     echo "❌ Git pull failed to retrieve latest changes."
+    log_bot "❌ Git pull failed to retrieve latest changes"
     # If we stashed, restore local changes before exiting
     if [ "$STASH_CREATED" -eq 1 ]; then
         echo "🔄 Restoring stashed local changes..."
@@ -100,6 +111,7 @@ if [ "$PULL_SUCCESS" -ne 1 ]; then
 fi
 
 echo "✅ Latest changes pulled successfully."
+log_bot "✅ Latest git changes pulled successfully"
 
 # 5. Restore stashed local changes if a stash was created
 if [ "$STASH_CREATED" -eq 1 ]; then

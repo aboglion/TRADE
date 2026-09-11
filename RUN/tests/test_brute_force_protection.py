@@ -2,7 +2,6 @@
 Tests for LoginRateLimiter and Brute-Force Password Protection.
 """
 
-import time
 from src.web.server import LoginRateLimiter
 
 

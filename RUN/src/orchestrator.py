@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.config.config_manager import BotConfig
-from src.core.enums import OrderStatus, Regime, RunMode
+from src.core.enums import OrderStatus, Regime
 from src.core.exceptions import (
     DataGapError,
     InsufficientDataError,
@@ -181,7 +181,7 @@ class BotOrchestrator:
             has_new_candles = False
             new_candles_by_pair: Dict[str, list] = {}
 
-            for asset_name, pair in pairs.items():
+            for _asset_name, pair in pairs.items():
                 last_ts = self._state.last_processed_candle_ts.get(pair)
                 new_candles = self._candle_service.get_new_closed_candles(
                     symbol=pair,
@@ -197,9 +197,12 @@ class BotOrchestrator:
                 self._save_state(success=True)
                 return True
 
-            # Only log cycle banner when meaningful work is about to be executed (new candles or forced)
-            logger.info("=" * 60)
-            logger.info("CYCLE START | %s | Mode: %s%s", ms_to_iso(now_ms), self._config.run_mode.name, " | FORCED" if force else "")
+            # Only log cycle banner at INFO when forced; routine cycles log at DEBUG
+            if force:
+                logger.info("=" * 60)
+                logger.info("CYCLE START | %s | Mode: %s | FORCED", ms_to_iso(now_ms), self._config.run_mode.name)
+            else:
+                logger.debug("CYCLE START | %s | Mode: %s", ms_to_iso(now_ms), self._config.run_mode.name)
 
             # 4. Fetch full history for indicator computation (synchronizing up_to_ts across all pairs)
             all_latest_ts = []
@@ -215,7 +218,7 @@ class BotOrchestrator:
             target_up_to_ts = max(all_latest_ts) if all_latest_ts else now_ms
 
             candles_by_asset: Dict[str, list] = {}
-            for asset_name, pair in pairs.items():
+            for _asset_name, pair in pairs.items():
                 try:
                     full_history = self._candle_service.get_full_history(
                         symbol=pair,
@@ -277,6 +280,11 @@ class BotOrchestrator:
                 prices=prices,
             )
 
+            # If rebalance plan requires orders and not forced, emit cycle banner at INFO
+            if plan.orders and not force:
+                logger.info("=" * 60)
+                logger.info("CYCLE START | %s | Mode: %s — Action Plan: %d order(s) to execute", ms_to_iso(now_ms), self._config.run_mode.name, len(plan.orders))
+
             # 9. Dynamic Leverage Sync & Risk-check execute each order
             self._risk_manager.reset_cycle()
             executed_count = 0
@@ -323,6 +331,14 @@ class BotOrchestrator:
                     failed_symbols.add(base_sym)
                     continue
 
+                logger.info(
+                    "🎯 ACTION DECISION: Executing %s %s %.8f (reason: %s)",
+                    intent.side.value.upper(),
+                    intent.symbol,
+                    intent.amount,
+                    intent.reason,
+                )
+
                 try:
                     result = self._order_manager.execute(intent)
                     if result.status in (OrderStatus.FILLED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED):
@@ -331,24 +347,33 @@ class BotOrchestrator:
                         failed_symbols.add(intent.symbol)
                         failed_symbols.add(base_sym)
                     logger.info(
-                        "Order executed: %s %s %.8f — %s",
-                        intent.side.value,
+                        "✅ Order executed: %s %s %.8f — %s (Price: %s, Fee: %s)",
+                        intent.side.value.upper(),
                         intent.symbol,
-                        intent.amount,
+                        result.filled_amount or intent.amount,
                         result.status.value,
+                        f"{result.average_price:.4f}" if result.average_price else "MARKET",
+                        f"{result.fees:.6f} {result.fee_currency}" if result.fees else "0",
                     )
                 except Exception as e:
-                    logger.error("Order execution failed: %s", e)
+                    logger.error("❌ Order execution failed for %s %s: %s", intent.side.value, intent.symbol, e)
                     failed_symbols.add(intent.symbol)
                     failed_symbols.add(base_sym)
                     # Don't halt the cycle — continue with remaining orders for other symbols
 
             # 10. Update last processed candle timestamps
-            for pair, candles in candles_by_asset.items():
-                if candles:
-                    self._state.last_processed_candle_ts[pair] = (
-                        candles[-1].timestamp_ms
-                    )
+            for pair in pairs.values():
+                ts_candidates = []
+                if pair in self._state.last_processed_candle_ts:
+                    ts_candidates.append(self._state.last_processed_candle_ts[pair])
+                new_c = new_candles_by_pair.get(pair, [])
+                if new_c:
+                    ts_candidates.append(new_c[-1].timestamp_ms)
+                full_c = candles_by_asset.get(pair, [])
+                if full_c:
+                    ts_candidates.append(full_c[-1].timestamp_ms)
+                if ts_candidates:
+                    self._state.last_processed_candle_ts[pair] = max(ts_candidates)
 
             # Save state
             self._save_state(success=True)
@@ -357,16 +382,25 @@ class BotOrchestrator:
             elapsed = time.time() - cycle_start
             lev_str = f" | Lev: {decision.metadata.get('effective_leverage', 1.0):.1f}x" if decision.metadata else ""
             shield_str = " | 🛡️ SAFE_HAVEN" if decision.metadata and decision.metadata.get("safe_haven_active") else (" | 🚀 IN_MOMENTUM" if decision.metadata and decision.metadata.get("in_momentum") else "")
-            logger.info(
-                "CYCLE COMPLETE | %.1fs | Regime: %s%s%s | Orders: %d/%d executed",
-                elapsed,
-                decision.regime.value,
-                lev_str,
-                shield_str,
-                executed_count,
-                len(plan.orders),
-            )
-            logger.info("=" * 60)
+            if len(plan.orders) > 0 or force:
+                logger.info(
+                    "CYCLE COMPLETE | %.1fs | Regime: %s%s%s | Orders: %d/%d executed",
+                    elapsed,
+                    decision.regime.value,
+                    lev_str,
+                    shield_str,
+                    executed_count,
+                    len(plan.orders),
+                )
+                logger.info("=" * 60)
+            else:
+                logger.debug(
+                    "CYCLE COMPLETE | %.1fs | Regime: %s%s%s | Orders: 0/0 executed (idle)",
+                    elapsed,
+                    decision.regime.value,
+                    lev_str,
+                    shield_str,
+                )
 
             return True
 
@@ -388,6 +422,8 @@ class BotOrchestrator:
             self._state.critical_errors.append(
                 f"Cycle error: {type(e).__name__}: {e}"
             )
+            if len(self._state.critical_errors) > 100:
+                self._state.critical_errors = self._state.critical_errors[-100:]
             self._save_state(success=False)
 
             if self._consecutive_errors >= self._config.scheduler.max_consecutive_errors:
@@ -397,7 +433,7 @@ class BotOrchestrator:
                 )
                 raise SafeStopRequired(
                     f"Too many consecutive errors: {self._consecutive_errors}"
-                )
+                ) from e
 
             return False
 

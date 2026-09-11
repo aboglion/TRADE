@@ -16,14 +16,12 @@ Verifies:
 """
 
 import time
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from src.core.enums import AssetRegime, OrderSide, OrderType, PositionAction, Regime, RunMode
+from src.core.enums import OrderSide, OrderType, Regime, RunMode
 from src.core.models import (
     AssetHolding,
     BotState,
-    Candle,
     OrderIntent,
     OrderResult,
     PortfolioSnapshot,
@@ -34,7 +32,7 @@ from src.services.reconciliation_service import ReconciliationService
 from src.services.portfolio_service import PortfolioService
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.exchanges.exchange_gateway import ExchangeGateway
-from src.config.config_manager import ConfigManager, ExchangeConfig, RiskConfig, StrategyConfig
+from src.config.config_manager import ConfigManager, ExchangeConfig, StrategyConfig
 from src.strategy.regime_adaptive_strategy import RegimeAdaptiveStrategy
 from src.strategy.micro_satellite_strategy import MicroSatelliteStrategy
 from src.strategy.hybrid_strategy import HybridStrategy

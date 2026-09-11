@@ -6,16 +6,15 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock
+from typing import List
 
 import pytest
 
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.enums import OrderSide, OrderStatus, OrderType
-from src.core.models import BotState, Candle, OrderIntent, OrderResult
+from src.core.enums import OrderSide, OrderType
+from src.core.models import BotState, Candle, OrderIntent
 
 
 # ── Candle fixtures ──────────────────────────────────────────

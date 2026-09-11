@@ -5,7 +5,6 @@ Tests for server log filtering and /api/logs/download endpoint.
 import io
 import json
 from unittest.mock import MagicMock
-import pytest
 
 from src.web.server import DashboardRequestHandler
 

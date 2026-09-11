@@ -2,8 +2,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.enums import Regime
-import json
 import logging
 
 logging.basicConfig(level=logging.INFO)

@@ -79,6 +79,10 @@
                         <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
                     </button>
 
+                    <button class="btn btn-outline" id="apiKeysModalBtn" title="Manage Binance API keys (.env) & Exchange Connection" onclick="openApiKeysModal()">
+                        <span>🔑</span> <span class="btn-text">API Keys (.env)</span>
+                    </button>
+
                     <button class="btn btn-outline btn-conditions" id="conditionsModalBtn" title="View visual real-time strategy buy/sell conditions & logic" onclick="openConditionsModal()">
                         <span>🎯</span> <span class="btn-text">Strategy Conditions</span>
                     </button>
@@ -378,6 +382,10 @@
                 <button class="modal-close" id="closeTelegramModal">&times;</button>
             </div>
             <div class="modal-body">
+                <div style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); padding: 0.65rem 0.85rem; border-radius: 8px; font-size: 0.82rem; color: #93c5fd; margin-bottom: 0.85rem; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.1rem;">💾</span>
+                    <span><strong>שמירה ב-.env:</strong> כל ההגדרות נשמרות ישירות בקובץ <code>.env</code> המאובטח ומוגנות מפני דריסות Git.</span>
+                </div>
                 <p class="modal-desc">Configure Bot Token and Chat ID to receive instant alerts for executed trades:</p>
                 <div class="form-grid" style="grid-template-columns: 1fr; gap: 0.85rem;">
                     <div class="form-group" style="background: rgba(255, 255, 255, 0.04); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
@@ -423,6 +431,59 @@
                 <div style="display: flex; gap: 8px;">
                     <button class="btn btn-outline" id="cancelTelegramSave">Cancel</button>
                     <button class="btn btn-action" id="saveTelegramConfigBtn">Save Settings 💾</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Binance API Keys (.env) Settings -->
+    <div class="modal-backdrop" id="apiKeysModal">
+        <div class="modal-content glass" style="max-width: 580px;">
+            <div class="modal-header">
+                <h3>🔑 ניהול מפתחות API של Binance (.env)</h3>
+                <button class="modal-close" id="closeApiKeysModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); padding: 0.65rem 0.85rem; border-radius: 8px; font-size: 0.82rem; color: #6ee7b7; margin-bottom: 0.85rem; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.1rem;">🛡️</span>
+                    <span><strong>אבטחה מלאה:</strong> המפתחות נשמרים ישירות בקובץ <code>.env</code> שאינו מנוהל ב-Git ומוגן מדריסות ומחיקות.</span>
+                </div>
+
+                <div class="form-grid" style="grid-template-columns: 1fr; gap: 0.85rem;">
+                    <div class="form-group">
+                        <label for="binanceApiKeyInput">Binance API Key:</label>
+                        <div class="input-wrapper" style="position: relative;">
+                            <span class="input-icon">🔑</span>
+                            <input type="text" id="binanceApiKeyInput" class="form-input" placeholder="הזן API Key או השאר ריק ללא שינוי" autocomplete="off">
+                            <button type="button" id="toggleApiKeyVisibilityBtn" title="Show/Hide Key" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted, #94a3b8); cursor: pointer; padding: 4px; font-size: 1.1rem; z-index: 5;">👁️</button>
+                        </div>
+                        <span id="binanceKeyStatusHelp" class="help-text" style="font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">טוען סטטוס מפתח...</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="binanceApiSecretInput">Binance API Secret:</label>
+                        <div class="input-wrapper" style="position: relative;">
+                            <span class="input-icon">🔒</span>
+                            <input type="password" id="binanceApiSecretInput" class="form-input" placeholder="הזן API Secret חדש (או השאר ריק כדי לשמור על הקיים)" autocomplete="off">
+                            <button type="button" id="toggleApiSecretVisibilityBtn" title="Show/Hide Secret" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted, #94a3b8); cursor: pointer; padding: 4px; font-size: 1.1rem; z-index: 5;">👁️</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="background: rgba(255, 255, 255, 0.04); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                        <label for="confirmLiveToggle" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 0;">
+                            <span style="font-weight: 600; color: var(--text-main, #f8fafc);">אישור מצב LIVE ב-.env (CONFIRM_LIVE):</span>
+                            <input type="checkbox" id="confirmLiveToggle" style="width: 22px; height: 22px; accent-color: #ef4444; cursor: pointer;">
+                        </label>
+                    </div>
+                </div>
+
+                <div id="apiKeysStatusBox" style="margin-top: 1rem; padding: 0.75rem; border-radius: 8px; font-size: 0.85rem; display: none;"></div>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-outline" id="testBinanceConnectionBtn" title="בדיקת חיבור ל-Binance Spot ו-Futures">🧪 בדיקת חיבור ל-Binance</button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-outline" id="cancelApiKeysSave">ביטול</button>
+                    <button class="btn btn-action" id="saveApiKeysConfigBtn">שמור ב-.env 💾</button>
                 </div>
             </div>
         </div>

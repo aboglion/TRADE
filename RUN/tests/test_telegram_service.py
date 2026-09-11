@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from src.config.config_manager import ConfigManager, TelegramConfig
+from src.config.config_manager import ConfigManager
 from src.services.telegram_service import TelegramService
 
 
@@ -122,6 +122,10 @@ telegram:
         with tempfile.NamedTemporaryFile("w+", suffix=".yaml", delete=False) as tf:
             tf.write(yaml_content)
             tf_path = tf.name
+
+        import os
+        for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ENABLED", "TELEGRAM_DASHBOARD_URL"):
+            os.environ.pop(k, None)
 
         try:
             cm = ConfigManager(tf_path)

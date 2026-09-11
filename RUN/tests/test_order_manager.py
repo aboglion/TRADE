@@ -5,7 +5,7 @@ Tests for order manager — duplicate prevention, lifecycle tracking, crash reco
 import pytest
 from src.core.enums import OrderSide, OrderStatus, OrderType, RunMode
 from src.core.exceptions import DuplicateOrderError
-from src.core.models import BotState, OrderIntent, OrderResult
+from src.core.models import BotState, OrderIntent
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.services.order_manager import OrderManager
 

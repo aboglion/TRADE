@@ -5,7 +5,6 @@ Usage:
   python scripts/check_connection.py
 """
 
-import os
 import sys
 from pathlib import Path
 

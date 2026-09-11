@@ -323,12 +323,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_strategy_conditions()
         elif clean_api_path in ("/api/test_binance", "/api/binance/test"):
             self._handle_test_binance()
+        elif clean_api_path in ("/api/keys", "/api/api_keys"):
+            self._handle_get_keys()
         elif clean_path.startswith("/api/"):
             self._send_json({"error": f"API endpoint '{clean_path}' not found"}, status=404)
         else:
             # Fallback to serving static files (index.html, style.css, app.js)
             if clean_path in ("/", "", "/index", "/index.html"):
                 self.path = "/index.html"
+            elif clean_path.startswith("/static/"):
+                self.path = clean_path[len("/static"):]
             else:
                 self.path = clean_path
             try:
@@ -373,6 +377,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_update_telegram()
         elif clean_path == "/api/telegram/test":
             self._handle_test_telegram()
+        elif clean_path in ("/api/keys", "/api/api_keys"):
+            self._handle_update_keys()
         elif clean_path == "/api/mode":
             self._handle_switch_mode()
         else:
@@ -818,6 +824,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "No new closed candles",
             "Starting reconciliation...",
             "Reconciliation complete — state is consistent",
+            "Portfolio within threshold",
+            "Imported active position tracking state",
+            "Imported micro position tracking state",
+            "Allocation deviations:",
+            "Found 1 new closed candle",
+            "Found 2 new closed candle",
+            "Found 3 new closed candle",
+            "Found 0 new closed candle",
         )
         if os.path.exists(log_path):
             try:
@@ -852,6 +866,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 "No new closed candles",
                 "Starting reconciliation...",
                 "Reconciliation complete — state is consistent",
+                "Portfolio within threshold",
+                "Imported active position tracking state",
+                "Imported micro position tracking state",
+                "Allocation deviations:",
+                "Found 1 new closed candle",
+                "Found 2 new closed candle",
+                "Found 3 new closed candle",
+                "Found 0 new closed candle",
             )
             filtered = [
                 line for line in all_lines
@@ -875,15 +897,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             candidate_paths = []
             if self.log_file_path:
                 candidate_paths.append(Path(self.log_file_path))
-            if self.config and getattr(self.config, "logging", None) and getattr(self.config.logging, "file", None):
-                candidate_paths.append(Path(self.config.logging.file))
+            else:
+                if self.config and getattr(self.config, "logging", None) and getattr(self.config.logging, "file", None):
+                    candidate_paths.append(Path(self.config.logging.file))
 
-            project_dir = Path(__file__).resolve().parent.parent.parent.parent
-            candidate_paths.extend([
-                Path("logs/bot.log"),
-                project_dir / "RUN" / "logs" / "bot.log",
-                project_dir / "logs" / "bot.log",
-            ])
+                project_dir = Path(__file__).resolve().parent.parent.parent.parent
+                candidate_paths.extend([
+                    Path("logs/bot.log"),
+                    project_dir / "RUN" / "logs" / "bot.log",
+                    project_dir / "logs" / "bot.log",
+                ])
 
             cleared_any = False
             seen = set()
@@ -1014,7 +1037,6 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         btc_atr_pct = float((atr14 / df_btc_daily["Close"]).iloc[-1])
 
                         # ADX daily
-                        delta = df_btc_daily["Close"].diff()
                         high_diff = df_btc_daily["High"].diff()
                         low_diff = -df_btc_daily["Low"].diff()
                         pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
@@ -1939,8 +1961,33 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         return None
 
     def _handle_get_telegram(self) -> None:
+        try:
+            from src.utils.env_manager import load_dotenv
+            load_dotenv()
+        except Exception:
+            pass
+
         svc = self._get_telegram_service()
         token = svc.bot_token if svc else ""
+        chat_id = svc.chat_id if svc else ""
+        enabled = svc.enabled if svc else False
+        dash_url = svc.dashboard_url if svc else ""
+
+        # Fallback to os.environ / .env if service in memory has empty values
+        if not token and os.environ.get("TELEGRAM_BOT_TOKEN"):
+            token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+            if not chat_id:
+                chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+            if not dash_url:
+                dash_url = os.environ.get("TELEGRAM_DASHBOARD_URL", "").strip()
+            if os.environ.get("TELEGRAM_ENABLED") is not None:
+                enabled = os.environ.get("TELEGRAM_ENABLED", "").lower() in ("true", "1", "yes")
+            if svc:
+                svc.bot_token = token
+                svc.chat_id = chat_id
+                svc.enabled = enabled
+                svc.dashboard_url = dash_url
+
         masked_token = ""
         if token:
             if len(token) > 8:
@@ -1949,12 +1996,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 masked_token = "****"
 
         data = {
-            "enabled": svc.enabled if svc else False,
+            "enabled": enabled,
             "bot_token": token,
             "masked_token": masked_token,
-            "chat_id": svc.chat_id if svc else "",
-            "dashboard_url": svc.dashboard_url if svc else "",
-            "is_configured": svc.is_configured() if svc else False,
+            "chat_id": chat_id,
+            "dashboard_url": dash_url,
+            "is_configured": bool(token and chat_id),
+            "saved_in_env": bool(token and chat_id),
         }
         self._send_json(data)
 
@@ -1985,6 +2033,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 if hasattr(self.orchestrator, "_order_manager") and self.orchestrator._order_manager:
                     self.orchestrator._order_manager._telegram_service = svc
 
+            # 1. Persist directly into .env for permanent storage (git-safe)
+            try:
+                from src.utils.env_manager import update_env_file
+                update_env_file({
+                    "TELEGRAM_ENABLED": enabled,
+                    "TELEGRAM_BOT_TOKEN": bot_token,
+                    "TELEGRAM_CHAT_ID": chat_id,
+                    "TELEGRAM_DASHBOARD_URL": dashboard_url,
+                })
+                logger.info("Persisted Telegram settings directly into .env")
+            except Exception as ex:
+                logger.warning("Could not persist Telegram config into .env: %s", ex)
+
+            # 2. Persist into config.yaml and state_store
             try:
                 from pathlib import Path
                 from src.config.config_manager import ConfigManager
@@ -2014,15 +2076,109 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 self.config.telegram.chat_id = chat_id
                 self.config.telegram.dashboard_url = dashboard_url
 
-            logger.info("Telegram configuration updated via API (Enabled: %s, Chat ID: %s)", enabled, chat_id)
+            logger.info("Telegram configuration updated via API and saved to .env (Enabled: %s, Chat ID: %s)", enabled, chat_id)
             self._send_json({
                 "success": True,
-                "message": "Telegram settings saved successfully in configuration file!",
+                "message": "הגדרות טלגרם נשמרו בהצלחה בקובץ .env ובמערכת! (Telegram settings saved to .env)",
                 "enabled": enabled,
                 "is_configured": svc.is_configured(),
+                "saved_to_env": True,
             })
         except Exception as e:
             logger.error("Failed to update telegram configuration via API: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_get_keys(self) -> None:
+        try:
+            from src.utils.env_manager import load_dotenv
+            load_dotenv()
+        except Exception:
+            pass
+
+        binance_key = os.environ.get("BINANCE_API_KEY", "").strip().strip("'\"").strip()
+        binance_secret = os.environ.get("BINANCE_API_SECRET", "").strip().strip("'\"").strip()
+        has_key = bool(binance_key and binance_key not in ("your_api_key_here", ""))
+        has_secret = bool(binance_secret and binance_secret not in ("your_api_secret_here", ""))
+
+        masked_key = ""
+        if has_key:
+            if len(binance_key) >= 8:
+                masked_key = f"{binance_key[:4]}...{binance_key[-4:]}"
+            else:
+                masked_key = "****"
+
+        tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip().strip("'\"").strip()
+        tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip().strip("'\"").strip()
+        tg_enabled = os.environ.get("TELEGRAM_ENABLED", "false").lower() in ("true", "1", "yes")
+
+        masked_tg_token = ""
+        if tg_token:
+            if len(tg_token) >= 8:
+                masked_tg_token = f"{tg_token[:4]}...{tg_token[-4:]}"
+            else:
+                masked_tg_token = "****"
+
+        from pathlib import Path
+        env_file = str(Path("RUN/.env") if Path("RUN/.env").exists() else Path(".env"))
+
+        data = {
+            "binance": {
+                "configured": has_key and has_secret,
+                "has_key": has_key,
+                "has_secret": has_secret,
+                "masked_key": masked_key,
+                "key_length": len(binance_key) if has_key else 0,
+            },
+            "telegram": {
+                "configured": bool(tg_token and tg_chat),
+                "enabled": tg_enabled,
+                "has_token": bool(tg_token),
+                "has_chat_id": bool(tg_chat),
+                "masked_token": masked_tg_token,
+                "chat_id": tg_chat,
+            },
+            "confirm_live": os.environ.get("CONFIRM_LIVE", "").strip() == "YES_I_UNDERSTAND",
+            "env_file": env_file,
+        }
+        self._send_json(data)
+
+    def _handle_update_keys(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+
+            updates = {}
+            if "binance_api_key" in data:
+                raw_k = str(data["binance_api_key"]).strip()
+                if raw_k and not raw_k.startswith("****") and "..." not in raw_k:
+                    updates["BINANCE_API_KEY"] = raw_k
+            if "binance_api_secret" in data:
+                raw_s = str(data["binance_api_secret"]).strip()
+                if raw_s and not raw_s.startswith("****"):
+                    updates["BINANCE_API_SECRET"] = raw_s
+            if "confirm_live" in data:
+                updates["CONFIRM_LIVE"] = "YES_I_UNDERSTAND" if data["confirm_live"] else ""
+
+            if updates:
+                from src.utils.env_manager import update_env_file
+                update_env_file(updates)
+                logger.info("Updated API keys directly in .env: %s", list(updates.keys()))
+
+                # Update live gateway / config if running
+                if self.config and hasattr(self.config, "exchange"):
+                    if "BINANCE_API_KEY" in updates:
+                        self.config.exchange.api_key = updates["BINANCE_API_KEY"]
+                    if "BINANCE_API_SECRET" in updates:
+                        self.config.exchange.api_secret = updates["BINANCE_API_SECRET"]
+
+            self._send_json({
+                "success": True,
+                "message": "הגדרות ה-API נשמרו בהצלחה בקובץ .env! (API keys saved to .env)",
+                "updated_keys": list(updates.keys()),
+            })
+        except Exception as e:
+            logger.error("Failed to update API keys: %s", e)
             self._send_json({"error": str(e)}, status=500)
 
     def _handle_test_telegram(self) -> None:
@@ -2099,6 +2255,12 @@ def run_dashboard_server(
     max_retries: int = 15,
 ) -> ThreadedHTTPServer:
     """Initialize and start the dashboard HTTP server."""
+    try:
+        from src.utils.env_manager import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+
     DashboardRequestHandler.config = config
     DashboardRequestHandler.gateway = gateway
     DashboardRequestHandler.state_store = state_store

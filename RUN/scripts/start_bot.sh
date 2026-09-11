@@ -29,7 +29,8 @@ if [ -z "$PYTHON" ]; then
 fi
 
 # Stop existing instance cleanly before starting
-"$SCRIPT_DIR/stop_bot.sh" "$PORT" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/stop_bot.sh" "$PORT" --hard >/dev/null 2>&1 || true
+rm -f "${LOGS_DIR}/stop.flag" "${LOGS_DIR}/kill.flag"
 
 # Start via python subprocess with start_new_session to ensure true daemonization
 "$PYTHON" -c "
@@ -46,7 +47,7 @@ subprocess.Popen(
         '--dashboard',
         '--port', '$PORT'
     ],
-    cwd='${PROJECT_DIR}',
+    cwd='${RUN_DIR}',
     stdin=subprocess.DEVNULL,
     stdout=log_file,
     stderr=subprocess.STDOUT,

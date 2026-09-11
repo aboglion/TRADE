@@ -9,7 +9,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LOGS_DIR="${PROJECT_DIR}/logs"
+LOGS_DIR="${LOGS_DIR:-${PROJECT_DIR}/logs}"
 PORT="${1:-8090}"
 MODE_ARG="${2:-}"
 

@@ -80,20 +80,35 @@ def log_runner(msg: str) -> None:
 def send_telegram_crash_alert(exit_code: int, last_logs: List[str]) -> None:
     """Send an emergency crash notification to Telegram if configured in config.yaml or .env."""
     try:
-        config_path = RUN_DIR / "config.yaml"
-        if not config_path.exists():
-            return
+        try:
+            from src.utils.env_manager import load_dotenv
+            load_dotenv()
+        except Exception:
+            pass
 
-        import yaml
         import html
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+        enabled = os.environ.get("TELEGRAM_ENABLED", "false").lower() in ("true", "1", "yes")
+        dash_url = os.environ.get("TELEGRAM_DASHBOARD_URL", "").strip() or "http://localhost:8090"
 
-        tg_cfg = cfg.get("telegram", {})
-        enabled = tg_cfg.get("enabled", False)
-        bot_token = str(tg_cfg.get("bot_token", "")).strip()
-        chat_id = str(tg_cfg.get("chat_id", "")).strip()
-        dash_url = str(tg_cfg.get("dashboard_url", "")).strip() or "http://localhost:8090"
+        # If not in env, check config.yaml
+        if not bot_token or not chat_id:
+            config_path = RUN_DIR / "config.yaml"
+            if config_path.exists():
+                import yaml
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+
+                tg_cfg = cfg.get("telegram", {})
+                if not enabled and "enabled" in tg_cfg:
+                    enabled = bool(tg_cfg.get("enabled", False))
+                if not bot_token:
+                    bot_token = str(tg_cfg.get("bot_token", "")).strip()
+                if not chat_id:
+                    chat_id = str(tg_cfg.get("chat_id", "")).strip()
+                if not dash_url:
+                    dash_url = str(tg_cfg.get("dashboard_url", "")).strip() or "http://localhost:8090"
 
         if not enabled or not bot_token or not chat_id:
             return
@@ -263,6 +278,14 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
             "Portfolio snapshot:",
             "No state file found at",
             "No new closed candles",
+            "Portfolio within threshold",
+            "Imported active position tracking state",
+            "Imported micro position tracking state",
+            "Allocation deviations:",
+            "Found 1 new closed candle",
+            "Found 2 new closed candle",
+            "Found 3 new closed candle",
+            "Found 0 new closed candle",
         )
         if log_path.exists():
             try:
@@ -965,6 +988,12 @@ def main() -> None:
     except Exception:
         pass
 
+    try:
+        from src.utils.env_manager import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+
     log_runner("Starting Bot Supervisor loop 24/7...")
 
     shutdown_flag = False
@@ -1015,12 +1044,12 @@ def main() -> None:
             except Exception:
                 pass
 
-            def stream_output() -> None:
+            def stream_output(p=proc, buffer=recent_output_lines) -> None:
                 try:
-                    if proc.stdout:
-                        for line in iter(proc.stdout.readline, ''):
+                    if p.stdout:
+                        for line in iter(p.stdout.readline, ''):
                             stripped = line.rstrip('\r\n')
-                            recent_output_lines.append(stripped)
+                            buffer.append(stripped)
                             print(line, end='', flush=True)
                 except Exception:
                     pass

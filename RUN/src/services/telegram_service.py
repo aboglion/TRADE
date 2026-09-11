@@ -114,6 +114,7 @@ class TelegramService:
             reason = str(order_data.get("reason", "Strategy rebalance") or "Strategy rebalance").strip()
 
             total_usd = amount * price
+            price_str = f"${price:,.4f}" if (0 < price < 10) else f"${price:,.2f}"
             side_is_buy = "BUY" in side_str
             side_emoji = "🟢" if side_is_buy else "🔴"
             action_text = "BUY" if side_is_buy else "SELL"
@@ -131,7 +132,7 @@ class TelegramService:
                 f"{side_emoji} <b>Order Type:</b> {action_text}\n"
                 f"🪙 <b>Asset:</b> <code>{symbol}</code>\n"
                 f"📊 <b>Amount:</b> <code>{amount:.6f}</code>\n"
-                f"💵 <b>Execution Price:</b> <code>${price:,.2f}</code>\n"
+                f"💵 <b>Execution Price:</b> <code>{price_str}</code>\n"
                 f"💰 <b>Total Value:</b> <code>${total_usd:,.2f}</code>\n"
                 f"🏷️ <b>Fee:</b> <code>{fees:.6f} {fee_curr}</code>\n"
                 f"🎯 <b>Reason/Strategy:</b> {reason}\n"

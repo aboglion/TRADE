@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.enums import OrderSide, OrderStatus, OrderType, Regime, RunMode
-from src.core.exceptions import ExchangeAuthError, InvalidOrderError
+from src.core.exceptions import ExchangeAuthError
 from src.core.models import (
     AssetHolding,
     BotState,
@@ -132,7 +132,6 @@ def test_orchestrator_symbol_failure_isolation():
     orchestrator._order_manager.execute = MagicMock(return_value=result_failed)
     risk_manager.approve_order = MagicMock(return_value=(True, ""))
 
-    pairs = {"BTC": "BTC/USDT"}
     candles = [Candle(timestamp_ms=1000, open=60000, high=60100, low=59900, close=60000, volume=10, is_closed=True)]
     plan = MagicMock(orders=[intent1, intent2])
     decision = StrategyDecision(

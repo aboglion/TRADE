@@ -4,8 +4,7 @@ Tests for candle service — gap detection, deduplication, closed candle filteri
 
 import pytest
 from tests import make_candle, make_candle_series
-from src.core.exceptions import DataGapError, InsufficientDataError
-from src.core.models import Candle
+from src.core.exceptions import DataGapError
 from src.data.candle_service import CandleService
 
 

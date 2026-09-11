@@ -13,8 +13,7 @@ Validates all critical software, execution, strategy, and communication fixes:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 from src.core.enums import OrderSide, OrderStatus, OrderType, Regime, RunMode
 from src.core.models import (
@@ -31,7 +30,7 @@ from src.exchanges.exchange_gateway import ExchangeGateway
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.orchestrator import BotOrchestrator
 from src.services.portfolio_service import PortfolioService
-from src.config.config_manager import BotConfig, ExchangeConfig, RiskConfig
+from src.config.config_manager import BotConfig, ExchangeConfig
 
 
 def test_orchestrator_order_status_import_and_execution_count():
@@ -78,7 +77,6 @@ def test_orchestrator_order_status_import_and_execution_count():
     risk_manager.approve_order = MagicMock(return_value=(True, ""))
 
     # Prepare mock cycle components
-    pairs = {"BTC": "BTC/USDT"}
     candles = [Candle(timestamp_ms=1000, open=60000, high=60100, low=59900, close=60000, volume=10, is_closed=True)]
     plan = MagicMock(orders=[mock_intent])
     decision = StrategyDecision(

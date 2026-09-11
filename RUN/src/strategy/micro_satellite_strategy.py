@@ -5,12 +5,12 @@ Micro Satellite Strategy for short-term momentum and trend acceleration trades.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
-from src.core.enums import AssetRegime, OrderSide, PositionAction, Regime
+from src.core.enums import AssetRegime, PositionAction, Regime
 from src.core.models import Candle, PortfolioSnapshot, StrategyDecision, StrategySignal, TargetAllocation
 from src.strategy.regime_adaptive_strategy import candles_to_dataframe
 
@@ -71,7 +71,7 @@ class MicroSatelliteStrategy:
         positions = state_dict.get("positions")
         if isinstance(positions, dict):
             self._positions = positions
-            logger.info("Imported micro position tracking state: %s", list(positions.keys()))
+            logger.debug("Imported micro position tracking state: %s", list(positions.keys()))
 
     def compute_signals(
         self,

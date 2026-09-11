@@ -10,12 +10,10 @@ Tests:
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock
 
-import pytest
 
-from src.core.enums import OrderSide, OrderStatus, OrderType, PositionAction, Regime
+from src.core.enums import OrderSide, OrderStatus, OrderType
 from src.core.models import (
     BotState,
     Candle,
@@ -23,8 +21,6 @@ from src.core.models import (
     OrderResult,
     PortfolioSnapshot,
     AssetHolding,
-    StrategyDecision,
-    TargetAllocation,
 )
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.services.order_manager import OrderManager
@@ -108,7 +104,7 @@ def test_micro_satellite_strategy_timestamp_bars_held():
     }
     strategy.import_state(state)
 
-    decision = strategy.compute_signals({"BTC/USDT": candles}, portfolio)
+    _ = strategy.compute_signals({"BTC/USDT": candles}, portfolio)
     exported = strategy.export_state()
     pos = exported["positions"]["BTC"]
 

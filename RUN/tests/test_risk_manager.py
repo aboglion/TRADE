@@ -3,7 +3,6 @@ Tests for risk manager — limit enforcement, kill switch, symbol validation.
 """
 
 import time
-import pytest
 from src.config.config_manager import RiskConfig
 from src.core.enums import OrderSide, OrderType
 from src.core.models import (

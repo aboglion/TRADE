@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Tuple
+from typing import Tuple
 
 from src.config.config_manager import RiskConfig
 from src.core.enums import OrderType
@@ -62,6 +62,7 @@ class RiskManager(IRiskManager):
             lambda i, p: self._check_min_time_between_orders(i, p),
             lambda i, p: self._check_max_portfolio_change(i, p),
             lambda i, p: self._check_min_order_value(i, p),
+            lambda i, p: self._check_sufficient_balance(i, p),
         ]
 
         for check in checks:
@@ -216,4 +217,38 @@ class RiskManager(IRiskManager):
                 f"Order value ${order_value:.2f} below minimum "
                 f"${self._config.min_order_value_usd:.2f}",
             )
+        return True, ""
+
+    def _check_sufficient_balance(
+        self, intent: OrderIntent, portfolio: PortfolioSnapshot
+    ) -> Tuple[bool, str]:
+        """
+        Check that account has sufficient free balance or margin to execute the order.
+        Position-reducing orders always pass since they release capital/margin.
+        """
+        if self._is_position_reducing_order(intent, portfolio):
+            return True, ""
+
+        base = intent.symbol.split("/")[0].split(":")[0]
+        holding = portfolio.holdings.get(base)
+
+        # Spot sell requires sufficient free tokens
+        if intent.side.value.upper() == "SELL" and (holding is None or holding.total >= 0):
+            available_qty = holding.free if holding else 0.0
+            if intent.amount > (available_qty + 1e-6) and not getattr(intent, "reduce_only", False):
+                is_futures_portfolio = any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
+                if not is_futures_portfolio:
+                    return (
+                        False,
+                        f"Insufficient free balance for {base}: need {intent.amount:.8f}, available {available_qty:.8f}",
+                    )
+
+        # Buy orders require sufficient quote currency (USDT)
+        if intent.side.value.upper() == "BUY":
+            usdt_holding = portfolio.holdings.get("USDT")
+            free_usdt = usdt_holding.free if usdt_holding else 0.0
+            order_value = self._get_order_value(intent)
+            if free_usdt <= 0.0 and order_value > 0.0:
+                return False, f"Insufficient balance: free USDT is ${free_usdt:.2f}"
+
         return True, ""

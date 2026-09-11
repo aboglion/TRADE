@@ -3,7 +3,6 @@ Unit tests for float precision, market order selection, estimated_price valuatio
 """
 
 from unittest.mock import MagicMock
-import pytest
 from src.utils.math_utils import (
     compute_order_amount,
     get_market_constraints,
@@ -155,6 +154,5 @@ def test_regime_detection_with_1000_candles():
             volume=100.0,
         ))
 
-    candles_by_asset = {"BTC/USDT": candles}
     regime = strategy._determine_regime(candles)
     assert regime == Regime.BULL

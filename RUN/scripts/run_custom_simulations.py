@@ -1,11 +1,7 @@
-import os
-import sys
 from datetime import datetime, timedelta
-import pandas as pd
 from src.core.enums import RunMode
 from src.data.live_provider import LiveDataProvider
 from src.data.candle_service import CandleService
-from src.exchanges.dry_run_exchange import DryRunExchange
 from src.services.portfolio_service import PortfolioService
 from src.services.risk_manager import RiskManager
 from src.services.state_store import JsonStateStore
@@ -13,7 +9,7 @@ from src.strategy.regime_adaptive_strategy import RegimeAdaptiveStrategy
 from src.strategy.micro_satellite_strategy import MicroSatelliteStrategy
 from src.strategy.hybrid_strategy import HybridStrategy
 from src.orchestrator import BotOrchestrator
-from src.core.models import BotState, Candle
+from src.core.models import BotState
 from src.config.config_manager import ConfigManager
 import logging
 
@@ -31,7 +27,6 @@ def run_sim(duration_days: int, start_btc: float, start_eth: float, start_usdt: 
     config = cm.load()
     cm._validate = orig_validate
     
-    import dataclasses
     
     # Bypass frozen dataclass
     object.__setattr__(config.strategy, "warmup_candles", 900)

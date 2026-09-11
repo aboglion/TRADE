@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.core.enums import AssetRegime, OrderSide, OrderType, PositionAction, Regime
+from src.core.enums import AssetRegime, PositionAction, Regime
 from src.core.interfaces import IStrategy
 from src.core.models import (
     Candle,
@@ -155,6 +155,8 @@ class RegimeAdaptiveStrategy(IStrategy):
         self._in_momentum: bool = False
         self._safe_haven_active: bool = False
         self._dist_from_5d_high_pct: float = 0.0
+        self._prev_regime: Optional[Regime] = None
+        self._prev_safe_haven: Optional[bool] = None
 
     def export_state(self) -> Dict[str, Any]:
         """Export state for persistence in BotState.strategy_state."""
@@ -175,7 +177,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         positions = state_dict.get("positions")
         if isinstance(positions, dict):
             self._positions = positions
-            logger.info("Imported active position tracking state: %s", list(positions.keys()))
+            logger.debug("Imported active position tracking state: %s", list(positions.keys()))
             
         val_bull_peak = state_dict.get("bull_peak")
         self._bull_peak = float(val_bull_peak) if val_bull_peak is not None else 0.0
@@ -245,7 +247,7 @@ class RegimeAdaptiveStrategy(IStrategy):
             },
         )
 
-        logger.info(
+        logger.debug(
             "Strategy decision: regime=%s | Lev: %.1fx | Momentum: %s | SafeHaven: %s (5d_PB: %.2f%%) | targets=%s",
             regime.value,
             self._effective_leverage,
@@ -289,13 +291,24 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         regime = Regime.BULL if latest_close > latest_sma else Regime.BEAR
 
-        logger.info(
-            "Regime detection: BTC Daily Close=%.2f, SMA%d=%.2f → %s",
-            latest_close,
-            self._sma_period,
-            latest_sma,
-            regime.value,
-        )
+        if self._prev_regime is not None and self._prev_regime != regime:
+            logger.info(
+                "🔄 REGIME TRANSITION: %s → %s (BTC Daily Close=%.2f vs SMA%d=%.2f)",
+                self._prev_regime.value.upper(),
+                regime.value.upper(),
+                latest_close,
+                self._sma_period,
+                latest_sma,
+            )
+        else:
+            logger.debug(
+                "Regime detection: BTC Daily Close=%.2f, SMA%d=%.2f → %s",
+                latest_close,
+                self._sma_period,
+                latest_sma,
+                regime.value,
+            )
+        self._prev_regime = regime
 
         return regime
 
@@ -327,6 +340,13 @@ class RegimeAdaptiveStrategy(IStrategy):
         ema50_daily = btc_daily.ewm(span=50, adjust=False).mean()
         sma150_daily = btc_daily.rolling(self._sma_period).mean()
 
+        if btc_daily.empty:
+            logger.error("No daily BTC candles available for strategy evaluation")
+            for symbol in candles_by_asset:
+                target_weights[symbol] = 0.0
+            target_weights["USDT"] = 1.0
+            return target_weights, signals, Regime.BEAR
+
         latest_btc = btc_daily.iloc[-1]
         latest_ema9 = ema9_daily.dropna().iloc[-1] if not ema9_daily.dropna().empty else latest_btc
         latest_ema20 = ema20_daily.dropna().iloc[-1] if not ema20_daily.dropna().empty else latest_btc
@@ -352,9 +372,6 @@ class RegimeAdaptiveStrategy(IStrategy):
         latest_dip = intraday_max_dip.dropna().iloc[-1] if not intraday_max_dip.dropna().empty else 0.0
 
         # Daily ADX on BTC for trend strength conviction
-        delta = btc_daily.diff()
-        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
-        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, min_periods=14).mean()
         high_diff = btc_high.diff()
         low_diff = -btc_low.diff()
         pos_dm = np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0.0)
@@ -371,17 +388,25 @@ class RegimeAdaptiveStrategy(IStrategy):
         # Bear regime triggers if BTC < SMA150 OR fast breakdown (BTC < EMA20 and EMA20 < EMA50)
         is_fast_bear_breakdown = (latest_btc < latest_ema20) and (latest_ema20 < latest_ema50)
         is_bear = (latest_btc < latest_sma150) or is_fast_bear_breakdown or (regime == Regime.BEAR)
-        is_pullback = (latest_btc < latest_ema20) and not is_bear
         is_bullish = (latest_btc >= latest_ema20) and not is_bear
 
         # ── 1. BEAR REGIME (Systematic Short Hedge) ───────────
         if is_bear:
-            logger.info(
-                "🐻 BEAR REGIME ACTIVE: %s. %.0f%% @ %.1fx Short BTC hedge active.",
-                "Fast Breakdown (BTC < EMA20 & EMA20 < EMA50)" if is_fast_bear_breakdown else f"Macro Bear (BTC < SMA{self._sma_period})",
-                self._bear_short_hedge * 100,
-                self._short_leverage,
-            )
+            if self._prev_regime != Regime.BEAR:
+                logger.info(
+                    "🐻 BEAR REGIME ACTIVATED: %s. %.0f%% @ %.1fx Short BTC hedge active.",
+                    "Fast Breakdown (BTC < EMA20 & EMA20 < EMA50)" if is_fast_bear_breakdown else f"Macro Bear (BTC < SMA{self._sma_period})",
+                    self._bear_short_hedge * 100,
+                    self._short_leverage,
+                )
+            else:
+                logger.debug(
+                    "🐻 BEAR REGIME ACTIVE: %s. %.0f%% @ %.1fx Short BTC hedge active.",
+                    "Fast Breakdown (BTC < EMA20 & EMA20 < EMA50)" if is_fast_bear_breakdown else f"Macro Bear (BTC < SMA{self._sma_period})",
+                    self._bear_short_hedge * 100,
+                    self._short_leverage,
+                )
+            self._prev_regime = Regime.BEAR
             self._bull_peak = 0.0
             self._bars_since_circuit_trip = 999
             self._effective_leverage = 0.0
@@ -437,14 +462,27 @@ class RegimeAdaptiveStrategy(IStrategy):
                 self._safe_haven_active = True
                 selected_lev = 1.0
                 lev_reason = f"🛡️ Crash Shield Safe Haven (5d_pb={btc_pb_from_5d*100:.2f}%, BTC=${latest_btc:,.0f} vs EMA9=${latest_ema9:,.0f})"
-                logger.info(
-                    "🛡️ CRASH SHIELD ACTIVE: BTC pullback %.2f%% (cutoff=%.2f%%) or Close < EMA9 ($%.2f < $%.2f). De-leveraging to Safe Haven (60%% Cash, 30%% Spot, 10%% Micro). Capital 100%% protected!",
-                    btc_pb_from_5d * 100, self._momentum_cutoff_pct * 100, latest_btc, latest_ema9,
-                )
+                if self._prev_safe_haven is not True:
+                    logger.info(
+                        "🛡️ CRASH SHIELD ACTIVATED: BTC pullback %.2f%% (cutoff=%.2f%%) or Close < EMA9 ($%.2f < $%.2f). De-leveraging to Safe Haven (60%% Cash, 30%% Spot, 10%% Micro). Capital 100%% protected!",
+                        btc_pb_from_5d * 100, self._momentum_cutoff_pct * 100, latest_btc, latest_ema9,
+                    )
+                else:
+                    logger.debug(
+                        "🛡️ CRASH SHIELD ACTIVE: BTC pullback %.2f%% (cutoff=%.2f%%) or Close < EMA9 ($%.2f < $%.2f). De-leveraging to Safe Haven.",
+                        btc_pb_from_5d * 100, self._momentum_cutoff_pct * 100, latest_btc, latest_ema9,
+                    )
+                self._prev_safe_haven = True
                 total_crypto_weight = self._safe_spot_weight
             else:
                 # 🚀 FULL CONVICTION LEVERAGE ENGINE ACTIVE!
+                if self._prev_safe_haven is True:
+                    logger.info(
+                        "🚀 CRASH SHIELD DEACTIVATED: Momentum recovered (5d_pb=%.2f%%, BTC=$%s vs EMA9=$%s). Resuming dynamic leverage.",
+                        btc_pb_from_5d * 100, f"{latest_btc:,.0f}", f"{latest_ema9:,.0f}",
+                    )
                 self._safe_haven_active = False
+                self._prev_safe_haven = False
                 if latest_atr_pct < 0.022 and latest_adx >= 24.0:
                     selected_lev = self._conviction_leverage # 10.0x Conviction Rocket!
                     lev_reason = f"🚀 Conviction Rocket 10x (ATR%={latest_atr_pct*100:.2f}%, ADX={latest_adx:.1f})"
@@ -509,7 +547,7 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         effective_leverage = selected_lev
         self._effective_leverage = effective_leverage
-        logger.info(
+        logger.debug(
             "Tactical leverage evaluation: effective=%.1fx | safe_haven=%s | in_momentum=%s (%s)",
             effective_leverage, self._safe_haven_active, self._in_momentum, lev_reason,
         )

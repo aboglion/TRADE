@@ -13,20 +13,14 @@ Validates:
 9. RegimeAdaptiveStrategy pyramiding pullback calculation from previous entry.
 """
 
-import json
-import os
-import threading
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-from src.core.enums import OrderSide, OrderType, PositionAction, Regime, RunMode
+from src.core.enums import OrderSide, OrderType, Regime, RunMode
 from src.core.models import (
     AssetHolding,
     BotState,
-    Candle,
     OrderIntent,
     PortfolioSnapshot,
     TargetAllocation,

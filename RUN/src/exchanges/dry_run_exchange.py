@@ -13,7 +13,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from src.core.enums import OrderSide, OrderStatus, OrderType
+from src.core.enums import OrderSide, OrderStatus
 from src.core.models import Candle, OrderIntent, OrderResult
 
 logger = logging.getLogger("bot.dry_run")
@@ -119,13 +119,13 @@ class DryRunExchange:
             tf_ms = self._timeframe_to_ms(timeframe)
 
             for row in raw:
-                ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
+                ts, o, h, lo, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
                 closed = (now_ms >= ts + tf_ms)
                 candles.append(Candle(
                     timestamp_ms=int(ts),
                     open=float(o),
                     high=float(h),
-                    low=float(l),
+                    low=float(lo),
                     close=float(c),
                     volume=float(v) if v else 0.0,
                     is_closed=closed,
@@ -237,8 +237,11 @@ class DryRunExchange:
 
     def set_leverage(self, leverage: int | float, symbol: str) -> None:
         """Set leverage for a simulated futures market symbol."""
-        self._current_leverage[symbol] = float(leverage)
-        logger.info("[DRY_RUN] Set leverage=%.1fx for %s", leverage, symbol)
+        lev_float = float(leverage)
+        if self._current_leverage.get(symbol) == lev_float:
+            return
+        self._current_leverage[symbol] = lev_float
+        logger.debug("[DRY_RUN] Set leverage=%.1fx for %s", leverage, symbol)
 
     def _get_active_leverage(self, symbol: str) -> float:
         levs = getattr(self, "_current_leverage", {})

@@ -16,22 +16,21 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import ccxt
 
 from src.config.config_manager import ExchangeConfig
-from src.core.enums import OrderSide, OrderStatus, OrderType, RunMode
+from src.core.enums import OrderStatus, RunMode
 from src.core.exceptions import (
     ExchangeAuthError,
     ExchangeConnectionError,
-    ExchangeNotAvailableError,
     ExchangeRateLimitError,
     InsufficientBalanceError,
     InvalidOrderError,
 )
 from src.core.models import Candle, OrderIntent, OrderResult
-from src.utils.network_utils import get_outbound_ip, get_whitelist_ip_summary
+from src.utils.network_utils import get_whitelist_ip_summary
 
 logger = logging.getLogger("bot.exchange")
 
@@ -218,13 +217,13 @@ class ExchangeGateway:
         tf_ms = self._timeframe_to_ms(timeframe)
 
         for row in raw:
-            ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
+            ts, o, h, lo, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
             closed = (now_ms >= ts + tf_ms)
             candles.append(Candle(
                 timestamp_ms=int(ts),
                 open=float(o),
                 high=float(h),
-                low=float(l),
+                low=float(lo),
                 close=float(c),
                 volume=float(v) if v else 0.0,
                 is_closed=closed,
@@ -296,9 +295,9 @@ class ExchangeGateway:
                 try:
                     raw = self._retry(lambda: self.exchange.fetch_balance())
                     logger.info("Portfolio Margin fallback succeeded! Running with portfolioMargin=%s", not curr_pm)
-                except Exception:
+                except Exception as err:
                     self.exchange.options["portfolioMargin"] = curr_pm
-                    raise e
+                    raise e from err
             else:
                 raise
         result: Dict[str, Dict[str, float]] = {}
@@ -332,9 +331,9 @@ class ExchangeGateway:
                 try:
                     positions = self._retry(lambda: self.exchange.fetch_positions())
                     return [p for p in positions if abs(float(p.get("contracts", 0) or 0)) > 0]
-                except Exception:
+                except Exception as err:
                     self.exchange.options["portfolioMargin"] = curr_pm
-                    raise e
+                    raise e from err
             raise
         except AttributeError:
             # exchange doesn't support fetch_positions
@@ -370,6 +369,8 @@ class ExchangeGateway:
         }
         if intent.order_type.value == "limit" and "timeInForce" not in params:
             params["timeInForce"] = "GTC"
+        if self._config.market_type == "future" and getattr(intent, "reduce_only", False):
+            params["reduceOnly"] = True
 
         # Apply strict exchange precision formatting to prevent API error -1111
         try:
@@ -425,9 +426,9 @@ class ExchangeGateway:
                 raw_response=raw,
             )
         except ccxt.InsufficientFunds as e:
-            raise InsufficientBalanceError(str(e))
+            raise InsufficientBalanceError(str(e)) from e
         except (ccxt.InvalidOrder, ccxt.BadRequest) as e:
-            raise InvalidOrderError(str(e))
+            raise InvalidOrderError(str(e)) from e
 
     @staticmethod
     def _extract_fee(raw: Dict[str, Any]) -> Tuple[float, str]:
@@ -588,8 +589,8 @@ class ExchangeGateway:
                         f"  3. Check IP Whitelist restrictions: if enabled, add server IP: {get_whitelist_ip_summary()}\n"
                         f"  4. Verify BINANCE_API_KEY and BINANCE_API_SECRET in your .env file.\n"
                         f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
-                    )
-                raise ExchangeAuthError(f"Authentication failed: {e}")
+                    ) from e
+                raise ExchangeAuthError(f"Authentication failed: {e}") from e
             except Exception as e:
                 err_msg = str(e)
                 if "-2015" in err_msg or "Invalid API-key" in err_msg:
@@ -602,38 +603,42 @@ class ExchangeGateway:
                         f"  3. Check IP Whitelist restrictions: if enabled, add server IP: {get_whitelist_ip_summary()}\n"
                         f"  4. Verify BINANCE_API_KEY and BINANCE_API_SECRET in your .env file.\n"
                         f"  (Note: If you intended Spot trading instead of Futures, set 'market_type: spot' in config.yaml)"
-                    )
+                    ) from e
                 if isinstance(e, ccxt.RateLimitExceeded):
                     if attempt < retries:
                         wait = (delay_ms * (2 ** attempt)) / 1000
                         logger.warning(
-                            "Rate limited, waiting %.1fs (attempt %d/%d)",
-                            wait, attempt + 1, retries,
+                            "⚠️ Exchange Rate Limited: %s — waiting %.1fs (attempt %d/%d)",
+                            e, wait, attempt + 1, retries,
                         )
                         time.sleep(wait)
                         continue
                     else:
-                        raise ExchangeRateLimitError(str(e))
+                        logger.error("❌ Exchange Rate Limit exceeded permanently: %s", e)
+                        raise ExchangeRateLimitError(str(e)) from e
                 elif isinstance(e, _TRANSIENT_ERRORS):
                     if attempt < retries:
                         wait = (delay_ms * (2 ** attempt)) / 1000
                         logger.warning(
-                            "Transient error: %s, retrying in %.1fs (attempt %d/%d)",
-                            type(e).__name__, wait, attempt + 1, retries,
+                            "⚠️ Exchange communication issue: %s — %s, retrying in %.1fs (attempt %d/%d)",
+                            type(e).__name__, e, wait, attempt + 1, retries,
                         )
                         time.sleep(wait)
                         continue
                     else:
+                        logger.error("❌ Exchange communication failed after %d retries: %s — %s", retries, type(e).__name__, e)
                         raise ExchangeConnectionError(
                             f"Exchange unreachable after {retries} retries: {e}"
-                        )
+                        ) from e
                 elif isinstance(e, (ccxt.BadSymbol, getattr(ccxt, 'SymbolNotFound', ccxt.BadSymbol))):
-                    raise InvalidOrderError(f"Symbol not supported or invalid: {e}")
+                    logger.error("❌ Invalid or unsupported exchange symbol: %s", e)
+                    raise InvalidOrderError(f"Symbol not supported or invalid: {e}") from e
                 elif isinstance(e, (ccxt.InsufficientFunds, ccxt.InvalidOrder, ccxt.BadRequest)):
+                    logger.error("❌ Exchange order error (%s): %s", type(e).__name__, e)
                     raise
                 elif isinstance(e, ccxt.BaseError):
-                    logger.error("Unexpected CCXT error: %s", e)
-                    raise ExchangeConnectionError(str(e))
+                    logger.error("❌ Exchange API error response: %s — %s", type(e).__name__, e)
+                    raise ExchangeConnectionError(str(e)) from e
                 raise
 
     @staticmethod

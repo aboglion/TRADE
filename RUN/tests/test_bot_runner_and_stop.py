@@ -1,5 +1,4 @@
 import os
-import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -43,15 +42,22 @@ def test_stop_flag_prevents_emergency_fallback(tmp_path: Path):
             stop_flag.unlink()
 
 
-def test_stop_bot_script_execution():
+def test_stop_bot_script_execution(tmp_path: Path):
     """Verify stop_bot.sh executes cleanly and returns exit code 0."""
     stop_script = Path(__file__).parent.parent / "scripts" / "stop_bot.sh"
     assert stop_script.exists()
     assert os.access(str(stop_script), os.X_OK)
 
-    res = subprocess.run([str(stop_script), "18099"], capture_output=True, text=True)
+    isolated_env = os.environ.copy()
+    isolated_env["LOGS_DIR"] = str(tmp_path)
+    res = subprocess.run([str(stop_script), "18099"], capture_output=True, text=True, env=isolated_env)
     assert res.returncode == 0
     assert "Stopped all bot background processes" in res.stdout
+
+    # Clean up real logs stop.flag if any exists
+    real_stop_flag = Path(__file__).parent.parent.parent / "logs" / "stop.flag"
+    if real_stop_flag.exists():
+        real_stop_flag.unlink()
 
 
 def test_fallback_crash_handler_status_and_error():

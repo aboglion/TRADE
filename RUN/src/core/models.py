@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional
 
 from src.core.enums import (
     AssetRegime,
-    MicroRegime,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -111,6 +110,7 @@ class OrderIntent:
     estimated_price: Optional[float] = None # Reference price for risk check / market order valuation
     reason: str = ""                    # Human-readable justification
     candle_ts: Optional[int] = None     # Candle that triggered this intent
+    reduce_only: bool = False           # Flag for position-reducing / closing orders in futures
 
     @staticmethod
     def generate_id() -> str:

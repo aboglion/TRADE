@@ -29,7 +29,13 @@ def parse_precision_to_decimals(precision: Any) -> int:
     if val <= 0:
         return 0
     if val < 1.0:
-        return int(round(abs(math.log10(val))))
+        try:
+            s = f"{val:.16f}".rstrip("0")
+            if "." in s:
+                return len(s.split(".")[1])
+            return 0
+        except Exception:
+            return int(round(abs(math.log10(val))))
     return int(val)
 
 

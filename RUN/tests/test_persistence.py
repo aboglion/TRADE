@@ -2,8 +2,7 @@
 Unit tests for data persistence & recovery across updates and restarts.
 """
 
-import json
-import pytest
+import os
 from pathlib import Path
 
 from src.config.config_manager import ConfigManager
@@ -37,6 +36,10 @@ def test_telegram_config_recovery_when_yaml_reset(tmp_path: Path):
     """
     config_file = tmp_path / "config.yaml"
     state_file = tmp_path / "bot_state.json"
+
+    # Clear any residual environment variables to test pure state store recovery
+    for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ENABLED", "TELEGRAM_DASHBOARD_URL"):
+        os.environ.pop(k, None)
 
     # 1. Create initial state with backed-up telegram settings
     store = JsonStateStore(str(state_file))

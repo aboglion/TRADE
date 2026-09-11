@@ -21,6 +21,11 @@ from src.core.models import Candle
 
 def candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
     """Convert a list of Candle objects to a DataFrame matching engine.py format."""
+    if not candles:
+        empty_df = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+        empty_df.index = pd.DatetimeIndex([], name="Date", tz="UTC")
+        return empty_df
+
     records = []
     for c in candles:
         records.append({
@@ -42,6 +47,9 @@ def add_indicators(df: pd.DataFrame, vol_q: float = 0.70) -> pd.DataFrame:
 
     EXACT PORT of engine.py add_indicators() (lines 144-209).
     """
+    if df.empty:
+        return df.copy()
+
     x = df.copy()
     x["EMA9"] = x.Close.ewm(span=9, adjust=False).mean()
     x["EMA20"] = x.Close.ewm(span=20, adjust=False).mean()

@@ -8,11 +8,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datetime import datetime, timedelta
 import logging
-import ccxt
 
 from src.config.config_manager import ConfigManager
 from src.core.enums import RunMode
-from src.core.models import BotState, Candle
+from src.core.models import BotState
 from src.core.interfaces import IMarketDataProvider, IClock
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.data.candle_service import CandleService
@@ -23,7 +22,6 @@ from src.strategy.regime_adaptive_strategy import RegimeAdaptiveStrategy
 from src.strategy.micro_satellite_strategy import MicroSatelliteStrategy
 from src.strategy.hybrid_strategy import HybridStrategy
 from src.orchestrator import BotOrchestrator
-from src.utils.logging_utils import setup_logger
 
 
 class MockClock(IClock):

@@ -6,14 +6,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 import pytest
 
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tests import make_candle, make_candle_series
+from tests import make_candle_series
 from src.core.models import BotState
 
 

@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.enums import Regime
-from src.core.models import PortfolioSnapshot, TargetAllocation
+from src.core.models import TargetAllocation
 from src.services.portfolio_service import PortfolioService
 from src.exchanges.dry_run_exchange import DryRunExchange
 import time

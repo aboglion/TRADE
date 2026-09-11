@@ -23,21 +23,19 @@ Covers:
 19. ReconciliationService orphaned order side and amount extraction.
 """
 
-import pytest
 import time
 from unittest.mock import MagicMock, patch
 
-from tests import make_candle_series, make_candle
+from tests import make_candle_series
 from src.core.enums import OrderSide, OrderStatus, OrderType, RunMode, Regime
 from src.core.models import (
     BotState,
-    Candle,
     AssetHolding,
     OrderIntent,
     OrderResult,
     PortfolioSnapshot,
 )
-from src.config.config_manager import RiskConfig, StrategyConfig, BotConfig
+from src.config.config_manager import RiskConfig
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.exchanges.exchange_gateway import ExchangeGateway
 from src.services.order_manager import OrderManager
@@ -47,8 +45,7 @@ from src.services.reconciliation_service import ReconciliationService
 from src.strategy.regime_adaptive_strategy import RegimeAdaptiveStrategy
 from src.strategy.micro_satellite_strategy import MicroSatelliteStrategy
 from src.services.telegram_service import TelegramService
-from src.utils.math_utils import truncate_to_precision, parse_precision_to_decimals
-from src.data.candle_service import CandleService
+from src.utils.math_utils import truncate_to_precision
 from src.web.server import DashboardRequestHandler
 import ccxt
 

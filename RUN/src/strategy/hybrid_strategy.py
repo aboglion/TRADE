@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-from src.core.models import Candle, PortfolioSnapshot, StrategySignal
+from src.core.models import Candle, PortfolioSnapshot
 
 logger = logging.getLogger("bot.strategy.hybrid")
 

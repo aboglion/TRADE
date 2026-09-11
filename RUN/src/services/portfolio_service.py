@@ -8,7 +8,7 @@ targets, and generates the minimal set of trades needed to rebalance.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.exchanges.exchange_gateway import ExchangeGateway
@@ -121,9 +121,12 @@ class PortfolioService:
                 contracts = float(pos.get("contracts", 0) or 0)
                 if contracts == 0:
                     continue
-                side = pos.get("side", "")
-                if side == "short" and contracts > 0:
-                    contracts = -contracts
+                info_amt = float(pos.get("info", {}).get("positionAmt", 0) or 0)
+                side = str(pos.get("side", "") or "").lower()
+                if (side == "short" or info_amt < 0 or contracts < 0):
+                    contracts = -abs(contracts)
+                else:
+                    contracts = abs(contracts)
                 
                 entry_price = float(pos.get("entryPrice", 0) or 0)
                 unrealized_pnl = float(pos.get("unrealizedPnl", 0) or 0)
@@ -239,7 +242,7 @@ class PortfolioService:
 
         total_deviation = sum(abs(d) for d in deviations.values())
 
-        logger.info(
+        logger.debug(
             "Allocation deviations: %s (total=%.2f%%)",
             {k: f"{v:+.2%}" for k, v in deviations.items()},
             total_deviation * 100,
@@ -317,6 +320,7 @@ class PortfolioService:
                         estimated_price=price,
                         reason=f"Close previous {current_weight:+.2%} position for regime reversal",
                         candle_ts=target.timestamp_ms,
+                        reduce_only=self._is_futures,
                     )
                     if close_side == OrderSide.SELL:
                         sell_orders.append(intent_close)
@@ -405,6 +409,15 @@ class PortfolioService:
             order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
             order_price = None if order_type == OrderType.MARKET else price
 
+            is_reducing = bool(
+                self._is_futures
+                and (
+                    is_full_liquidation
+                    or (current_weight > 1e-6 and deviation < 0)
+                    or (current_weight < -1e-6 and deviation > 0)
+                )
+            )
+
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
                 symbol=pair_symbol,
@@ -415,6 +428,7 @@ class PortfolioService:
                 estimated_price=price,
                 reason=f"Rebalance: {deviation:+.2%} deviation in {pair_symbol}",
                 candle_ts=target.timestamp_ms,
+                reduce_only=is_reducing,
             )
 
             if deviation < 0:
@@ -460,8 +474,8 @@ class PortfolioService:
 
         if all_orders:
             logger.info(
-                "Rebalance plan: %d sells + %d buys",
-                len(sell_orders), len(buy_orders),
+                "🎯 REBALANCE DECISION: Executing %d sells + %d buys (total deviation=%.2f%%)",
+                len(sell_orders), len(buy_orders), total_deviation * 100,
             )
             for o in all_orders:
                 logger.info(
@@ -472,7 +486,7 @@ class PortfolioService:
                     o.reason,
                 )
         else:
-            logger.info("Portfolio within threshold, no rebalance needed")
+            logger.debug("Portfolio within threshold (total deviation=%.2f%%), no rebalance needed", total_deviation * 100)
 
         return RebalancePlan(
             orders=all_orders,

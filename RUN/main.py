@@ -197,7 +197,6 @@ def main() -> None:
     # Now import everything (after env is loaded)
     from src.config.config_manager import ConfigManager
     from src.core.enums import RunMode
-    from src.core.models import BotState
     from src.data.candle_service import CandleService
     from src.data.live_provider import LiveDataProvider
     from src.exchanges.dry_run_exchange import DryRunExchange
@@ -250,7 +249,7 @@ def main() -> None:
     state = state_store.load_state()
 
     # Callback to persist dry run balance changes to config.yaml & bot_state.json
-    def on_dry_run_balance_change(balances: Dict[str, float]) -> None:
+    def on_dry_run_balance_change(balances: dict[str, float]) -> None:
         try:
             cm.save_dry_run_balances(balances)
             st = state_store.load_state()

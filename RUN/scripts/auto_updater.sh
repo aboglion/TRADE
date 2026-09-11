@@ -20,7 +20,14 @@ for venv_path in "${PROJECT_DIR}/venv" "${PROJECT_DIR}/.venv" "/root/TRADE/venv"
 done
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    local iso_ts="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    echo "[$timestamp] $1" | tee -a "$LOG_FILE"
+    for bot_log in "${PROJECT_DIR}/logs/bot.log" "${PROJECT_DIR}/RUN/logs/bot.log"; do
+        if [ -d "$(dirname "$bot_log")" ]; then
+            echo "$iso_ts | INFO     | bot.git.updater | $1" >> "$bot_log" 2>/dev/null || true
+        fi
+    done
 }
 
 run_loop() {

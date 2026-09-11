@@ -9,7 +9,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from src.core.enums import Regime
 from src.core.models import (
     BotState,
     Candle,
@@ -17,7 +16,6 @@ from src.core.models import (
     OrderResult,
     PortfolioSnapshot,
     StrategyDecision,
-    TargetAllocation,
 )
 
 

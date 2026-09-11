@@ -8,15 +8,12 @@ Tests:
 """
 
 from unittest.mock import MagicMock
-import pytest
 
 from src.core.enums import OrderSide, OrderStatus, OrderType, Regime
 from src.core.models import (
     AssetHolding,
-    BotState,
     Candle,
     OrderIntent,
-    OrderResult,
     PortfolioSnapshot,
     TargetAllocation,
 )

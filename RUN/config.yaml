@@ -64,12 +64,12 @@ scheduler:
   max_consecutive_errors: 10
 dry_run:
   initial_balances:
-    USDT: 2940.83006728
-    BTC: 0.0
-    ETH: 0.0
+    USDT: 2291.47889956
+    BTC: 0.00455012
+    ETH: 0.10716519
     SOL: 0.0
 telegram:
-  enabled: false
-  bot_token: ''
-  chat_id: ''
-  dashboard_url: ''
+  enabled: true
+  bot_token: 123456:FAKE_BOT_TOKEN_FOR_TEST
+  chat_id: '987654321'
+  dashboard_url: http://localhost:8090

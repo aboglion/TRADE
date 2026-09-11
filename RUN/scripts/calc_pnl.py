@@ -1,5 +1,4 @@
 import ccxt
-import time
 from datetime import datetime, timedelta
 
 def main():
@@ -34,8 +33,6 @@ def main():
     fin_usdt = 421.14769317
     fin_btc = 0.0148827
     fin_eth = 0.5506405
-    fin_sol = 0.0
-    
     # Start Portfolio Value
     start_val = init_usdt + (init_btc * start_prices['BTC/USDT']) + (init_eth * start_prices['ETH/USDT'])
     
@@ -44,11 +41,6 @@ def main():
     
     # HODL Value (Initial balances at final prices)
     hodl_val = init_usdt + (init_btc * end_prices['BTC/USDT']) + (init_eth * end_prices['ETH/USDT'])
-    
-    # The bot sold (0.0201094 - 0.0148827) = 0.0052267 BTC
-    # Let's see how much USDT it should have received vs how much it got, to estimate fees.
-    btc_sold = init_btc - fin_btc
-    # Assuming it sold at around some price... DryRunExchange charges 0.1% fee.
     
     print(f"Start Prices: {start_prices}")
     print(f"End Prices: {end_prices}")

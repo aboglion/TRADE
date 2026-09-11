@@ -8,10 +8,8 @@ inconsistencies.  The exchange is ALWAYS the source of truth.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
 
 from src.core.enums import OrderStatus
-from src.core.exceptions import ReconciliationError
 from src.core.models import BotState
 
 logger = logging.getLogger("bot.services.reconciliation")

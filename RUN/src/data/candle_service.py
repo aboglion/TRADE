@@ -12,12 +12,12 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from src.core.exceptions import DataGapError, InsufficientDataError
 from src.core.interfaces import IMarketDataProvider
 from src.core.models import Candle
-from src.utils.time_utils import candle_open_ms, is_candle_closed, timeframe_to_ms
+from src.utils.time_utils import is_candle_closed, timeframe_to_ms
 
 logger = logging.getLogger("bot.data.candle_service")
 
@@ -90,7 +90,7 @@ class CandleService:
         new_closed = self._deduplicate(new_closed)
 
         if new_closed:
-            logger.info(
+            logger.debug(
                 "Found %d new closed candle(s) for %s [%s → %s]",
                 len(new_closed),
                 symbol,

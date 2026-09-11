@@ -4,9 +4,7 @@ Tests for state store — save/load roundtrip, atomic writes, corruption handlin
 
 import json
 import os
-import tempfile
 
-import pytest
 from src.core.models import BotState
 from src.services.state_store import JsonStateStore
 

@@ -249,7 +249,7 @@ class TestRegimeAdaptiveStrategyParity:
         flash_candle = make_candle(last_ts, open=70000.0, high=70200.0, low=66500.0, close=69500.0)
         btc_candles.append(flash_candle)
 
-        decision_flash = strategy.compute_signals({"BTC/USDT": btc_candles}, portfolio)
+        _ = strategy.compute_signals({"BTC/USDT": btc_candles}, portfolio)
         assert strategy._effective_leverage == 1.0
         assert strategy._bars_since_circuit_trip == 1
 
@@ -370,12 +370,12 @@ class TestRegimeAdaptiveStrategyParity:
 
     def test_pyramiding_uses_config_add_fractions(self):
         cfg = {"add1_frac": 0.50, "add2_frac": 0.30}
-        strategy = RegimeAdaptiveStrategy()
         entries = [{"px": 60000.0, "atr": 500.0}]
         
         # 1 entry: base
         assert len(entries) == 1
         mult_1 = 1.0
+        assert mult_1 == 1.0
         
         # 2 entries: 1.0 + add1_frac
         entries.append({"px": 61000.0, "atr": 500.0})

@@ -9,24 +9,19 @@ Verifies all bug fixes and architectural reliability improvements across:
 - Micro Satellite Strategy Signal Completeness
 """
 
-import os
-import json
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from src.core.enums import OrderSide, OrderStatus, OrderType, PositionAction, Regime, RunMode
+from src.core.enums import OrderSide, OrderType, PositionAction, Regime, RunMode
 from src.core.models import (
-    AssetHolding,
     BotState,
     Candle,
     OrderIntent,
-    OrderResult,
     PortfolioSnapshot,
     TargetAllocation,
 )
 from src.core.exceptions import InsufficientDataError
-from src.config.config_manager import ConfigManager, ExchangeConfig, RiskConfig
+from src.config.config_manager import ConfigManager, ExchangeConfig
 from src.exchanges.exchange_gateway import ExchangeGateway
 from src.exchanges.dry_run_exchange import DryRunExchange
 from src.services.portfolio_service import PortfolioService

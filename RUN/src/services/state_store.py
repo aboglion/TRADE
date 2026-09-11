@@ -16,9 +16,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
 
-from src.core.exceptions import StateCorruptionError
 from src.core.interfaces import IStateStore
 from src.core.models import BotState
 

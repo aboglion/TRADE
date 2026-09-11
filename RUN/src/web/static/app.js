@@ -553,6 +553,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (e.target.id === "telegramModal") closeTelegramModal();
     });
 
+    // API Keys (.env) modal event listeners
+    safeAddListener("apiKeysModalBtn", "click", openApiKeysModal);
+    safeAddListener("closeApiKeysModal", "click", closeApiKeysModal);
+    safeAddListener("cancelApiKeysSave", "click", closeApiKeysModal);
+    safeAddListener("saveApiKeysConfigBtn", "click", saveApiKeysConfig);
+    safeAddListener("testBinanceConnectionBtn", "click", testBinanceConnection);
+    safeAddListener("toggleApiKeyVisibilityBtn", "click", toggleApiKeyVisibility);
+    safeAddListener("toggleApiSecretVisibilityBtn", "click", toggleApiSecretVisibility);
+    safeAddListener("apiKeysModal", "click", (e) => {
+        if (e.target.id === "apiKeysModal") closeApiKeysModal();
+    });
+
     // System Errors modal event listeners (support both healthCard and systemHealthCard)
     safeAddListener("healthCard", "click", openErrorsModal);
     safeAddListener("systemHealthCard", "click", openErrorsModal);
@@ -1311,7 +1323,7 @@ async function fetchLogs() {
         }
 
         logLines.forEach(rawLine => {
-            if (rawLine.includes("Loaded state:") || rawLine.includes("Portfolio snapshot:") || rawLine.includes("No state file found at") || rawLine.includes("No new closed candles")) {
+            if (rawLine.includes("Loaded state:") || rawLine.includes("Portfolio snapshot:") || rawLine.includes("No state file found at") || rawLine.includes("No new closed candles") || rawLine.includes("Portfolio within threshold") || rawLine.includes("Imported active position tracking") || rawLine.includes("Imported micro position tracking") || rawLine.includes("Allocation deviations:") || rawLine.includes("Found 1 new closed candle") || rawLine.includes("Found 2 new closed candle") || rawLine.includes("Found 3 new closed candle")) {
                 return;
             }
 
@@ -2168,7 +2180,7 @@ async function saveTelegramConfig() {
         const data = await res.json();
 
         if (res.ok && data.success) {
-            showToast("✈️ " + (data.message || "Telegram settings saved successfully!"), "success");
+            showToast("✈️ " + (data.message || "הגדרות טלגרם נשמרו בהצלחה בקובץ .env!"), "success");
             closeTelegramModal();
             await loadTelegramConfig();
         } else {
@@ -2180,6 +2192,218 @@ async function saveTelegramConfig() {
         if (saveBtn) {
             saveBtn.disabled = false;
             saveBtn.textContent = "Save Settings 💾";
+        }
+    }
+}
+
+// ── Binance API Keys & .env Management Functions ──────────────
+
+async function openApiKeysModal() {
+    const modal = document.getElementById("apiKeysModal");
+    if (!modal) return;
+    await loadApiKeysConfig();
+    modal.classList.add("active");
+}
+
+function closeApiKeysModal() {
+    const modal = document.getElementById("apiKeysModal");
+    if (modal) modal.classList.remove("active");
+    const statusBox = document.getElementById("apiKeysStatusBox");
+    if (statusBox) statusBox.style.display = "none";
+}
+
+function toggleApiKeyVisibility() {
+    const input = document.getElementById("binanceApiKeyInput");
+    const btn = document.getElementById("toggleApiKeyVisibilityBtn");
+    if (!input || !btn) return;
+    if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈";
+    } else {
+        input.type = "password";
+        btn.textContent = "👁️";
+    }
+}
+
+function toggleApiSecretVisibility() {
+    const input = document.getElementById("binanceApiSecretInput");
+    const btn = document.getElementById("toggleApiSecretVisibilityBtn");
+    if (!input || !btn) return;
+    if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈";
+    } else {
+        input.type = "password";
+        btn.textContent = "👁️";
+    }
+}
+
+async function loadApiKeysConfig() {
+    const statusHelp = document.getElementById("binanceKeyStatusHelp");
+    const keyInput = document.getElementById("binanceApiKeyInput");
+    const secretInput = document.getElementById("binanceApiSecretInput");
+    const liveToggle = document.getElementById("confirmLiveToggle");
+
+    if (secretInput) secretInput.value = "";
+
+    try {
+        const res = await apiFetch("/api/keys");
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (keyInput) {
+            keyInput.value = data.binance?.masked_key || "";
+        }
+        if (liveToggle) {
+            liveToggle.checked = !!data.confirm_live;
+        }
+        if (statusHelp) {
+            if (data.binance?.configured) {
+                statusHelp.innerHTML = `<span style="color: #4ade80;">✅ מפתחות Binance מוגדרים ותקינים ב-.env (${data.binance.masked_key})</span>`;
+            } else if (data.binance?.has_key) {
+                statusHelp.innerHTML = `<span style="color: #fbbf24;">⚠️ מפתח API קיים (${data.binance.masked_key}) אך חסר Secret ב-.env</span>`;
+            } else {
+                statusHelp.innerHTML = `<span style="color: #f87171;">❌ לא הוגדרו מפתחות Binance בקובץ .env</span>`;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load API keys config:", e);
+    }
+}
+
+async function saveApiKeysConfig() {
+    const saveBtn = document.getElementById("saveApiKeysConfigBtn");
+    const keyInput = document.getElementById("binanceApiKeyInput");
+    const secretInput = document.getElementById("binanceApiSecretInput");
+    const liveToggle = document.getElementById("confirmLiveToggle");
+    const statusBox = document.getElementById("apiKeysStatusBox");
+
+    const keyVal = (keyInput?.value || "").trim();
+    const secretVal = (secretInput?.value || "").trim();
+    const confirmLive = !!liveToggle?.checked;
+
+    const payload = {
+        confirm_live: confirmLive,
+    };
+
+    if (keyVal && !keyVal.includes("...") && !keyVal.startsWith("****")) {
+        payload.binance_api_key = keyVal;
+    }
+    if (secretVal && !secretVal.startsWith("****")) {
+        payload.binance_api_secret = secretVal;
+    }
+
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "שומר ב-.env... ⏳";
+    }
+
+    try {
+        const res = await apiFetch("/api/keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            showToast("🔑 " + (data.message || "מפתחות ה-API נשמרו בהצלחה בקובץ .env!"), "success");
+            if (statusBox) {
+                statusBox.style.display = "block";
+                statusBox.style.background = "rgba(34, 197, 94, 0.15)";
+                statusBox.style.border = "1px solid rgba(34, 197, 94, 0.4)";
+                statusBox.style.color = "#86efac";
+                statusBox.innerHTML = `✅ <strong>הצלחה:</strong> מפתחות ה-API נשמרו ישירות לקובץ <code>.env</code>.`;
+            }
+            await loadApiKeysConfig();
+            setTimeout(() => {
+                closeApiKeysModal();
+            }, 1200);
+        } else {
+            showToast("❌ שגיאה בשמירת מפתחות: " + (data.error || "Unknown error"), "error");
+            if (statusBox) {
+                statusBox.style.display = "block";
+                statusBox.style.background = "rgba(239, 68, 68, 0.15)";
+                statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+                statusBox.style.color = "#fca5a5";
+                statusBox.textContent = "❌ " + (data.error || "Failed to save keys");
+            }
+        }
+    } catch (err) {
+        showToast("❌ שגיאה בתקשורת: " + err, "error");
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "שמור ב-.env 💾";
+        }
+    }
+}
+
+async function testBinanceConnection() {
+    const testBtn = document.getElementById("testBinanceConnectionBtn");
+    const statusBox = document.getElementById("apiKeysStatusBox");
+
+    if (testBtn) {
+        testBtn.disabled = true;
+        testBtn.textContent = "⏳ בודק חיבור מול Binance...";
+    }
+    if (statusBox) {
+        statusBox.style.display = "block";
+        statusBox.style.background = "rgba(59, 130, 246, 0.15)";
+        statusBox.style.border = "1px solid rgba(59, 130, 246, 0.4)";
+        statusBox.style.color = "#93c5fd";
+        statusBox.textContent = "⏳ שולח בקשות אימות ל-Binance API (Spot, USDT-M, Portfolio Margin)...";
+    }
+
+    try {
+        const res = await apiFetch("/api/test_binance");
+        const data = await res.json();
+
+        if (statusBox) {
+            if (res.ok && data.tests) {
+                let html = `<div style="font-weight: 600; margin-bottom: 6px;">תוצאות בדיקת חיבור Binance:</div>`;
+                const tests = data.tests || {};
+                
+                for (const [name, t] of Object.entries(tests)) {
+                    const isSuccess = t.status === "SUCCESS";
+                    const icon = isSuccess ? "✅" : "❌";
+                    const color = isSuccess ? "#86efac" : "#fca5a5";
+                    let detail = "";
+                    if (isSuccess && t.balances) {
+                        const balCount = Object.keys(t.balances).length;
+                        detail = ` (נמצאו ${balCount} מטבעות)`;
+                    } else if (t.error) {
+                        detail = ` - ${t.error.substring(0, 70)}...`;
+                    }
+                    html += `<div style="color: ${color}; margin-top: 3px;">${icon} <strong>${name.toUpperCase()}</strong>: ${t.status}${detail}</div>`;
+                }
+
+                if (data.outbound_ip) {
+                    html += `<div style="margin-top: 6px; font-size: 0.75rem; color: #94a3b8;">כתובת IP יוצאת: <code>${data.outbound_ip}</code></div>`;
+                }
+
+                statusBox.innerHTML = html;
+                showToast("🧪 בדיקת חיבור ל-Binance הושלמה!", "info");
+            } else {
+                statusBox.style.background = "rgba(239, 68, 68, 0.15)";
+                statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+                statusBox.style.color = "#fca5a5";
+                statusBox.textContent = "❌ שגיאה בבדיקה: " + (data.error || "Failed to verify connection");
+                showToast("❌ שגיאה באימות מול Binance", "error");
+            }
+        }
+    } catch (err) {
+        if (statusBox) {
+            statusBox.style.background = "rgba(239, 68, 68, 0.15)";
+            statusBox.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+            statusBox.style.color = "#fca5a5";
+            statusBox.textContent = "❌ שגיאת תקשורת: " + err;
+        }
+        showToast("❌ שגיאה בבדיקת חיבור", "error");
+    } finally {
+        if (testBtn) {
+            testBtn.disabled = false;
+            testBtn.textContent = "🧪 בדיקת חיבור ל-Binance";
         }
     }
 }
@@ -2344,6 +2568,8 @@ window.openDryRunModal = openDryRunModal;
 window.closeDryRunModal = closeDryRunModal;
 window.openTelegramModal = openTelegramModal;
 window.closeTelegramModal = closeTelegramModal;
+window.openApiKeysModal = openApiKeysModal;
+window.closeApiKeysModal = closeApiKeysModal;
 window.openConditionsModal = openConditionsModal;
 window.closeConditionsModal = closeConditionsModal;
 window.openKillSwitchModal = openKillSwitchModal;
