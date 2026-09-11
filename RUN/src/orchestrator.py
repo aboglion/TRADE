@@ -134,7 +134,7 @@ class BotOrchestrator:
         # Timing check: Alert if cycle was triggered in less than 5 minutes (300s)
         # Note: on bot startup (self._last_scan_time is None) or manual forced trigger, do not alert.
         now = time.time()
-        if self._last_scan_time is not None and not force:
+        if self._last_scan_time is not None and not force and not getattr(self, "_last_scan_forced", False):
             elapsed_seconds = now - self._last_scan_time
             expected_interval = getattr(self._config.scheduler, "poll_interval_seconds", 300)
             min_threshold = max(60, expected_interval - 15)  # e.g. 285s
@@ -144,6 +144,7 @@ class BotOrchestrator:
                     elapsed_seconds, expected_interval,
                 )
         self._last_scan_time = now
+        self._last_scan_forced = force
 
         logger.debug("Routine cycle check | %s | Mode: %s", ms_to_iso(now_ms), self._config.run_mode.name)
 
@@ -324,8 +325,9 @@ class BotOrchestrator:
                     continue
 
                 if idx > 0:
-                    wait_sec = max(0.1, float(getattr(self._config.risk, "min_seconds_between_orders", 1))) + 0.1
-                    time.sleep(wait_sec)
+                    min_sec = float(getattr(self._config.risk, "min_seconds_between_orders", 1))
+                    if min_sec > 0:
+                        time.sleep(min_sec + 0.05)
                 approved, reason = self._risk_manager.approve_order(
                     intent, portfolio
                 )
@@ -347,6 +349,21 @@ class BotOrchestrator:
                     result = self._order_manager.execute(intent)
                     if result.status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
                         executed_count += 1
+                        old_base = portfolio.holdings.get(base_sym)
+
+                        # Handle reduce-only recovery where position was already closed on exchange (-2022)
+                        if str(result.exchange_order_id or "").startswith("closed_"):
+                            if old_base:
+                                portfolio.holdings[base_sym] = AssetHolding(
+                                    symbol=base_sym,
+                                    free=0.0,
+                                    locked=0.0,
+                                    total=0.0,
+                                    value_usd=0.0,
+                                )
+                            logger.info("Order %s resolved as position already closed on exchange", intent.client_order_id)
+                            continue
+
                         # INTENTIONAL MUTATION: We mutate the frozen PortfolioSnapshot's
                         # holdings dict in-place so subsequent orders in THIS cycle see
                         # accurate free balances for risk checks. This is safe because:
@@ -360,9 +377,7 @@ class BotOrchestrator:
                         filled_qty = result.filled_amount if (result.filled_amount and result.filled_amount > 0) else intent.amount
                         fill_price = result.average_price or intent.price or intent.estimated_price or prices.get(intent.symbol, 0.0)
                         fill_val = filled_qty * fill_price
-                        fees_usd = (result.fees or 0.0) * (fill_price if (result.fee_currency and result.fee_currency.upper() == base_sym.upper()) else 1.0)
 
-                        old_base = portfolio.holdings.get(base_sym)
                         is_fut = (
                             getattr(self._config.exchange, "market_type", "") == "future"
                             or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
@@ -384,24 +399,25 @@ class BotOrchestrator:
                         if old_base:
                             delta_qty = -filled_qty if intent.side == OrderSide.SELL else net_filled_qty
                             new_total = old_base.total + delta_qty
+                            is_closed_pos = abs(new_total) <= 1e-8
                             if is_fut or new_total <= 0:
                                 new_free = 0.0
                             else:
                                 new_free = max(0.0, min(new_total, old_base.free + delta_qty))
-                            new_val = abs(new_total) * fill_price
+                            new_val = 0.0 if is_closed_pos else abs(new_total) * fill_price
 
                             # Handle position side flip (long <-> short)
                             is_side_flip = (old_base.total > 1e-8 and new_total < -1e-8) or (old_base.total < -1e-8 and new_total > 1e-8)
-                            new_entry_px = fill_price if is_side_flip else (old_base.entry_price if abs(new_total) > 1e-8 else 0.0)
+                            new_entry_px = fill_price if is_side_flip else (old_base.entry_price if not is_closed_pos else 0.0)
                             new_pos_lev = lev if (is_side_flip or old_base.leverage <= 1.0) else old_base.leverage
 
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
-                                free=new_free,
-                                locked=old_base.locked,
-                                total=new_total,
+                                free=0.0 if is_closed_pos else new_free,
+                                locked=0.0 if is_closed_pos else old_base.locked,
+                                total=0.0 if is_closed_pos else new_total,
                                 value_usd=new_val,
-                                unrealized_pnl=0.0 if (is_side_flip or abs(new_total) <= 1e-8) else old_base.unrealized_pnl,
+                                unrealized_pnl=0.0 if (is_side_flip or is_closed_pos) else old_base.unrealized_pnl,
                                 entry_price=new_entry_px,
                                 leverage=new_pos_lev,
                             )
@@ -416,13 +432,13 @@ class BotOrchestrator:
                                 leverage=lev if is_fut else 1.0,
                             )
                         elif intent.side == OrderSide.SELL:
-                            # New short position opened
+                            # New short position opened (in futures only)
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
                                 free=0.0,
                                 locked=0.0,
-                                total=-filled_qty,
-                                value_usd=fill_val,
+                                total=-filled_qty if is_fut else 0.0,
+                                value_usd=fill_val if is_fut else 0.0,
                                 entry_price=fill_price if is_fut else 0.0,
                                 leverage=lev if is_fut else 1.0,
                             )
@@ -434,17 +450,18 @@ class BotOrchestrator:
 
                         if is_fut:
                             old_qty = old_base.total if old_base else 0.0
+                            entry_px = old_base.entry_price if (old_base and old_base.entry_price > 0) else fill_price
                             if old_qty > 1e-8 and intent.side == OrderSide.SELL:
                                 # Closing/reducing long position
                                 closed_qty = min(old_qty, filled_qty)
                                 opened_qty = max(0.0, filled_qty - old_qty)
-                                real_pnl = (fill_price - old_base.entry_price) * closed_qty if old_base.entry_price > 0 else 0.0
+                                real_pnl = (fill_price - entry_px) * closed_qty
                                 margin_delta = ((closed_qty * fill_price) / lev) - ((opened_qty * fill_price) / lev)
                             elif old_qty < -1e-8 and intent.side == OrderSide.BUY:
                                 # Covering/reducing short position
                                 closed_qty = min(abs(old_qty), filled_qty)
                                 opened_qty = max(0.0, filled_qty - abs(old_qty))
-                                real_pnl = (old_base.entry_price - fill_price) * closed_qty if old_base.entry_price > 0 else 0.0
+                                real_pnl = (entry_px - fill_price) * closed_qty
                                 margin_delta = ((closed_qty * fill_price) / lev) - ((opened_qty * fill_price) / lev)
                             else:
                                 # Pure expansion in same direction
@@ -497,19 +514,12 @@ class BotOrchestrator:
                     failed_symbols.add(base_sym)
                     # Don't halt the cycle — continue with remaining orders for other symbols
 
-            # 10. Update last processed candle timestamps
+            # 10. Update last processed candle timestamps to the actual candles evaluated by strategy
             for pair in pairs.values():
-                ts_candidates = []
-                if pair in self._state.last_processed_candle_ts:
-                    ts_candidates.append(self._state.last_processed_candle_ts[pair])
-                new_c = new_candles_by_pair.get(pair, [])
-                if new_c:
-                    ts_candidates.append(new_c[-1].timestamp_ms)
                 full_c = candles_by_asset.get(pair, [])
                 if full_c:
-                    ts_candidates.append(full_c[-1].timestamp_ms)
-                if ts_candidates:
-                    self._state.last_processed_candle_ts[pair] = max(ts_candidates)
+                    current_last = self._state.last_processed_candle_ts.get(pair, 0)
+                    self._state.last_processed_candle_ts[pair] = max(current_last, full_c[-1].timestamp_ms)
 
             # Save state
             self._save_state(success=True)

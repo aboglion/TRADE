@@ -271,7 +271,7 @@ class MicroSatelliteStrategy:
 
         d_bars = self._cfg["donchian_micro_bars"]
         x["DonchianMicroHigh"] = x.High.rolling(d_bars).max().shift(1)
-        x["Ret30D"] = (x.Close - x.Close.shift(180)) / x.Close.shift(180)
+        x["Ret30D"] = (x.Close - x.Close.shift(180)) / x.Close.shift(180).replace(0, np.nan)
 
         regimes = []
         close_v = x.Close.values
@@ -280,7 +280,7 @@ class MicroSatelliteStrategy:
         rsi_v = x.RSI.values
         vol_v, volsma_v = x.Volume.values, x.VolSMA20.values
         donch_hi = x.DonchianMicroHigh.values
-        ret30_v = x.Ret30D.fillna(0).values
+        ret30_v = x.Ret30D.fillna(0).replace([np.inf, -np.inf], 0).values
 
         for i in range(len(x)):
             c, o = close_v[i], open_v[i]

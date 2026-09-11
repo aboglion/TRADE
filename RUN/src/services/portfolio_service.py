@@ -117,7 +117,7 @@ class PortfolioService:
             positions = self._gateway.fetch_positions()
             for pos in positions:
                 sym = pos.get("symbol", "")
-                base = sym.split("/")[0] if "/" in sym else sym.replace("USDT", "")
+                base = sym.split("/")[0].split(":")[0].split("_")[0] if ("/" in sym or ":" in sym or "_" in sym) else sym.replace("USDT", "")
                 contracts = float(pos.get("contracts", 0) or 0)
                 if contracts == 0:
                     continue
@@ -128,9 +128,9 @@ class PortfolioService:
                 else:
                     contracts = abs(contracts)
                 
-                entry_price = float(pos.get("entryPrice", 0) or 0)
-                unrealized_pnl = float(pos.get("unrealizedPnl", 0) or 0)
-                leverage = float(pos.get("leverage", 1) or 1)
+                entry_price = float(pos.get("entryPrice") or pos.get("info", {}).get("entryPrice") or 0.0)
+                unrealized_pnl = float(pos.get("unrealizedPnl") or pos.get("info", {}).get("unRealizedProfit") or 0.0)
+                leverage = float(pos.get("leverage") or pos.get("info", {}).get("leverage") or 1.0)
                 
                 clean_sym = sym.split(":")[0] if ":" in sym else sym
                 price = (

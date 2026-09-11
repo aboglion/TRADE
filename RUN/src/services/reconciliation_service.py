@@ -217,8 +217,10 @@ class ReconciliationService:
                 amount = 0.0
                 side = "buy"
                 if isinstance(exc_order.raw_response, dict):
-                    amount = float(exc_order.raw_response.get("amount", 0.0) or 0.0)
-                    side = str(exc_order.raw_response.get("side", "buy") or "buy").lower()
+                    raw = exc_order.raw_response
+                    raw_info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+                    amount = float(raw.get("amount") or raw_info.get("origQty") or 0.0)
+                    side = str(raw.get("side") or raw_info.get("side") or "buy").lower()
 
                 sym = exc_order.symbol or ""
                 if sym and "/" not in sym:

@@ -214,6 +214,28 @@ class BotState:
     def from_dict(cls, data: dict[str, Any]) -> BotState:
         if not isinstance(data, dict):
             return cls()
+
+        session_val = data.get("session_initial_value_usd")
+        if session_val is not None:
+            try:
+                session_val = float(session_val)
+            except (ValueError, TypeError):
+                session_val = None
+
+        fees: dict[str, float] = {}
+        for k, v in (data.get("session_fees") or {}).items():
+            try:
+                fees[str(k)] = float(v)
+            except (ValueError, TypeError):
+                pass
+
+        prices: dict[str, float] = {}
+        for k, v in (data.get("session_initial_prices") or {}).items():
+            try:
+                prices[str(k)] = float(v)
+            except (ValueError, TypeError):
+                pass
+
         return cls(
             version=int(data.get("version") or 1),
             last_processed_candle_ts=data.get("last_processed_candle_ts") or {},
@@ -224,8 +246,9 @@ class BotState:
             last_cycle_success=data.get("last_cycle_success", True) if data.get("last_cycle_success") is not None else True,
             critical_errors=data.get("critical_errors") if data.get("critical_errors") is not None else [],
             strategy_state=data.get("strategy_state") if data.get("strategy_state") is not None else {},
-            session_initial_value_usd=data.get("session_initial_value_usd"),
-            session_fees=data.get("session_fees") if data.get("session_fees") is not None else {},
-            session_initial_prices=data.get("session_initial_prices") if data.get("session_initial_prices") is not None else {},
+            session_initial_value_usd=session_val,
+            session_fees=fees,
+            session_initial_prices=prices,
             pnl_history=data.get("pnl_history") if data.get("pnl_history") is not None else [],
         )
+

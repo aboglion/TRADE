@@ -369,12 +369,12 @@ class RegimeAdaptiveStrategy(IStrategy):
         tr3 = (btc_low - btc_daily.shift(1)).abs()
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr14 = tr.rolling(window=14).mean()
-        atr_pct = atr14 / btc_daily
-        latest_atr_pct = atr_pct.dropna().iloc[-1] if not atr_pct.dropna().empty else 0.035
+        atr_pct = atr14 / btc_daily.replace(0, np.nan)
+        latest_atr_pct = float(atr_pct.dropna().iloc[-1]) if not atr_pct.dropna().empty else 0.035
 
         # Intraday drop from open (flash dip)
-        intraday_max_dip = (btc_low - btc_open) / btc_open
-        latest_dip = intraday_max_dip.dropna().iloc[-1] if not intraday_max_dip.dropna().empty else 0.0
+        intraday_max_dip = (btc_low - btc_open) / btc_open.replace(0, np.nan)
+        latest_dip = float(intraday_max_dip.dropna().iloc[-1]) if not intraday_max_dip.dropna().empty else 0.0
 
         # Daily ADX on BTC for trend strength conviction
         high_diff = btc_high.diff()

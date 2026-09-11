@@ -206,9 +206,16 @@ class OrderManager:
                                 logger.warning("Failed to send telegram notification for filled order: %s", tel_err)
 
             except Exception as e:
-                logger.warning(
-                    "Could not check order %s: %s", order_id, e
-                )
+                err_str = str(e)
+                if "Order does not exist" in err_str or "-2013" in err_str or "OrderNotFound" in type(e).__name__:
+                    logger.warning("Order %s does not exist on exchange — marking FAILED", order_id)
+                    order_data["status"] = OrderStatus.FAILED.value
+                    order_data["error_message"] = f"Order not found on exchange: {e}"
+                    self._append_completed_order(order_data)
+                else:
+                    logger.warning(
+                        "Could not check order %s: %s", order_id, e
+                    )
 
         # Remove resolved orders from pending
         self._state.pending_orders = [
@@ -281,11 +288,21 @@ class OrderManager:
                     self._gateway.cancel_order(symbol=sym, order_id=o.exchange_order_id)
                     canceled_count += 1
                     # Update local state immediately so pending_orders reflects cancellation
+                    found = False
                     for p in self._state.pending_orders:
                         if p.get("exchange_order_id") == o.exchange_order_id or (o.client_order_id and p.get("client_order_id") == o.client_order_id):
                             p["status"] = OrderStatus.CANCELLED.value
                             self._append_completed_order(p)
+                            found = True
                             break
+                    if not found:
+                        self._append_completed_order({
+                            "client_order_id": o.client_order_id or f"orphan_{o.exchange_order_id}",
+                            "exchange_order_id": o.exchange_order_id,
+                            "symbol": sym,
+                            "status": OrderStatus.CANCELLED.value,
+                            "reason": "Cancelled stale/orphan open order on exchange",
+                        })
                     self._state.pending_orders = [
                         p for p in self._state.pending_orders
                         if p.get("status") in ("submitted", "unknown", "open", "partially_filled", "intent")
@@ -348,10 +365,10 @@ class OrderManager:
                 ):
                     self._append_completed_order(order_data)
                     has_fill = (result.status == OrderStatus.FILLED) or bool(result.filled_amount and result.filled_amount > 0)
-                    if has_fill:
+                    if has_fill and not str(result.exchange_order_id or "").startswith("closed_"):
                         if not order_data.get("fees_recorded") and result.fees > 0 and result.fee_currency:
                             curr = (result.fee_currency or "USDT").upper()
-                            self._state.session_fees[curr] = self._state.session_fees.get(curr, 0.0) + result.fees
+                            self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + float(result.fees)
                             order_data["fees_recorded"] = True
                         
                         # Send Telegram trade alert (safe, never fails execution)
