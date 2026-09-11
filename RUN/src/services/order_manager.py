@@ -81,6 +81,7 @@ class OrderManager:
         # 2. Save intent (crash-safe: if we crash after this, we know
         #    on restart that we intended to place this order)
         self._save_intent(intent)
+        self._submitted_ids.add(intent.client_order_id)
 
         # 3. Submit
         logger.info(
@@ -97,8 +98,6 @@ class OrderManager:
         try:
             # Gateway is polymorphic: DryRunExchange or ExchangeGateway
             result = self._gateway.create_order(intent)
-
-            self._submitted_ids.add(intent.client_order_id)
 
             # 4. Update state
             self._update_order_result(intent, result)

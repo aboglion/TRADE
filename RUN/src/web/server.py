@@ -662,14 +662,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 current_price = 0.0
                 if symbol in ("USDT", "USD", "BUSD", "USDC"):
                     current_price = 1.0
-                elif h.total != 0:
+                elif h.total != 0 and h.value_usd > 0:
                     current_price = abs(h.value_usd / h.total)
-                else:
-                    try:
-                        pair = f"{symbol}/USDT"
-                        current_price = self.gateway.fetch_ticker_price(pair)
-                    except Exception:
-                        current_price = 0.0
+
+                if current_price <= 0 and symbol not in ("USDT", "USD", "BUSD", "USDC"):
+                    for pair_candidate in (f"{symbol}/USDT", f"{symbol}:USDT", symbol):
+                        try:
+                            current_price = float(self.gateway.fetch_ticker_price(pair_candidate) or 0.0)
+                            if current_price > 0:
+                                break
+                        except Exception:
+                            pass
+                    if current_price <= 0 and getattr(h, "entry_price", 0.0) > 0:
+                        current_price = float(h.entry_price)
 
                 # Auto-record initial price baseline for period return calculation
                 init_price = initial_prices.get(symbol)

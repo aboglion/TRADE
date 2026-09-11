@@ -408,7 +408,26 @@ class BotOrchestrator:
 
                             # Handle position side flip (long <-> short)
                             is_side_flip = (old_base.total > 1e-8 and new_total < -1e-8) or (old_base.total < -1e-8 and new_total > 1e-8)
-                            new_entry_px = fill_price if is_side_flip else (old_base.entry_price if not is_closed_pos else 0.0)
+                            if is_closed_pos:
+                                new_entry_px = 0.0
+                                new_unrealized_pnl = 0.0
+                            elif is_side_flip:
+                                new_entry_px = fill_price
+                                new_unrealized_pnl = 0.0
+                            elif old_base.total > 1e-8 and intent.side == OrderSide.BUY and new_total > 1e-8:
+                                # Adding to long position (pyramiding): weighted average entry price
+                                old_entry = old_base.entry_price if old_base.entry_price > 0 else fill_price
+                                new_entry_px = ((old_base.total * old_entry) + (net_filled_qty * fill_price)) / new_total
+                                new_unrealized_pnl = (fill_price - new_entry_px) * new_total
+                            elif old_base.total < -1e-8 and intent.side == OrderSide.SELL and new_total < -1e-8:
+                                # Adding to short position: weighted average entry price
+                                old_entry = old_base.entry_price if old_base.entry_price > 0 else fill_price
+                                new_entry_px = ((abs(old_base.total) * old_entry) + (filled_qty * fill_price)) / abs(new_total)
+                                new_unrealized_pnl = (new_entry_px - fill_price) * abs(new_total)
+                            else:
+                                new_entry_px = old_base.entry_price
+                                new_unrealized_pnl = ((fill_price - new_entry_px) * new_total) if new_total > 0 else ((new_entry_px - fill_price) * abs(new_total))
+
                             new_pos_lev = lev if (is_side_flip or old_base.leverage <= 1.0) else old_base.leverage
 
                             portfolio.holdings[base_sym] = AssetHolding(
@@ -417,7 +436,7 @@ class BotOrchestrator:
                                 locked=0.0 if is_closed_pos else old_base.locked,
                                 total=0.0 if is_closed_pos else new_total,
                                 value_usd=new_val,
-                                unrealized_pnl=0.0 if (is_side_flip or is_closed_pos) else old_base.unrealized_pnl,
+                                unrealized_pnl=new_unrealized_pnl,
                                 entry_price=new_entry_px,
                                 leverage=new_pos_lev,
                             )

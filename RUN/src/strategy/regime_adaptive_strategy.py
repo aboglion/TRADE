@@ -360,7 +360,7 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         # 5-day rolling high of BTC
         btc_5d_high = btc_high.iloc[-5:].max() if len(btc_high) >= 5 else latest_btc
-        btc_pb_from_5d = (latest_btc - btc_5d_high) / btc_5d_high if btc_5d_high > 0 else 0.0
+        btc_pb_from_5d = (latest_btc - btc_5d_high) / btc_5d_high if (btc_5d_high > 0 and not np.isnan(btc_5d_high) and not np.isnan(latest_btc)) else 0.0
         self._dist_from_5d_high_pct = btc_pb_from_5d * 100.0
 
         # Daily ATR% for volatility-scaled leverage
@@ -371,10 +371,14 @@ class RegimeAdaptiveStrategy(IStrategy):
         atr14 = tr.rolling(window=14).mean()
         atr_pct = atr14 / btc_daily.replace(0, np.nan)
         latest_atr_pct = float(atr_pct.dropna().iloc[-1]) if not atr_pct.dropna().empty else 0.035
+        if np.isnan(latest_atr_pct) or latest_atr_pct <= 0:
+            latest_atr_pct = 0.035
 
         # Intraday drop from open (flash dip)
         intraday_max_dip = (btc_low - btc_open) / btc_open.replace(0, np.nan)
         latest_dip = float(intraday_max_dip.dropna().iloc[-1]) if not intraday_max_dip.dropna().empty else 0.0
+        if np.isnan(latest_dip):
+            latest_dip = 0.0
 
         # Daily ADX on BTC for trend strength conviction
         high_diff = btc_high.diff()
@@ -387,7 +391,9 @@ class RegimeAdaptiveStrategy(IStrategy):
         denom = (pos_di + neg_di).replace(0, np.nan)
         dx = (100 * (pos_di - neg_di).abs() / denom).fillna(0.0)
         adx_daily = dx.ewm(alpha=1/14, min_periods=14).mean()
-        latest_adx = adx_daily.dropna().iloc[-1] if not adx_daily.dropna().empty else 20.0
+        latest_adx = float(adx_daily.dropna().iloc[-1]) if not adx_daily.dropna().empty else 20.0
+        if np.isnan(latest_adx) or latest_adx < 0:
+            latest_adx = 20.0
 
         # Macro & Tactical Bear Detection (Parity with engine.py lines 827-828):
         # Bear regime triggers if BTC < SMA150 OR fast breakdown (BTC < EMA20 and EMA20 < EMA50)

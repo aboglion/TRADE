@@ -237,7 +237,7 @@ class ReconciliationService:
                     "symbol": sym,
                     "side": side,
                     "amount": amount,
-                    "status": exc_order.status.value,
+                    "status": exc_order.status.value if hasattr(exc_order.status, "value") else str(exc_order.status or "open"),
                     "filled_amount": exc_order.filled_amount,
                     "source": "orphan_detected",
                 })

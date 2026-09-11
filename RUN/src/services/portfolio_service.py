@@ -140,10 +140,15 @@ class PortfolioService:
                     or prices.get(base, 0.0)
                 )
                 if price <= 0:
-                    try:
-                        price = self._gateway.fetch_ticker_price(sym)
-                    except Exception:
-                        price = 0.0
+                    for sym_candidate in (sym, clean_sym, f"{base}/USDT", f"{clean_sym}:USDT"):
+                        try:
+                            price = self._gateway.fetch_ticker_price(sym_candidate)
+                            if price > 0:
+                                break
+                        except Exception:
+                            pass
+                if price <= 0 and entry_price > 0:
+                    price = entry_price
                         
                 value_usd = abs(contracts) * price
 
@@ -487,6 +492,14 @@ class PortfolioService:
                     or (current_weight < -1e-6 and deviation > 0)
                 )
             )
+
+            if self._is_futures and is_reducing and holding:
+                pos_qty = abs(holding.total)
+                if amount > pos_qty:
+                    amount = truncate_to_precision(pos_qty, constraints["amount_precision"])
+                    if not is_above_min_order(amount, price, constraints["min_amount"], constraints["min_notional"]):
+                        logger.debug("Reduce quantity for %s ($%.2f) below exchange minimums, skipping", symbol, amount * price)
+                        continue
 
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
