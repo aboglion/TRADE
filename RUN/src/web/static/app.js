@@ -929,7 +929,9 @@ async function fetchStatus() {
             }
             if (regimeLevPill) {
                 const isSafeHaven = !!(macro && macro.safe_haven_active);
-                regimeLevPill.textContent = isBull ? (isSafeHaven ? "1.0x SAFE HAVEN" : `${Number(effLev).toFixed(1)}x BULL`) : "2.0x SHORT (35% Hedge)";
+                const shortHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 35;
+                const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
+                regimeLevPill.textContent = isBull ? (isSafeHaven ? "1.0x SAFE HAVEN" : `${Number(effLev).toFixed(1)}x BULL`) : `${shortLev}x SHORT (${shortHedgePct}% Hedge)`;
                 regimeLevPill.className = isBull ? (isSafeHaven ? "pnl-pill pnl-pill-mid" : "pnl-pill pnl-pill-high") : "pnl-pill pnl-pill-low";
             }
             if (typeof recordRegimePoint === "function") {
@@ -937,7 +939,9 @@ async function fetchStatus() {
             }
         } else if (regimeLevPill) {
             const isSafeHaven = !!(macro && macro.safe_haven_active);
-            regimeLevPill.textContent = isBull ? (isSafeHaven ? "1.0x SAFE HAVEN" : `${Number(effLev).toFixed(1)}x BULL`) : "2.0x SHORT (35% Hedge)";
+            const shortHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 35;
+            const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
+            regimeLevPill.textContent = isBull ? (isSafeHaven ? "1.0x SAFE HAVEN" : `${Number(effLev).toFixed(1)}x BULL`) : `${shortLev}x SHORT (${shortHedgePct}% Hedge)`;
             regimeLevPill.className = isBull ? (isSafeHaven ? "pnl-pill pnl-pill-mid" : "pnl-pill pnl-pill-high") : "pnl-pill pnl-pill-low";
         }
 
@@ -2755,7 +2759,17 @@ function renderBinaryTree(data) {
         const inMomentum = macro.in_momentum !== undefined ? !!macro.in_momentum : (!underEma && pullback > -4.0);
         const safeHavenActive = macro.safe_haven_active !== undefined ? !!macro.safe_haven_active : !inMomentum;
         const effectiveLev = macro.effective_leverage || (isBull ? (safeHavenActive ? 1.0 : 2.5) : 0.0);
-        const totalExposure = macro.total_crypto_weight_pct || (isBull ? (safeHavenActive ? 40 : 205) : 0);
+        const totalExposure = macro.total_crypto_weight_pct || (isBull ? (safeHavenActive ? 30 : 205) : 0);
+        const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -3.0;
+        const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
+        const bearHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 45;
+        const netShortPct = Math.round(bearHedgePct * parseFloat(shortLev));
+        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 70;
+        const binanceBracket = macro.binance_tier_bracket || {};
+        const accountEquity = binanceBracket.account_equity || 2000;
+        const bracketTier = binanceBracket.tier || 1;
+        const bracketMaxLev = binanceBracket.max_allowed_leverage || 20.0;
+        const bracketDesc = binanceBracket.bracket_desc || "Tier 1: ≤$50,000 (Max 20x)";
 
         const nodes = [
             {
@@ -2769,42 +2783,66 @@ function renderBinaryTree(data) {
             {
                 id: "risk_node_momentum_gate",
                 title: "2. שער אימות מומנטום מוסדי (Momentum Validation Gate)",
-                subtitle: "נסיגה משיא 5 ימים עד 2.0%- ומחיר מעל EMA9 יומית (תנאי הכרחי למינוף > 1.0x)",
-                criteria: "5d Pullback >= -2.0% AND BTC Close >= EMA9 Daily",
-                actual: `נסיגה מ-5d: ${distFrom5d.toFixed(2)}% (סף: -2.0%) | BTC $${(macro.btc_close||0).toLocaleString()} vs EMA9 $${(macro.btc_ema9||0).toLocaleString()} ${inMomentum ? '✓ מומנטום מאומת' : '🛡️ נסיגה -> Safe Haven!'}`,
+                subtitle: `נסיגה משיא 5 ימים עד ${cutoffPct.toFixed(1)}%- ומחיר מעל EMA9 יומית (תנאי הכרחי למינוף > 1.0x)`,
+                criteria: `5d Pullback >= ${cutoffPct.toFixed(1)}% AND BTC Close >= EMA9 Daily`,
+                actual: `נסיגה מ-5d: ${distFrom5d.toFixed(2)}% (סף: ${cutoffPct.toFixed(1)}%) | BTC $${(macro.btc_close||0).toLocaleString()} vs EMA9 $${(macro.btc_ema9||0).toLocaleString()} ${inMomentum ? '✓ מומנטום מאומת' : '🛡️ נסיגה -> Safe Haven!'}`,
                 met: isBull && inMomentum && !safeHavenActive,
             },
             {
                 id: "risk_node_conviction_tier",
-                title: "3. מנוע רקטת שכנוע (Conviction Rocket & ATR Tiers)",
-                subtitle: "קביעת מינוף: ATR < 2.2% & ADX >= 24 (רקטת 10x) | ATR < 2.8% (5.0x) | בסיס (2.5x)",
-                criteria: "ATR < 2.2% & ADX >= 24 -> 10.0x | ATR < 2.8% -> 5.0x | ATR >= 2.8% -> 2.5x",
-                actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || (effectiveLev >= 8 ? '🚀 10x Conviction Rocket' : (effectiveLev >= 4 ? '5.0x Tier' : '2.5x Base Tier'))}`,
+                title: "3. מנוע רקטת שכנוע ותנודתיות (Conviction Rocket 20x Engine)",
+                subtitle: "קביעת מינוף דינמי: ATR < 2.1% & ADX >= 25 (רקטת 20x מוגנת) | ATR < 2.2% (10x) | ATR < 2.8% (5.0x) | בסיס (2.5x)",
+                criteria: "ATR < 2.1% & ADX >= 25 -> 20x | ATR < 2.2% -> 10x | ATR < 2.8% -> 5x | Base -> 2.5x",
+                actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || (effectiveLev >= 15 ? '🚀 20x Super Conviction Rocket' : (effectiveLev >= 8 ? '🚀 10x Conviction Rocket' : (effectiveLev >= 4 ? '5.0x Tier' : '2.5x Base Tier')))}`,
                 met: isBull && inMomentum && !safeHavenActive,
             },
             {
+                id: "risk_node_binance_bracket",
+                title: "4. מדרגות דירוג בינאנס (Binance Tiered Margin Bracket Gate)",
+                subtitle: `מגבלת מינוף רשמית בבינאנס לפי גודל הון/פוזיציה (הון: $${accountEquity.toLocaleString()})`,
+                criteria: "≤$50k: Max 20x | ≤$250k: Max 10x | ≤$1M: Max 5x | ≤$5M: Max 3x | >$5M: Max 2x",
+                actual: `${bracketDesc} | הון: $${accountEquity.toLocaleString()} → מינוף מורשה מקס: ${bracketMaxLev.toFixed(0)}x`,
+                met: true,
+            },
+            {
                 id: "risk_node_flash_breaker",
-                title: "4. מפסק ביטחון לנרות פלאש (Intraday Flash Circuit Breaker)",
-                subtitle: "צניחה תוך-יומית מנר הפתיחה מעבר ל-3.8%- חותכת מיידית ל-1.0x ספוט",
+                title: "5. מפסק ביטחון לנרות פלאש (Intraday Flash Circuit Breaker)",
+                subtitle: "צניחה תוך-יומית מנר הפתיחה מעבר ל-2.2%- ב-20x (או 3.8%- בבסיס) חותכת מיידית ל-1.0x ספוט",
                 criteria: `Intraday Dip >= ${flashLimit.toFixed(1)}% (נר בטוח)`,
                 actual: `${intradayDip.toFixed(2)}% מהפתיחה ${flashTriggered ? '⚠️ הופעל מפסק ביטחון!' : '✓ תקין ומוגן'}`,
                 met: !flashTriggered,
             },
             {
                 id: "risk_node_reentry_ladder",
-                title: "5. סולם כניסה מחדש ב-4 שלבים (Controlled Re-Entry Ladder)",
-                subtitle: "חזרה מדורגת לאחר מפסק: שלב 1 (1.0x) ← שלב 2 (2.0x) ← שלב 3 (4.0x) ← שלב 4 (10.0x)",
-                criteria: "שלב 1: 1.0x | שלב 2: 2.0x | שלב 3: 4.0x | שלב 4+: 10.0x מלא",
+                title: "6. סולם כניסה מחדש ב-5 שלבים (5-Step Controlled Re-Entry Ladder)",
+                subtitle: "חזרה מדורגת לאחר מפסק: שלב 1 (1.0x) ← שלב 2 (2.0x) ← שלב 3 (4.0x) ← שלב 4 (10.0x) ← שלב 5 (20.0x)",
+                criteria: "שלב 1: 1.0x | שלב 2: 2.0x | שלב 3: 4.0x | שלב 4: 10.0x | שלב 5: 20.0x",
                 actual: `${ladderStep} (תקרה: ${ladderCap.toFixed(1)}x, נרות מאז טריגר: ${barsSinceTrip})`,
                 met: barsSinceTrip > 4,
+            },
+            {
+                id: "risk_node_safe_haven",
+                title: "7. עוגן מזומן בתשואה חסרת סיכון (Safe Haven 70% Cash Yield)",
+                subtitle: "70% מזומן דולרי בריבית 4% APY + 20% ספוט סולידי + 10% מיקרו לוויין בזמן תיקונים",
+                criteria: `${safeCashPct}% Cash @ 4.0% APY במצב הגנה | 100% מושקע במומנטום מלא`,
+                actual: safeHavenActive ? `🛡️ ${safeCashPct}% Cash Buffer (4% APY) + ${100-safeCashPct}% Spot/Micro` : "🚀 100% Capital Deployed in Momentum",
+                met: true,
+            },
+            {
+                id: "risk_node_bear_hedge",
+                title: `8. גידור שורט שיטתי בדובים (Systematic Bear Short Hedge ${bearHedgePct}% @ ${shortLev}x)`,
+                subtitle: `הגנה אקטיבית והפקת רווחים בירידות: ${bearHedgePct}% מרג'ין במינוף ${shortLev}x שורט על BTC (${netShortPct}% חשיפה)`,
+                criteria: `BTC < SMA150 -> ${bearHedgePct}% Margin @ ${shortLev}x Short BTC (${netShortPct}% Net Short)`,
+                actual: isBull ? "✓ משטר שוורים (שורט רדום)" : `🐻 שורט פעיל: ${bearHedgePct}% ממונף ${shortLev}x (-${netShortPct}% נטו)`,
+                met: isBull,
             }
         ];
 
         html += `
             <div class="tree-root-card">
                 <span class="root-badge">🌳 START ROOT NODE</span>
-                <div class="root-title">עץ ניהול סיכונים ורקטת שכנוע (INSTITUTIONAL CRASH SHIELD & 10x ROCKET TREE)</div>
-                <div class="root-subtitle">שער מומנטום מוסדי (EMA9 & 5d-High), מגן Safe Haven (60% מזומן 4% APY), רקטת 10x, סולם חזרה וגידור שורט 2.0x</div>
+                <div class="root-title">עץ ניהול סיכונים ורקטת שכנוע (INSTITUTIONAL CRASH SHIELD & 20x CONVICTION TREE)</div>
+                <div class="root-subtitle">שער מומנטום מוסדי (EMA9 & 5d-High), מגן Safe Haven (${safeCashPct}% מזומן 4% APY), רקטת 20x מוגנת, מדרגות דירוג בינאנס וגידור שורט ${shortLev}x (${bearHedgePct}%)</div>
             </div>
             <div class="tree-branch-container">
                 <div class="tree-branch-line tree-branch-pass"></div>
@@ -2871,15 +2909,15 @@ function renderBinaryTree(data) {
         if (macro.regime === "BEAR") {
             html += `
                 <div class="tree-leaf-outcome outcome-sell-triggered">
-                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — 35% SHORT @ 2.0x + 65% CASH YIELD 4%)</div>
-                    <div class="outcome-desc">ביטקוין מתחת לממוצעים: סגירת כל פוזיציות הלונג + פתיחת 35% שורט במינוף 2.0x על BTC (חשיפה -70%), לצד 65% מזומן דולרי המניב ריבית 4% APY.</div>
+                    <div class="outcome-title">🐻 משטר דובים פעיל (BEAR REGIME — ${bearHedgePct}% SHORT @ ${shortLev}x + ${Math.max(0, 100 - bearHedgePct)}% CASH YIELD 4%)</div>
+                    <div class="outcome-desc">ביטקוין מתחת לממוצעים: סגירת כל פוזיציות הלונג + פתיחת ${bearHedgePct}% שורט במינוף ${shortLev}x על BTC (חשיפה של -${netShortPct}%), לצד ${Math.max(0, 100 - bearHedgePct)}% מזומן דולרי המניב ריבית 4% APY.</div>
                 </div>
             `;
         } else if (safeHavenActive) {
             html += `
                 <div class="tree-leaf-outcome outcome-buy-waiting">
                     <div class="outcome-title">🛡️ מגן SAFE HAVEN פעיל (CRASH SHIELD: 1.0x SPOT — 60% CASH YIELD @ 4% APY)</div>
-                    <div class="outcome-desc">נסיגה מעל 2.0%- משיא 5 ימים או שבירת EMA9 יומית: המינוף קוצץ מיידית ל-1.0x ספוט ללא חוב מימוני, 60% מההון הועבר למזומן תשואה, ופירמידינג ננעל להגנה מושלמת על ההון!</div>
+                    <div class="outcome-desc">נסיגה מעל ${Math.abs(cutoffPct).toFixed(1)}%- משיא 5 ימים או שבירת EMA9 יומית: המינוף קוצץ מיידית ל-1.0x ספוט ללא חוב מימוני, 60% מההון הועבר למזומן תשואה, ופירמידינג ננעל להגנה מושלמת על ההון!</div>
                 </div>
             `;
         } else if (flashTriggered) {
@@ -2893,7 +2931,7 @@ function renderBinaryTree(data) {
             html += `
                 <div class="tree-leaf-outcome outcome-buy-success">
                     <div class="outcome-title">🚀 רקטת שכנוע 10x פעילה (MAX CONVICTION ROCKET: ${effectiveLev.toFixed(1)}x — ${totalExposure}% EXPOSURE)</div>
-                    <div class="outcome-desc">מומנטום חי מאושר (מעל EMA9 ובטווח 2% משיא 5 ימים), תנודתיות נמוכה (ATR ${btcAtr.toFixed(2)}%) ו-ADX מובהק (${btcAdx.toFixed(1)}). המערכת מזנקת למינוף מירבי פי 10 למקסום רווח שיא!</div>
+                    <div class="outcome-desc">מומנטום חי מאושר (מעל EMA9 ובטווח ${Math.abs(cutoffPct).toFixed(1)}% משיא 5 ימים), תנודתיות נמוכה (ATR ${btcAtr.toFixed(2)}%) ו-ADX מובהק (${btcAdx.toFixed(1)}). המערכת מזנקת למינוף מירבי פי 10 למקסום רווח שיא!</div>
                 </div>
             `;
         } else {
@@ -3254,30 +3292,44 @@ function renderDashboardPipeline(data) {
         const ladderCap = macro.ladder_cap || 10.0;
         const effectiveLev = macro.effective_leverage || (isBull ? 2.5 : 0.0);
         const totalExposure = macro.total_crypto_weight_pct || (isBull ? 205 : 0);
+        const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -3.0;
+        const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
+        const bearHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 45;
+        const netShortPct = Math.round(bearHedgePct * parseFloat(shortLev));
+        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 70;
+        const binanceBracket = macro.binance_tier_bracket || {};
+        const accountEquity = binanceBracket.account_equity || 2000;
+        const bracketTier = binanceBracket.tier || 1;
+        const bracketMaxLev = binanceBracket.max_allowed_leverage || 20.0;
+        const bracketDesc = binanceBracket.bracket_desc || "Tier 1: ≤$50,000 (Max 20x)";
+        const isBracketClamped = !!binanceBracket.is_clamped;
 
         const btcDistSma = macro.btc_sma150 ? ((btcClose - macro.btc_sma150) / macro.btc_sma150) * 100 : 0;
         const r1_prog = isBull ? 100 : Math.max(0, Math.min(99, Math.round(100 + btcDistSma)));
         const r1_label = isBull ? `+${btcDistSma.toFixed(1)}% מעל הסף` : `חסר ${Math.abs(btcDistSma).toFixed(1)}% ל-SMA`;
 
-        const pbGap = dist5d - (-2.0);
+        const pbGap = dist5d - cutoffPct;
         const r2_prog = inMomentum ? 100 : Math.max(15, Math.min(95, Math.round(100 + pbGap * 15)));
         const r2_label = inMomentum ? "✓ 100% מומנטום" : `חריגה ${Math.abs(pbGap).toFixed(1)}% משיא 5d`;
 
-        const r3_prog = effectiveLev >= 10.0 ? 100 : (effectiveLev >= 5.0 ? 75 : (effectiveLev >= 2.5 ? 50 : 25));
+        const r3_prog = effectiveLev >= 20.0 ? 100 : (effectiveLev >= 10.0 ? 80 : (effectiveLev >= 5.0 ? 50 : 25));
         const r3_label = `מינוף ${effectiveLev.toFixed(1)}x פעיל`;
 
+        const r4_bracket_prog = isBracketClamped ? Math.round((bracketMaxLev / 20.0) * 100) : 100;
+        const r4_bracket_label = isBracketClamped ? `מוגבל דירוג (${bracketMaxLev.toFixed(0)}x)` : `דירוג T${bracketTier} (${bracketMaxLev.toFixed(0)}x)`;
+
         const flashMargin = (Math.abs(flashLimit) - Math.abs(intradayDip));
-        const r4_prog = !flashTriggered ? 100 : 0;
-        const r4_label = !flashTriggered ? `מרווח: ${flashMargin.toFixed(1)}%` : `צניחה ${Math.abs(intradayDip).toFixed(1)}%`;
+        const r5_prog = !flashTriggered ? 100 : 0;
+        const r5_label = !flashTriggered ? `מרווח: ${flashMargin.toFixed(1)}%` : `צניחה ${Math.abs(intradayDip).toFixed(1)}%`;
 
-        const r5_prog = barsSinceTrip > 4 ? 100 : Math.round((barsSinceTrip / 4) * 100);
-        const r5_label = barsSinceTrip > 4 ? "✓ 100% מושלם" : `שלב ${barsSinceTrip}/4 (${r5_prog}%)`;
+        const r6_prog = barsSinceTrip > 5 ? 100 : Math.round((barsSinceTrip / 5) * 100);
+        const r6_label = barsSinceTrip > 5 ? "✓ 100% מושלם" : `שלב ${barsSinceTrip}/5 (${r6_prog}%)`;
 
-        const r6_prog = 100;
-        const r6_label = safeHavenActive ? "🛡️ 60% מזומן" : "🚀 100% מושקע";
+        const r7_prog = 100;
+        const r7_label = safeHavenActive ? `🛡️ ${safeCashPct}% מזומן` : "🚀 100% מושקע";
 
-        const r7_prog = isBull ? 100 : 0;
-        const r7_label = isBull ? "✓ מוגן (רדום)" : "🐻 שורט פעיל";
+        const r8_prog = isBull ? 100 : 0;
+        const r8_label = isBull ? "✓ מוגן (רדום)" : `🐻 שורט -${netShortPct}%`;
 
         const riskNodes = [
             {
@@ -3297,79 +3349,92 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_2",
                 shortTitle: "2. מגן מפולת",
                 fullTitle: "2. שער מומנטום ומגן מפולת (Crash Shield Gate)",
-                criteria: `5d Pullback >= -2.0% & Close >= EMA9 ($${(ema9||0).toLocaleString()})`,
+                criteria: `5d Pullback >= ${cutoffPct.toFixed(1)}% & Close >= EMA9 ($${(ema9||0).toLocaleString()})`,
                 actual: `5d PB: ${dist5d.toFixed(2)}% | EMA9: $${(ema9||0).toLocaleString()} (${inMomentum ? '🚀 מומנטום' : '🛡️ Safe Haven'})`,
                 live_val: `5d: ${dist5d.toFixed(1)}%`,
                 badge: inMomentum ? "🚀 מומנטום" : "🛡️ Safe Haven",
                 progress_pct: r2_prog,
                 progress_label: r2_label,
                 met: inMomentum,
-                explanation: "שער הכניסה למינוף מוגבר: נסיגה מעל 2%- משיא 5 ימים מפעילה מיד Safe Haven והורדה ל-1.0x ספוט."
+                explanation: `שער הכניסה למינוף מוגבר: נסיגה מעל ${Math.abs(cutoffPct).toFixed(1)}%- משיא 5 ימים או שבירת EMA9 מפעילה מיד Safe Haven והורדה ל-1.0x ספוט.`
             },
             {
                 id: "dash_risk_3",
                 shortTitle: "3. מנוע מינוף",
-                fullTitle: "3. מנוע מינוף דינמי (Dynamic Conviction Engine)",
-                criteria: "ATR < 2.2% & ADX >= 24 (10x) | ATR < 2.8% (5x) | Base (2.5x)",
+                fullTitle: "3. מנוע מינוף דינמי ורקטת שכנוע (Conviction Rocket 20x Engine)",
+                criteria: "ATR < 2.1% & ADX >= 25 (20x) | ATR < 2.2% (10x) | ATR < 2.8% (5x) | Base (2.5x)",
                 actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || `${effectiveLev.toFixed(1)}x Tier`}`,
                 live_val: `${effectiveLev.toFixed(1)}x Tier`,
                 badge: `${effectiveLev.toFixed(1)}x`,
                 progress_pct: r3_prog,
                 progress_label: r3_label,
                 met: isBull && inMomentum && effectiveLev >= 2.5,
-                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 10x ברגיעה ומומנטום, ו-5.0x / 2.5x בתנודתיות."
+                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 20x ברגיעה ומומנטום מובהק, 10x/5.0x/2.5x בתנודתיות, או 1.0x ספוט."
             },
             {
                 id: "dash_risk_4",
-                shortTitle: "4. מפסק פלאש",
-                fullTitle: "4. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
+                shortTitle: "4. מדרגות בינאנס",
+                fullTitle: "4. מדרגות דירוג בינאנס (Binance Tiered Margin Bracket Gate)",
+                criteria: "≤$50k: Max 20x | ≤$250k: Max 10x | ≤$1M: Max 5x | ≤$5M: Max 3x",
+                actual: `${bracketDesc} | הון נוכחי: $${accountEquity.toLocaleString()}`,
+                live_val: `T${bracketTier}: ${bracketMaxLev.toFixed(0)}x מקס`,
+                badge: isBracketClamped ? `⚠️ מוגבל ל-${bracketMaxLev.toFixed(0)}x` : `✓ מורשה (${bracketMaxLev.toFixed(0)}x)`,
+                progress_pct: r4_bracket_prog,
+                progress_label: r4_bracket_label,
+                met: true,
+                explanation: "הגנת מדרגות דירוג ומינוף רשמיות של בינאנס (Tiered Margin Brackets) לפי גודל הפוזיציה וההון. מבטיח אפס שגיאות API (-4028) ומסחר מדויק ומבוקר."
+            },
+            {
+                id: "dash_risk_5",
+                shortTitle: "5. מפסק פלאש",
+                fullTitle: "5. מפסק ביטחון לנרות פלאש (Intraday Flash Circuit Breaker)",
                 criteria: `Intraday Dip >= ${flashLimit.toFixed(1)}%`,
                 actual: `${intradayDip.toFixed(2)}% ${flashTriggered ? '⚠️ הופעל!' : '✓ תקין'}`,
                 live_val: `${intradayDip.toFixed(1)}%`,
                 badge: flashTriggered ? "⚡ הופעל!" : "✓ תקין",
-                progress_pct: r4_prog,
-                progress_label: r4_label,
-                met: !flashTriggered,
-                explanation: "מפסק הגנה תוך-יומי החותך מיידית את המינוף ל-1.0x אם נר יומי צונח מעל 3.8%- מפתיחה."
-            },
-            {
-                id: "dash_risk_5",
-                shortTitle: "5. סולם חזרה",
-                fullTitle: "5. סולם כניסה מחדש מדורג (4-Step Re-Entry Ladder)",
-                criteria: "התאוששות 4 שלבים: 1.0x → 2.0x → 4.0x → 10.0x",
-                actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
-                live_val: ladderStep,
-                badge: `תקרה ${ladderCap.toFixed(0)}x`,
                 progress_pct: r5_prog,
                 progress_label: r5_label,
-                met: barsSinceTrip > 4,
-                explanation: "מניעת מלכודות שוורים: חזרה הדרגתית ומבוקרת למינוף מלא ב-4 שלבים מדודים."
+                met: !flashTriggered,
+                explanation: "מפסק הגנה תוך-יומי החותך מיידית את המינוף ל-1.0x אם נר יומי צונח מעבר ל-2.2%- (ב-20x) או 3.8%- (בבסיס)."
             },
             {
                 id: "dash_risk_6",
-                shortTitle: "6. עוגן מזומן",
-                fullTitle: "6. עוגן מזומן בתשואה חסרת סיכון (Safe Haven Cash Yield)",
-                criteria: "60% Cash @ 4.0% APY במצב הגנה | 100% מושקע במומנטום מלא",
-                actual: safeHavenActive ? "🛡️ 60% Cash Buffer (4% APY) + 30% Spot" : "🚀 100% Capital Deployed",
-                live_val: safeHavenActive ? "60% Cash @ 4%" : "100% מושקע",
-                badge: safeHavenActive ? "4% APY" : "🚀 מומנטום",
+                shortTitle: "6. סולם חזרה",
+                fullTitle: "6. סולם כניסה מחדש מדורג ב-5 שלבים (5-Step Re-Entry Ladder)",
+                criteria: "התאוששות 5 שלבים: 1.0x → 2.0x → 4.0x → 10.0x → 20.0x",
+                actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
+                live_val: ladderStep,
+                badge: `תקרה ${ladderCap.toFixed(0)}x`,
                 progress_pct: r6_prog,
                 progress_label: r6_label,
-                met: true,
-                explanation: "הקצאת 60% מההון למזומן בריבית 4% כשהשוק בתיקון, לשמירה מוחלטת על הקרן."
+                met: barsSinceTrip > 5,
+                explanation: "מניעת מלכודות שוורים: חזרה הדרגתית ומבוקרת למינוף מלא ב-5 שלבים מדודים."
             },
             {
                 id: "dash_risk_7",
-                shortTitle: "7. גידור שורט",
-                fullTitle: "7. גידור שורט שיטתי בשוק דובי (Systematic Bear Short Hedge)",
-                criteria: "BTC < SMA150 -> 35% Margin @ 2.0x Short BTC (70% Net Short)",
-                actual: isBull ? "✓ משטר שוורים (שורט רדום)" : "🐻 שורט פעיל: 35% ממונף 2.0x",
-                live_val: isBull ? "לונגים מאושרים" : "-70% Net Short",
-                badge: isBull ? "✓ תקין" : "🐻 שורט פעיל",
+                shortTitle: "7. עוגן מזומן",
+                fullTitle: "7. עוגן מזומן בתשואה חסרת סיכון (Safe Haven Cash Yield)",
+                criteria: `${safeCashPct}% Cash @ 4.0% APY במצב הגנה | 100% מושקע במומנטום מלא`,
+                actual: safeHavenActive ? `🛡️ ${safeCashPct}% Cash Buffer (4% APY) + ${100-safeCashPct}% Spot/Micro` : "🚀 100% Capital Deployed",
+                live_val: safeHavenActive ? `${safeCashPct}% Cash @ 4%` : "100% מושקע",
+                badge: safeHavenActive ? "4% APY" : "🚀 מומנטום",
                 progress_pct: r7_prog,
                 progress_label: r7_label,
+                met: true,
+                explanation: `הקצאת ${safeCashPct}% מההון למזומן בריבית 4% כשהשוק בתיקון, לשמירה מוחלטת על הקרן.`
+            },
+            {
+                id: "dash_risk_8",
+                shortTitle: "8. גידור שורט",
+                fullTitle: `8. גידור שורט שיטתי בשוק דובי (Systematic Bear Short Hedge ${bearHedgePct}% @ ${shortLev}x)`,
+                criteria: `BTC < SMA150 -> ${bearHedgePct}% Margin @ ${shortLev}x Short BTC (${netShortPct}% Net Short)`,
+                actual: isBull ? "✓ משטר שוורים (שורט רדום)" : `🐻 שורט פעיל: ${bearHedgePct}% ממונף ${shortLev}x (-${netShortPct}% נטו)`,
+                live_val: isBull ? "לונגים מאושרים" : `-${netShortPct}% Net Short`,
+                badge: isBull ? "✓ תקין" : "🐻 שורט פעיל",
+                progress_pct: r8_prog,
+                progress_label: r8_label,
                 met: isBull,
-                explanation: "הגנה אקטיבית: הקצאת 35% מההון לשורט ממונף 2.0x על ביטקוין כאשר השוק עובר למשטר דובים."
+                explanation: `הגנה אקטיבית: הקצאת ${bearHedgePct}% מההון לשורט ממונף ${shortLev}x על ביטקוין (${netShortPct}% חשיפה נומינלית) כאשר השוק עובר למשטר דובים.`
             }
         ];
 
@@ -3380,18 +3445,22 @@ function renderDashboardPipeline(data) {
         let outcomeIcon = "";
 
         if (macro.regime === "BEAR") {
-            outcomeText = "BEAR (35% SHORT HEDGE @ 2.0x)";
+            outcomeText = `BEAR (${bearHedgePct}% SHORT HEDGE @ ${shortLev}x)`;
             outcomeClass = "sell-triggered";
             outcomeIcon = "🐻";
         } else if (safeHavenActive) {
-            outcomeText = `SAFE HAVEN SHIELD (1.0x SPOT | 60% CASH @ 4% APY)`;
+            outcomeText = `SAFE HAVEN SHIELD (1.0x SPOT | ${safeCashPct}% CASH @ 4% APY)`;
             outcomeClass = "blocking";
             outcomeIcon = "🛡️";
         } else if (flashTriggered) {
             outcomeText = `FLASH BREAKER (1.0x SPOT)`;
             outcomeClass = "blocking";
             outcomeIcon = "⚡";
-        } else if (effectiveLev >= 10.0) {
+        } else if (effectiveLev >= 18.0) {
+            outcomeText = `SUPER CONVICTION ROCKET (20.0x | ${totalExposure}%)`;
+            outcomeClass = "pass";
+            outcomeIcon = "🚀";
+        } else if (effectiveLev >= 8.0) {
             outcomeText = `CONVICTION ROCKET (10.0x | ${totalExposure}%)`;
             outcomeClass = "pass";
             outcomeIcon = "🚀";
@@ -3414,7 +3483,7 @@ function renderDashboardPipeline(data) {
             <div class="pipeline-card">
                 <div class="pipeline-card-header">
                     <div class="pipeline-coin-info">
-                        <span class="pipeline-coin-badge">🛡️ INSTITUTIONAL CRASH SHIELD & 10x ENGINE</span>
+                        <span class="pipeline-coin-badge">🛡️ INSTITUTIONAL CRASH SHIELD & 20x ENGINE</span>
                         <span class="pipeline-type-tag risk">LADDER סיכונים ומקרו</span>
                     </div>
                     <span class="pipeline-outcome-pill ${outcomeClass}">${outcomeIcon} ${outcomeText}</span>
@@ -3616,7 +3685,10 @@ function renderStrategyConditions(data) {
     if (levEl) {
         const lev = macro.effective_leverage || 1.0;
         const isSafeHaven = !!(macro && macro.safe_haven_active);
-        levEl.textContent = isBull ? (isSafeHaven ? "Safe Haven: 1.0x (60% Cash)" : `Leverage: ${lev.toFixed(1)}x`) : "Short Hedge: 35% @ 2.0x";
+        const bearHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 45;
+        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 70;
+        const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
+        levEl.textContent = isBull ? (isSafeHaven ? `Safe Haven: 1.0x (${safeCashPct}% Cash)` : `Leverage: ${lev.toFixed(1)}x`) : `Short Hedge: ${bearHedgePct}% @ ${shortLev}x`;
     }
 
     // 2. Render Asset Condition Cards
@@ -4444,7 +4516,7 @@ function handleRegimeHover(e, canvas, tooltip) {
 
     if (closest && minDistance < 40) {
         const gapSign = closest.gap >= 0 ? "+" : "";
-        const regimeName = closest.isBull ? "BULL MARKET (10x Conviction Rocket & Crash Shield)" : "BEAR MARKET (35% Short BTC @ 2.0x + 65% Cash Yield)";
+        const regimeName = closest.isBull ? "BULL MARKET (20x Conviction Rocket & Crash Shield)" : "BEAR MARKET (45% Short BTC @ 2.5x + 55% Cash Yield)";
         const regimeColor = closest.isBull ? "#34d399" : "#f43f5e";
 
         tooltip.innerHTML = `

@@ -51,18 +51,20 @@ class StrategyConfig:
     assets: dict[str, AssetConfig] = field(default_factory=dict)
     warmup_candles: int = 1200
     sma_regime_period: int = 150
-    conviction_leverage: float = 10.0
+    conviction_leverage: float = 20.0
     bull_leverage: float = 10.0
     mid_leverage: float = 5.0
     base_leverage: float = 2.5
     min_leverage: float = 1.0
-    momentum_cutoff_pct: float = -0.02
-    safe_cash_weight: float = 0.60
-    safe_spot_weight: float = 0.30
+    momentum_cutoff_pct: float = -0.030
+    safe_cash_weight: float = 0.70
+    safe_spot_weight: float = 0.20
     safe_micro_weight: float = 0.10
     flash_wick_limit: float = -0.038
-    ladder_steps: list[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0])
-    bear_short_hedge_weight: float = 0.35   # 0.35 for 35% margin @ 2.0x short hedge on BTC
+    flash_wick_limit_20x: float = -0.022
+    atr_20x_limit: float = 0.021
+    ladder_steps: list[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0, 20.0])
+    bear_short_hedge_weight: float = 0.45   # 0.45 for 45% margin @ 2.0x short hedge on BTC
     short_leverage: float = 2.0            # 2.0x leverage for short hedge
     cash_apr: float = 0.04
     core_ratio: float = 0.80               # Macro/Micro allocation split
@@ -83,6 +85,7 @@ class RiskConfig:
     kill_switch: bool = False
     max_drawdown_pct: float = 0.60
     min_order_value_usd: float = 11.0     # Binance minimum
+    deviation_threshold: float = 0.06     # 6.0% rebalance deviation threshold
 
 
 @dataclass
@@ -234,7 +237,7 @@ class ConfigManager:
             mid_leverage=s_raw.get("mid_leverage", 5.0),
             base_leverage=s_raw.get("base_leverage", 2.5),
             min_leverage=s_raw.get("min_leverage", 1.0),
-            momentum_cutoff_pct=s_raw.get("momentum_cutoff_pct", -0.02),
+            momentum_cutoff_pct=s_raw.get("momentum_cutoff_pct", -0.045),
             safe_cash_weight=s_raw.get("safe_cash_weight", 0.60),
             safe_spot_weight=s_raw.get("safe_spot_weight", 0.30),
             safe_micro_weight=s_raw.get("safe_micro_weight", 0.10),
@@ -261,6 +264,7 @@ class ConfigManager:
             kill_switch=r_raw.get("kill_switch", False),
             max_drawdown_pct=r_raw.get("max_drawdown_pct", 0.60),
             min_order_value_usd=r_raw.get("min_order_value_usd", 11.0),
+            deviation_threshold=r_raw.get("deviation_threshold", 0.06),
         )
 
     def _load_state(self, config: BotConfig, raw: dict) -> None:

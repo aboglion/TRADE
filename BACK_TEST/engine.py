@@ -876,8 +876,10 @@ def run_dynamic_adaptive_engine(
                     port_r = (safe_cash_weight * (1.0 + daily_cash_yield)) + (safe_spot_weight * r_bh) + (safe_micro_weight * r_hy)
                 else:
                     # 🚀 Conviction Engine Active
-                    if atr_p < 0.022 and adx_v >= 24.0:
-                        selected_lev = conviction_leverage
+                    if conviction_leverage >= 20.0 and atr_p < 0.021 and adx_v >= 25.0:
+                        selected_lev = 20.0
+                    elif atr_p < 0.022 and adx_v >= 24.0:
+                        selected_lev = min(10.0, conviction_leverage) if conviction_leverage < 20.0 else 10.0
                     elif atr_p < 0.028:
                         selected_lev = mid_leverage
                     else:
@@ -889,11 +891,12 @@ def run_dynamic_adaptive_engine(
                             ladder_cap = ladder_steps[bars_since_circuit_trip - 1]
                             selected_lev = min(selected_lev, ladder_cap)
 
-                    # Intraday Flash Circuit Breaker
-                    if selected_lev > 1.0 and intraday_dip < flash_wick_limit:
+                    # Intraday Flash Circuit Breaker (tighter -2.2% if in 20x tier)
+                    active_flash_limit = -0.022 if selected_lev > 10.0 else flash_wick_limit
+                    if selected_lev > 1.0 and intraday_dip < active_flash_limit:
                         bars_since_circuit_trip = 1
-                        excess = min(0.0, (r_bh - 1.0) - flash_wick_limit)
-                        r_bh_lev = 1.0 + (flash_wick_limit * selected_lev) + excess
+                        excess = min(0.0, (r_bh - 1.0) - active_flash_limit)
+                        r_bh_lev = 1.0 + (active_flash_limit * selected_lev) + excess
                     else:
                         bars_since_circuit_trip += 1
                         r_bh_lev = 1.0 + (r_bh - 1.0) * selected_lev
@@ -966,22 +969,22 @@ def run_dynamic_adaptive_engine(
 def run_dynamic_adaptive_20x_engine(
     initial_capital=1000.0,
     weights=None,
-    conviction_leverage=10.0,
+    conviction_leverage=20.0,
     bull_leverage=10.0,
     mid_leverage=5.0,
     base_leverage=2.5,
     min_leverage=1.0,
-    momentum_cutoff_pct=-0.02,
-    safe_cash_weight=0.60,
-    safe_spot_weight=0.30,
+    momentum_cutoff_pct=-0.030,
+    safe_cash_weight=0.70,
+    safe_spot_weight=0.20,
     safe_micro_weight=0.10,
-    bear_short_hedge=0.35,
-    short_leverage=2.0,
+    bear_short_hedge=0.45,
+    short_leverage=2.5,
     cash_apr=0.04,
     flash_wick_limit=-0.038,
-    ladder_steps=(1.0, 2.0, 4.0, 10.0)
+    ladder_steps=(1.0, 2.0, 4.0, 10.0, 20.0)
 ):
-    """Institutional Crash Shield & 10x Conviction Rocket production engine with 100% Live Strategy parity."""
+    """Institutional Crash Shield & Guarded 20x Conviction Rocket production engine with 100% Live Strategy parity."""
     return run_dynamic_adaptive_engine(
         initial_capital=initial_capital,
         weights=weights,

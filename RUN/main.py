@@ -293,6 +293,7 @@ def main() -> None:
     )
     portfolio_service = PortfolioService(
         gateway,
+        deviation_threshold=getattr(config.risk, "deviation_threshold", 0.06),
         allow_market_orders=config.risk.allow_market_orders,
         is_futures=(config.exchange.market_type == "future"),
     )
@@ -309,19 +310,21 @@ def main() -> None:
     macro_strategy = RegimeAdaptiveStrategy(
         asset_weights=asset_weights,
         sma_regime_period=config.strategy.sma_regime_period,
-        conviction_leverage=getattr(config.strategy, "conviction_leverage", 10.0),
+        conviction_leverage=getattr(config.strategy, "conviction_leverage", 20.0),
         bull_leverage=config.strategy.bull_leverage,
         mid_leverage=config.strategy.mid_leverage,
         base_leverage=getattr(config.strategy, "base_leverage", 2.5),
         min_leverage=config.strategy.min_leverage,
-        momentum_cutoff_pct=getattr(config.strategy, "momentum_cutoff_pct", -0.02),
-        safe_cash_weight=getattr(config.strategy, "safe_cash_weight", 0.60),
-        safe_spot_weight=getattr(config.strategy, "safe_spot_weight", 0.30),
+        momentum_cutoff_pct=getattr(config.strategy, "momentum_cutoff_pct", -0.030),
+        safe_cash_weight=getattr(config.strategy, "safe_cash_weight", 0.70),
+        safe_spot_weight=getattr(config.strategy, "safe_spot_weight", 0.20),
         safe_micro_weight=getattr(config.strategy, "safe_micro_weight", 0.10),
         flash_wick_limit=config.strategy.flash_wick_limit,
+        flash_wick_limit_20x=getattr(config.strategy, "flash_wick_limit_20x", -0.022),
+        atr_20x_limit=getattr(config.strategy, "atr_20x_limit", 0.021),
         ladder_steps=config.strategy.ladder_steps,
         bear_short_hedge_weight=config.strategy.bear_short_hedge_weight,
-        short_leverage=getattr(config.strategy, "short_leverage", 2.0),
+        short_leverage=getattr(config.strategy, "short_leverage", 2.5),
         core_ratio=config.strategy.core_ratio,
     )
     

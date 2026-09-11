@@ -287,13 +287,17 @@ class BotOrchestrator:
 
             if hasattr(self._gateway, "set_leverage"):
                 for p in pairs.values():
+                    lev_to_set = 1.0
                     try:
                         if is_bear_regime:
                             # In Bear: set short_leverage for the hedge symbol, 1x for others
                             btc_pair = next((v for v in pairs.values() if "BTC" in v), None)
-                            lev_to_set = max(1.0, float(short_lev)) if p == btc_pair else 1.0
+                            raw_lev = max(1.0, float(short_lev)) if p == btc_pair else 1.0
                         else:
-                            lev_to_set = clamped_lev
+                            raw_lev = clamped_lev
+                        from src.utils.math_utils import clamp_leverage_by_binance_bracket
+                        notional_approx = float(portfolio.total_value_usd or 0.0) * raw_lev
+                        lev_to_set = clamp_leverage_by_binance_bracket(p, raw_lev, notional_approx)
                         self._gateway.set_leverage(lev_to_set, p)
                     except Exception as ex:
                         logger.warning("Could not sync leverage=%.1fx for %s: %s", lev_to_set, p, ex)

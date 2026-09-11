@@ -31,7 +31,7 @@ from src.utils.math_utils import (
 logger = logging.getLogger("bot.services.portfolio")
 
 # Minimum deviation to trigger a rebalance (percentage points)
-DEFAULT_DEVIATION_THRESHOLD = 0.03  # 3%
+DEFAULT_DEVIATION_THRESHOLD = 0.06  # 6%
 
 
 class PortfolioService:

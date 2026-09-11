@@ -11,22 +11,25 @@ strategy:
   timeframe: 4h
   warmup_candles: 1200
   sma_regime_period: 150
-  conviction_leverage: 10.0
+  conviction_leverage: 20.0
   bull_leverage: 10.0
   mid_leverage: 5.0
   base_leverage: 2.5
   min_leverage: 1.0
-  momentum_cutoff_pct: -0.02
-  safe_cash_weight: 0.6
-  safe_spot_weight: 0.3
-  safe_micro_weight: 0.1
+  momentum_cutoff_pct: -0.030
+  safe_cash_weight: 0.70
+  safe_spot_weight: 0.20
+  safe_micro_weight: 0.10
   flash_wick_limit: -0.038
+  flash_wick_limit_20x: -0.022
+  atr_20x_limit: 0.021
   ladder_steps:
   - 1.0
   - 2.0
   - 4.0
   - 10.0
-  bear_short_hedge_weight: 0.35
+  - 20.0
+  bear_short_hedge_weight: 0.45
   short_leverage: 2.0
   cash_apr: 0.04
   assets:
@@ -44,6 +47,7 @@ risk:
   max_single_order_usd: 10000
   max_portfolio_change_pct: 3.5
   min_seconds_between_orders: 1
+  deviation_threshold: 0.06
   allowed_symbols:
   - BTC/USDT
   - ETH/USDT

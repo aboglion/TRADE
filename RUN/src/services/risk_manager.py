@@ -37,7 +37,7 @@ class RiskManager(IRiskManager):
 
     def __init__(self, config: RiskConfig, is_futures: bool = False):
         self._config = config
-        self._is_futures = is_futures
+        self._is_futures = is_futures or getattr(config, "is_futures", False)
         self._cycle_order_count = 0
         self._last_order_time: float = 0.0
         self._cycle_total_value: float = 0.0
@@ -260,17 +260,26 @@ class RiskManager(IRiskManager):
         quote_holding = portfolio.holdings.get(quote) or portfolio.holdings.get("USDT") or portfolio.holdings.get("USD")
         free_quote = quote_holding.free if quote_holding else 0.0
         order_value = self._get_order_value(intent)
-        is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
+        intent_lev = float(getattr(intent, "leverage", 1.0) or 1.0)
+        is_futures_intent = (
+            intent_lev > 1.0
+            or "short" in str(getattr(intent, "reason", "")).lower()
+            or getattr(intent, "reduce_only", False)
+        )
+        is_futures_portfolio = (
+            self._is_futures
+            or is_futures_intent
+            or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
+        )
 
         side_str = (intent.side.value if hasattr(intent.side, "value") else str(intent.side)).upper()
 
-        # Spot sell requires sufficient free tokens
-        if side_str == "SELL" and (holding is None or holding.total >= 0):
+        # Spot sell requires sufficient free tokens (only when strictly in spot mode)
+        if side_str == "SELL" and not is_futures_portfolio and (holding is None or holding.total >= 0):
             available_qty = holding.free if holding else 0.0
             if (
                 intent.amount > (available_qty + 1e-6)
                 and not getattr(intent, "reduce_only", False)
-                and not is_futures_portfolio
             ):
                 return (
                     False,
@@ -292,9 +301,9 @@ class RiskManager(IRiskManager):
         if is_futures_portfolio and order_value > 0.0 and not self._is_position_reducing_order(intent, portfolio) and not getattr(intent, "reduce_only", False):
             if free_quote <= 0.0:
                 return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
-            order_lev = getattr(intent, "leverage", 1.0)
+            order_lev = getattr(intent, "leverage", 1.0) or 1.0
             holding_lev = holding.leverage if holding else 1.0
-            lev = max(1.0, float(order_lev if order_lev > 1.0 else (holding_lev if holding_lev > 1.0 else getattr(intent, "leverage", 1.0))))
+            lev = max(1.0, float(order_lev if order_lev > 1.0 else (holding_lev if holding_lev > 1.0 else 1.0)))
             margin_req = order_value / max(1.0, lev)
             if free_quote < (margin_req - 1e-4):
                 return (

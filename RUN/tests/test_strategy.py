@@ -86,7 +86,7 @@ class TestRegimeAdaptiveStrategyParity:
 
     def test_bear_regime_short_hedge(self):
         from src.strategy.hybrid_strategy import HybridStrategy
-        macro = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.15, core_ratio=0.80)
+        macro = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.15, short_leverage=1.0, core_ratio=0.80)
         micro = RegimeAdaptiveStrategy(sma_regime_period=150, bear_short_hedge_weight=0.0, core_ratio=0.20)
         hybrid = HybridStrategy(macro_strategy=macro, micro_strategy=micro, core_ratio=0.80)
 

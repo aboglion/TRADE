@@ -1136,11 +1136,47 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
             # Momentum Validation Gate (Institutional Crash Shield)
             strat_cfg = getattr(self.config, "strategy", None) if self.config else None
+            bear_hedge_w = float(getattr(strat_cfg, "bear_short_hedge_weight", 0.45))
+            short_lev = float(getattr(strat_cfg, "short_leverage", 2.0))
+            notional_short_pct = bear_hedge_w * short_lev * 100.0
+            cash_yield_pct = max(0.0, 1.0 - bear_hedge_w) * 100.0
+
+            raw_cash_w = getattr(strat_cfg, "safe_cash_weight", None)
+            safe_cash_w = float(raw_cash_w) if isinstance(raw_cash_w, (int, float)) else 0.60
+            raw_spot_w = getattr(strat_cfg, "safe_spot_weight", None)
+            safe_spot_w = float(raw_spot_w) if isinstance(raw_spot_w, (int, float)) else 0.30
+            raw_micro_w = getattr(strat_cfg, "safe_micro_weight", None)
+            safe_micro_w = float(raw_micro_w) if isinstance(raw_micro_w, (int, float)) else 0.10
+            cash_w = safe_cash_w * 100.0
+
+            account_equity = 2000.0
             try:
-                raw_cutoff = getattr(strat_cfg, "momentum_cutoff_pct", -0.02)
-                cutoff_pct = float(raw_cutoff) * 100.0 if raw_cutoff is not None else -2.0
+                if self.gateway:
+                    from src.services.portfolio_service import PortfolioService
+                    is_futures = (self.config.exchange.market_type == "future") if (self.config and hasattr(self.config, "exchange")) else False
+                    ps = PortfolioService(self.gateway, is_futures=is_futures)
+                    snap = ps.get_portfolio()
+                    if snap and snap.total_value_usd > 0:
+                        account_equity = float(snap.total_value_usd)
+            except Exception:
+                if state and getattr(state, "session_initial_value_usd", None):
+                    account_equity = float(state.session_initial_value_usd)
+
+            try:
+                raw_cutoff = getattr(strat_cfg, "momentum_cutoff_pct", -0.030)
+                cutoff_pct = float(raw_cutoff) * 100.0 if raw_cutoff is not None else -3.0
             except (TypeError, ValueError):
-                cutoff_pct = -2.0
+                cutoff_pct = -3.0
+
+            try:
+                conviction_lev = float(getattr(strat_cfg, "conviction_leverage", 20.0))
+            except (TypeError, ValueError):
+                conviction_lev = 20.0
+
+            from src.utils.math_utils import get_binance_bracket_info
+            btc_bracket = get_binance_bracket_info("BTC/USDT", conviction_lev, account_equity * conviction_lev)
+            eth_bracket = get_binance_bracket_info("ETH/USDT", conviction_lev, account_equity * conviction_lev)
+            sol_bracket = get_binance_bracket_info("SOL/USDT", conviction_lev, account_equity * conviction_lev)
 
             try:
                 raw_wick = getattr(strat_cfg, "flash_wick_limit", -0.038)
@@ -1148,15 +1184,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             except (TypeError, ValueError):
                 flash_wick_limit_pct = -3.8
 
-            flash_triggered = (btc_intraday_dip_pct < flash_wick_limit_pct)
+            try:
+                raw_wick_20x = getattr(strat_cfg, "flash_wick_limit_20x", -0.022)
+                flash_wick_20x_pct = float(raw_wick_20x) * 100.0 if raw_wick_20x is not None else -2.2
+            except (TypeError, ValueError):
+                flash_wick_20x_pct = -2.2
 
             in_momentum = (macro_regime == "BULL") and (btc_pb_from_5d >= cutoff_pct) and (btc_daily_close >= btc_ema9_daily)
             safe_haven_active = (macro_regime == "BULL") and not in_momentum
-
-            try:
-                conviction_lev = float(getattr(strat_cfg, "conviction_leverage", 10.0))
-            except (TypeError, ValueError):
-                conviction_lev = 10.0
 
             try:
                 mid_lev = float(getattr(strat_cfg, "mid_leverage", 5.0))
@@ -1168,27 +1203,34 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             except (TypeError, ValueError):
                 base_lev = 2.5
 
-            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 2.0, 4.0, 10.0])
-            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 2.0, 4.0, 10.0]
+            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 2.0, 4.0, 10.0, 20.0])
+            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 2.0, 4.0, 10.0, 20.0]
             if not ladder_steps:
-                ladder_steps = [1.0, 2.0, 4.0, 10.0]
+                ladder_steps = [1.0, 2.0, 4.0, 10.0, 20.0]
 
             if macro_regime == "BEAR":
-                leverage = 0.0
-                active_tier = "BEAR SHORT HEDGE (35% @ 2.0x Short BTC + 65% Cash Yield)"
+                leverage = short_lev
+                active_tier = f"BEAR SHORT HEDGE ({bear_hedge_w*100:.0f}% @ {short_lev:.1f}x Short BTC + {cash_yield_pct:.0f}% Cash Yield)"
                 ladder_step = "N/A"
                 ladder_cap = 0.0
-                total_crypto_exposure = -70.0
+                total_crypto_exposure = -notional_short_pct
+                active_flash_wick_limit_pct = flash_wick_limit_pct
+                flash_triggered = (btc_intraday_dip_pct < active_flash_wick_limit_pct)
             elif safe_haven_active:
                 leverage = 1.0
-                active_tier = f"🛡️ Crash Shield Safe Haven (1.0x Spot | 60% Cash @ 4% APY, 5d_pb={btc_pb_from_5d:+.1f}%)"
+                active_tier = f"🛡️ Crash Shield Safe Haven (1.0x Spot | {cash_w:.0f}% Cash @ 4% APY, 5d_pb={btc_pb_from_5d:+.1f}%)"
                 ladder_step = "Safe Haven (Protected)"
                 ladder_cap = 1.0
-                total_crypto_exposure = 30.0
+                total_crypto_exposure = safe_spot_w * 100.0
+                active_flash_wick_limit_pct = flash_wick_limit_pct
+                flash_triggered = False
             else:
                 # Active in Momentum: Conviction Rocket & Volatility Tiers
-                if btc_atr_pct < 0.022 and btc_adx_daily >= 24.0:
+                if conviction_lev >= 20.0 and btc_atr_pct < 0.021 and btc_adx_daily >= 25.0:
                     selected_lev = conviction_lev
+                    active_tier = f"🚀 Super Conviction Rocket 20x (ATR={btc_atr_pct*100:.2f}%, ADX={btc_adx_daily:.1f})"
+                elif btc_atr_pct < 0.022 and btc_adx_daily >= 24.0:
+                    selected_lev = min(10.0, conviction_lev)
                     active_tier = f"🚀 Conviction Rocket 10x (ATR={btc_atr_pct*100:.2f}%, ADX={btc_adx_daily:.1f})"
                 elif btc_atr_pct < 0.028:
                     selected_lev = mid_lev
@@ -1208,7 +1250,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     ladder_step = f"Completed (Full {conviction_lev:.0f}x Unlocked)"
                     ladder_cap = conviction_lev
 
-                # Flash circuit breaker override
+                # Binance Bracket Clamping
+                bracket_max = btc_bracket["max_allowed_leverage"]
+                if selected_lev > bracket_max:
+                    selected_lev = bracket_max
+                    active_tier += f" | 🛡️ Binance Bracket ({bracket_max:.0f}x)"
+
+                # Flash circuit breaker override (strict -2.2% limit if 20x, -3.8% if standard)
+                active_flash_wick_limit_pct = flash_wick_20x_pct if selected_lev > 10.0 else flash_wick_limit_pct
+                flash_triggered = (btc_intraday_dip_pct < active_flash_wick_limit_pct)
                 if selected_lev > 1.0 and flash_triggered:
                     selected_lev = 1.0
                     active_tier = f"⚡ Flash Breaker Triggered (1.0x Cut, dip={btc_intraday_dip_pct:.1f}%)"
@@ -1454,20 +1504,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                                 "progress_pct": cs_prog,
                                 "progress_label": cs_prog_label,
                                 "met": in_momentum,
-                                "explanation": "אימות שביטקוין לא נסוג מעל 2% משיא 5 ימים ומחזיק מעל EMA9 יומית לפתיחת מינוף מוגבר."
+                                "explanation": f"אימות שביטקוין לא נסוג מעל {abs(cutoff_pct):.1f}%- משיא 5 ימים ומחזיק מעל EMA9 יומית לפתיחת מינוף מוגבר."
                             },
                             {
                                 "id": "node_leverage_tier",
                                 "shortTitle": "3. מנוע מינוף",
-                                "title": "3. מדרג מינוף וסייזינג (Dynamic Leverage)",
-                                "criteria": f"Leverage: {leverage:.1f}x (חשיפה {total_crypto_exposure:.0f}%)",
+                                "title": "3. מדרג מינוף וסייזינג (Dynamic Leverage & Binance Bracket)",
+                                "criteria": f"Leverage: {leverage:.1f}x (חשיפה {total_crypto_exposure:.0f}%) | {btc_bracket['bracket_desc']}",
                                 "actual": active_tier,
                                 "live_val": f"{leverage:.1f}x ({total_crypto_exposure:.0f}%)",
-                                "badge": f"{leverage:.1f}x",
+                                "badge": f"{leverage:.1f}x (T{btc_bracket['tier']})",
                                 "progress_pct": lev_prog,
                                 "progress_label": lev_prog_label,
                                 "met": macro_regime == "BULL",
-                                "explanation": "קביעת המינוף האפקטיבי וכוח הקנייה (עד 10x ברגיעה, 5x/2.5x בתנודתיות, או 1.0x ספוט)."
+                                "explanation": f"קביעת המינוף האפקטיבי וכוח הקנייה (עד {conviction_lev:.0f}x ברגיעה ומומנטום עם הגנת Binance Margin Brackets, או 1.0x ספוט)."
                             },
                             {
                                 "id": "node_ema_alignment",
@@ -1549,15 +1599,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         {
                             "id": "node_bear_emergency",
                             "shortTitle": "1. יציאת דובים",
-                            "title": "1. יציאת דובים ושורט 35% (Bear Exit & Short Hedge)",
-                            "criteria": "BTC < SMA150 or EMA20 < EMA50 -> Close Longs & Open 35% @ 2.0x BTC Short",
-                            "actual": "BEAR ACTIVE (35% @ 2.0x Short BTC)" if macro_regime == "BEAR" else "BULL ACTIVE (תקין)",
+                            "title": f"1. יציאת דובים ושורט {bear_hedge_w*100:.0f}% (Bear Exit & Short Hedge)",
+                            "criteria": f"BTC < SMA150 or EMA20 < EMA50 -> Close Longs & Open {bear_hedge_w*100:.0f}% @ {short_lev:.1f}x BTC Short",
+                            "actual": f"BEAR ACTIVE ({bear_hedge_w*100:.0f}% @ {short_lev:.1f}x Short BTC)" if macro_regime == "BEAR" else "BULL ACTIVE (תקין)",
                             "live_val": "BEAR" if macro_regime == "BEAR" else "BULL",
                             "badge": "🚨 שורט דובים!" if macro_regime == "BEAR" else "✓ תקין",
                             "progress_pct": s1_prog,
                             "progress_label": s1_label,
                             "triggered": macro_regime == "BEAR",
-                            "explanation": "סגירת כל הלונגים ומעבר לגידור שורט ממונף 2.0x על BTC במעבר למשטר דובים."
+                            "explanation": f"סגירת כל הלונגים ומעבר לגידור שורט ממונף {short_lev:.1f}x על BTC ({notional_short_pct:.0f}% חשיפה נומינלית) במעבר למשטר דובים."
                         },
                         {
                             "id": "node_crash_shield",
@@ -1678,6 +1728,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "btc_ema9_daily": round(btc_ema9_daily, 2),
                     "btc_5d_high": round(btc_5d_high, 2),
                     "dist_from_5d_high_pct": round(btc_pb_from_5d, 2) if not np.isnan(btc_pb_from_5d) else 0.0,
+                    "momentum_cutoff_pct": cutoff_pct,
                     "in_momentum": in_momentum,
                     "safe_haven_active": safe_haven_active,
                     "conviction_rocket_active": (leverage >= 10.0),
@@ -1688,18 +1739,35 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     "risk_guard_active": safe_haven_active,
                     "stepped_pullback_active": False,
                     "effective_leverage": round(leverage, 1) if not np.isnan(leverage) else 1.0,
+                    "conviction_leverage": round(conviction_lev, 1),
+                    "short_leverage": round(short_lev, 1),
                     "btc_atr_pct": round(btc_atr_pct * 100.0, 2) if not np.isnan(btc_atr_pct) else 3.5,
                     "btc_adx_daily": round(btc_adx_daily, 1) if not np.isnan(btc_adx_daily) else 20.0,
                     "btc_intraday_dip_pct": btc_intraday_dip_pct,
-                    "flash_wick_limit_pct": flash_wick_limit_pct,
+                    "flash_wick_limit_pct": round(active_flash_wick_limit_pct, 2),
                     "flash_circuit_triggered": flash_triggered,
                     "bars_since_circuit_trip": bars_since_circuit_trip,
                     "ladder_step": ladder_step,
                     "ladder_cap": round(ladder_cap, 1),
+                    "ladder_steps": ladder_steps,
                     "active_tier": active_tier,
                     "total_crypto_weight_pct": total_crypto_exposure,
-                    "cash_weight_pct": 60.0 if safe_haven_active else (65.0 if macro_regime == "BEAR" else 0.0),
-                    "bear_short_hedge_pct": 35.0 if macro_regime == "BEAR" else 0.0,
+                    "cash_weight_pct": round(cash_w if safe_haven_active else (cash_yield_pct if macro_regime == "BEAR" else 0.0), 1),
+                    "safe_cash_weight_pct": round(safe_cash_w * 100.0, 1),
+                    "safe_spot_weight_pct": round(safe_spot_w * 100.0, 1),
+                    "safe_micro_weight_pct": round(safe_micro_w * 100.0, 1),
+                    "bear_short_hedge_pct": round((bear_hedge_w * 100.0) if macro_regime == "BEAR" else 0.0, 1),
+                    "binance_tier_bracket": {
+                        "account_equity": round(account_equity, 2),
+                        "bracket_desc": btc_bracket["bracket_desc"],
+                        "tier": btc_bracket["tier"],
+                        "tier_max_notional": btc_bracket["tier_max_notional"],
+                        "max_allowed_leverage": btc_bracket["max_allowed_leverage"],
+                        "is_clamped": btc_bracket["is_clamped"],
+                        "btc": btc_bracket,
+                        "eth": eth_bracket,
+                        "sol": sol_bracket,
+                    },
                 },
                 "assets": assets_data,
             }

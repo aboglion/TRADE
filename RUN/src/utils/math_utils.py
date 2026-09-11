@@ -143,3 +143,102 @@ def get_market_constraints(market_info: dict[str, Any]) -> dict[str, Any]:
         "min_notional": cost_limits.get("min", 10.0) or 10.0,
     }
 
+
+def clamp_leverage_by_binance_bracket(symbol: str, requested_lev: float, notional_usd: float) -> float:
+    """
+    Clamp requested leverage to official Binance USDT-M Futures Tiered Margin Brackets.
+    Prevents API error -4028 (leverage exceeds bracket maximum).
+    """
+    clean_sym = symbol.split("/")[0].split(":")[0].upper()
+    req = max(1.0, float(requested_lev))
+
+    if "BTC" in clean_sym:
+        if notional_usd <= 50_000.0:
+            max_lev = 20.0
+        elif notional_usd <= 250_000.0:
+            max_lev = 10.0
+        elif notional_usd <= 1_000_000.0:
+            max_lev = 5.0
+        elif notional_usd <= 5_000_000.0:
+            max_lev = 3.0
+        else:
+            max_lev = 2.0
+    elif "ETH" in clean_sym:
+        if notional_usd <= 40_000.0:
+            max_lev = 20.0
+        elif notional_usd <= 200_000.0:
+            max_lev = 10.0
+        elif notional_usd <= 800_000.0:
+            max_lev = 5.0
+        elif notional_usd <= 2_000_000.0:
+            max_lev = 3.0
+        else:
+            max_lev = 2.0
+    else:  # SOL and other alts
+        if notional_usd <= 20_000.0:
+            max_lev = 20.0
+        elif notional_usd <= 100_000.0:
+            max_lev = 10.0
+        elif notional_usd <= 500_000.0:
+            max_lev = 5.0
+        else:
+            max_lev = 2.0
+
+    return min(req, max_lev)
+
+
+def get_binance_bracket_info(symbol: str, requested_lev: float, notional_usd: float) -> dict:
+    """
+    Return comprehensive Binance Tiered Margin Bracket metadata for a given symbol and notional value.
+    """
+    clean_sym = symbol.split("/")[0].split(":")[0].upper()
+    req = max(1.0, float(requested_lev))
+
+    if "BTC" in clean_sym:
+        if notional_usd <= 50_000.0:
+            tier, max_lev, max_notional, bracket_str = 1, 20.0, 50_000.0, "Tier 1: ≤$50,000 (Max 20x)"
+        elif notional_usd <= 250_000.0:
+            tier, max_lev, max_notional, bracket_str = 2, 10.0, 250_000.0, "Tier 2: ≤$250,000 (Max 10x)"
+        elif notional_usd <= 1_000_000.0:
+            tier, max_lev, max_notional, bracket_str = 3, 5.0, 1_000_000.0, "Tier 3: ≤$1,000,000 (Max 5x)"
+        elif notional_usd <= 5_000_000.0:
+            tier, max_lev, max_notional, bracket_str = 4, 3.0, 5_000_000.0, "Tier 4: ≤$5,000,000 (Max 3x)"
+        else:
+            tier, max_lev, max_notional, bracket_str = 5, 2.0, float("inf"), "Tier 5: >$5,000,000 (Max 2x)"
+    elif "ETH" in clean_sym:
+        if notional_usd <= 40_000.0:
+            tier, max_lev, max_notional, bracket_str = 1, 20.0, 40_000.0, "Tier 1: ≤$40,000 (Max 20x)"
+        elif notional_usd <= 200_000.0:
+            tier, max_lev, max_notional, bracket_str = 2, 10.0, 200_000.0, "Tier 2: ≤$200,000 (Max 10x)"
+        elif notional_usd <= 800_000.0:
+            tier, max_lev, max_notional, bracket_str = 3, 5.0, 800_000.0, "Tier 3: ≤$800,000 (Max 5x)"
+        elif notional_usd <= 2_000_000.0:
+            tier, max_lev, max_notional, bracket_str = 4, 3.0, 2_000_000.0, "Tier 4: ≤$2,000,000 (Max 3x)"
+        else:
+            tier, max_lev, max_notional, bracket_str = 5, 2.0, float("inf"), "Tier 5: >$2,000,000 (Max 2x)"
+    else:  # SOL and other alts
+        if notional_usd <= 20_000.0:
+            tier, max_lev, max_notional, bracket_str = 1, 20.0, 20_000.0, "Tier 1: ≤$20,000 (Max 20x)"
+        elif notional_usd <= 100_000.0:
+            tier, max_lev, max_notional, bracket_str = 2, 10.0, 100_000.0, "Tier 2: ≤$100,000 (Max 10x)"
+        elif notional_usd <= 500_000.0:
+            tier, max_lev, max_notional, bracket_str = 3, 5.0, 500_000.0, "Tier 3: ≤$500,000 (Max 5x)"
+        else:
+            tier, max_lev, max_notional, bracket_str = 4, 2.0, float("inf"), "Tier 4: >$500,000 (Max 2x)"
+
+    clamped = min(req, max_lev)
+    is_clamped = (req > max_lev)
+
+    return {
+        "symbol": clean_sym,
+        "requested_leverage": req,
+        "clamped_leverage": clamped,
+        "max_allowed_leverage": max_lev,
+        "tier": tier,
+        "tier_max_notional": max_notional,
+        "bracket_desc": bracket_str,
+        "is_clamped": is_clamped,
+    }
+
+
+

@@ -285,7 +285,9 @@ class DryRunExchange:
         # Basic margin/balance check
         quote = intent.symbol.split("/")[1] if "/" in intent.symbol else "USDT"
         is_futures = True  # Strategy operates in futures mode
-        leverage = self._get_active_leverage(intent.symbol)
+        leverage = getattr(intent, "leverage", 1.0)
+        if not leverage or leverage <= 1.0:
+            leverage = self._get_active_leverage(intent.symbol)
         margin_req = cost / leverage if is_futures else cost
         total_collateral = self._calculate_total_collateral()
         available_margin = max(self._get_free(quote), total_collateral)
@@ -334,7 +336,9 @@ class DryRunExchange:
         is_futures = True  # We migrated to futures
         
         if is_futures and futures_amount > 0:
-            active_lev = self._get_active_leverage(intent.symbol)
+            active_lev = getattr(intent, "leverage", 1.0)
+            if not active_lev or active_lev <= 1.0:
+                active_lev = self._get_active_leverage(intent.symbol)
             pos = dict(self._get_pos(intent.symbol))
             if not pos:
                 pos = {
