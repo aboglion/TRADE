@@ -271,12 +271,14 @@ class RiskManager(IRiskManager):
         if is_futures_portfolio and order_value > 0.0 and not self._is_position_reducing_order(intent, portfolio) and not getattr(intent, "reduce_only", False):
             if free_quote <= 0.0:
                 return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
-            lev = float(holding.leverage if (holding and holding.leverage > 1.0) else 10.0)
+            order_lev = getattr(intent, "leverage", 1.0)
+            holding_lev = holding.leverage if holding else 1.0
+            lev = max(1.0, float(order_lev if order_lev > 1.0 else (holding_lev if holding_lev > 1.0 else 2.0)))
             margin_req = order_value / max(1.0, lev)
             if free_quote < (margin_req - 1e-4):
                 return (
                     False,
-                    f"Insufficient margin: need ${margin_req:.2f} {quote} margin, free {quote} is ${free_quote:.2f}",
+                    f"Insufficient margin: need ${margin_req:.2f} {quote} margin (leverage={lev:.1f}x), free {quote} is ${free_quote:.2f}",
                 )
 
         return True, ""

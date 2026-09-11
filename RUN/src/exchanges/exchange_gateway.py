@@ -509,6 +509,26 @@ class ExchangeGateway:
                         )
                 except Exception as retry_err:
                     logger.error("Failed handling -2022 reduce-only recovery: %s", retry_err)
+
+            # Handle duplicate order sent on network timeout retry (-2010 or duplicate order message)
+            if ("duplicate" in err_msg.lower() or "already exists" in err_msg.lower()) and intent.client_order_id:
+                logger.warning(
+                    "Order %s reported as duplicate by exchange — fetching existing order status from exchange...",
+                    intent.client_order_id,
+                )
+                try:
+                    existing_res = self.fetch_order(resolved_sym, intent.client_order_id)
+                    if existing_res and existing_res.status != OrderStatus.UNKNOWN:
+                        logger.info(
+                            "Successfully recovered duplicate order %s from exchange (status=%s, filled=%.8f)",
+                            intent.client_order_id,
+                            existing_res.status.value,
+                            existing_res.filled_amount,
+                        )
+                        return existing_res
+                except Exception as fetch_err:
+                    logger.warning("Could not fetch duplicate order %s: %s", intent.client_order_id, fetch_err)
+
             raise InvalidOrderError(str(e)) from e
 
     @staticmethod

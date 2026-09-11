@@ -1758,6 +1758,18 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             state.pnl_history.clear()
                     self.state_store.save_state(state)
                     logger.info("Persisted dry run balances into bot_state.json")
+
+                    # Sync in-memory state if orchestrator is running
+                    if self.orchestrator and hasattr(self.orchestrator, "_state"):
+                        self.orchestrator._state.strategy_state["dry_run_balances"] = parsed
+                        if data.get("clear_history", True):
+                            self.orchestrator._state.completed_orders.clear()
+                            self.orchestrator._state.pending_orders.clear()
+                            self.orchestrator._state.session_initial_value_usd = None
+                            self.orchestrator._state.session_fees.clear()
+                            self.orchestrator._state.session_initial_prices.clear()
+                            if hasattr(self.orchestrator._state, "pnl_history") and self.orchestrator._state.pnl_history:
+                                self.orchestrator._state.pnl_history.clear()
                 except Exception as ex:
                     logger.warning("Could not persist dry run balances to state store: %s", ex)
 
@@ -1805,6 +1817,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 })
 
             self.state_store.save_state(state)
+
+            # Sync in-memory state of running orchestrator
+            if self.orchestrator and hasattr(self.orchestrator, "_state"):
+                self.orchestrator._state.session_initial_value_usd = state.session_initial_value_usd
+                self.orchestrator._state.session_fees.clear()
+                self.orchestrator._state.session_initial_prices.clear()
+                self.orchestrator._state.completed_orders.clear()
+                if hasattr(self.orchestrator._state, "pnl_history"):
+                    self.orchestrator._state.pnl_history = list(state.pnl_history)
+
             logger.info("Session stats and PNL reset via API.")
             self._send_json({"success": True, "message": "Session stats reset successfully"})
         except Exception as e:
@@ -1828,6 +1850,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 state.pending_orders.clear()
 
             self.state_store.save_state(state)
+
+            # Sync in-memory state of running orchestrator
+            if self.orchestrator and hasattr(self.orchestrator, "_state"):
+                if hasattr(self.orchestrator._state, "completed_orders"):
+                    self.orchestrator._state.completed_orders.clear()
+                if hasattr(self.orchestrator._state, "pending_orders"):
+                    self.orchestrator._state.pending_orders.clear()
+
             logger.info("Cleared %d orders from state via API", total_count)
             self._send_json({
                 "success": True,

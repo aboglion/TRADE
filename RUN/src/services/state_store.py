@@ -114,6 +114,8 @@ class JsonStateStore(IStateStore):
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())
 
                 # Backup current state
                 if self._path.exists():

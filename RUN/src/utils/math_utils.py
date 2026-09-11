@@ -77,7 +77,7 @@ def is_above_min_order(
     min_notional: float,
 ) -> bool:
     """
-    Check if an order meets exchange minimums.
+    Check if an order meets exchange minimums with float precision tolerance.
 
     Args:
         amount: Order quantity in base currency.
@@ -85,7 +85,9 @@ def is_above_min_order(
         min_amount: Minimum order amount (e.g., 0.00001 BTC).
         min_notional: Minimum order value in USD (e.g., $10).
     """
-    return amount >= min_amount and (amount * price) >= min_notional
+    notional = amount * price
+    # Use 1e-8 tolerance for notional and 1e-10 for amount to avoid floating point precision traps
+    return (amount >= (min_amount - 1e-10)) and (notional >= (min_notional - 1e-8))
 
 
 def compute_order_amount(

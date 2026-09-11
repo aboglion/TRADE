@@ -214,6 +214,10 @@ class OrderManager:
             if o.get("status") in ("submitted", "unknown", "open", "intent", "partially_filled")
         ]
 
+        # Cap completed_orders in memory to prevent unbounded growth
+        if len(self._state.completed_orders) > 6000:
+            self._state.completed_orders = self._state.completed_orders[-5000:]
+
         return results
 
     def check_open_orders_on_exchange(self) -> list[OrderResult]:

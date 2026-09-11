@@ -209,6 +209,10 @@ class ReconciliationService:
             if o.get("status") in ("submitted", "unknown", "open", "partially_filled")
         ]
 
+        # Cap completed_orders in memory to prevent unbounded growth
+        if len(self._state.completed_orders) > 6000:
+            self._state.completed_orders = self._state.completed_orders[-5000:]
+
         if clean:
             logger.debug("Reconciliation complete — state is consistent")
         else:

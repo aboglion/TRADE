@@ -110,6 +110,7 @@ class OrderIntent:
     reason: str = ""                    # Human-readable justification
     candle_ts: int | None = None     # Candle that triggered this intent
     reduce_only: bool = False           # Flag for position-reducing / closing orders in futures
+    leverage: float = 1.0               # Leverage for futures margin check / exchange sync
 
     @staticmethod
     def generate_id() -> str:
@@ -209,18 +210,20 @@ class BotState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BotState:
+        if not isinstance(data, dict):
+            return cls()
         return cls(
-            version=data.get("version", 1),
-            last_processed_candle_ts=data.get("last_processed_candle_ts", {}),
+            version=int(data.get("version") or 1),
+            last_processed_candle_ts=data.get("last_processed_candle_ts") or {},
             last_regime=data.get("last_regime"),
-            pending_orders=data.get("pending_orders", []),
-            completed_orders=data.get("completed_orders", []),
+            pending_orders=data.get("pending_orders") if data.get("pending_orders") is not None else [],
+            completed_orders=data.get("completed_orders") if data.get("completed_orders") is not None else [],
             last_run_ts=data.get("last_run_ts"),
-            last_cycle_success=data.get("last_cycle_success", True),
-            critical_errors=data.get("critical_errors", []),
-            strategy_state=data.get("strategy_state", {}),
+            last_cycle_success=data.get("last_cycle_success", True) if data.get("last_cycle_success") is not None else True,
+            critical_errors=data.get("critical_errors") if data.get("critical_errors") is not None else [],
+            strategy_state=data.get("strategy_state") if data.get("strategy_state") is not None else {},
             session_initial_value_usd=data.get("session_initial_value_usd"),
-            session_fees=data.get("session_fees", {}),
-            session_initial_prices=data.get("session_initial_prices", {}),
-            pnl_history=data.get("pnl_history", []),
+            session_fees=data.get("session_fees") if data.get("session_fees") is not None else {},
+            session_initial_prices=data.get("session_initial_prices") if data.get("session_initial_prices") is not None else {},
+            pnl_history=data.get("pnl_history") if data.get("pnl_history") is not None else [],
         )

@@ -366,29 +366,34 @@ class BotOrchestrator:
                             or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
                             or intent.symbol.endswith(":USDT")
                         )
-                        # Leverage fallback: use 2.0x when no prior position exists.
-                        # This is a conservative default for new futures positions;
-                        # the actual leverage is synced from strategy via set_leverage()
-                        # at the start of the cycle (see step 9 above).
-                        lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else 2.0))
+                        # Leverage fallback: use strategy-synced leverage when no prior position exists.
+                        lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else (short_lev if (intent.side == OrderSide.SELL and is_bear_regime) else clamped_lev)))
 
                         if old_base:
                             delta_qty = -filled_qty if intent.side == OrderSide.SELL else filled_qty
                             new_total = old_base.total + delta_qty
-                            if new_total <= 0:
+                            if new_total <= 0 and not is_fut:
+                                new_free = 0.0
+                            elif is_fut:
                                 new_free = 0.0
                             else:
-                                new_free = max(0.0, min(new_total, old_base.free + delta_qty)) if not is_fut else 0.0
+                                new_free = max(0.0, min(new_total, old_base.free + delta_qty))
                             new_val = abs(new_total) * fill_price
+
+                            # Handle position side flip (long <-> short)
+                            is_side_flip = (old_base.total > 1e-8 and new_total < -1e-8) or (old_base.total < -1e-8 and new_total > 1e-8)
+                            new_entry_px = fill_price if is_side_flip else (old_base.entry_price if abs(new_total) > 1e-8 else 0.0)
+                            new_pos_lev = lev if (is_side_flip or old_base.leverage <= 1.0) else old_base.leverage
+
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
                                 free=new_free,
                                 locked=old_base.locked,
                                 total=new_total,
                                 value_usd=new_val,
-                                unrealized_pnl=old_base.unrealized_pnl if abs(new_total) > 1e-8 else 0.0,
-                                entry_price=old_base.entry_price if abs(new_total) > 1e-8 else 0.0,
-                                leverage=old_base.leverage,
+                                unrealized_pnl=0.0 if (is_side_flip or abs(new_total) <= 1e-8) else old_base.unrealized_pnl,
+                                entry_price=new_entry_px,
+                                leverage=new_pos_lev,
                             )
                         elif intent.side == OrderSide.BUY:
                             portfolio.holdings[base_sym] = AssetHolding(

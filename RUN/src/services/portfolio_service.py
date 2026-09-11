@@ -447,6 +447,7 @@ class PortfolioService:
                 )
             )
 
+            pos_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),
                 symbol=pair_symbol,
@@ -458,6 +459,7 @@ class PortfolioService:
                 reason=f"Rebalance: {deviation:+.2%} deviation in {pair_symbol}",
                 candle_ts=target.timestamp_ms,
                 reduce_only=is_reducing,
+                leverage=pos_lev,
             )
 
             if deviation < 0:
