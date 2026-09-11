@@ -3380,23 +3380,23 @@ function renderDashboardPipeline(data) {
         let outcomeIcon = "";
 
         if (macro.regime === "BEAR") {
-            outcomeText = "🐻 BEAR (35% SHORT HEDGE @ 2.0x)";
+            outcomeText = "BEAR (35% SHORT HEDGE @ 2.0x)";
             outcomeClass = "sell-triggered";
             outcomeIcon = "🐻";
         } else if (safeHavenActive) {
-            outcomeText = `🛡️ SAFE HAVEN SHIELD (1.0x SPOT | 60% CASH @ 4% APY)`;
+            outcomeText = `SAFE HAVEN SHIELD (1.0x SPOT | 60% CASH @ 4% APY)`;
             outcomeClass = "blocking";
             outcomeIcon = "🛡️";
         } else if (flashTriggered) {
-            outcomeText = `⚡ FLASH BREAKER (1.0x SPOT)`;
+            outcomeText = `FLASH BREAKER (1.0x SPOT)`;
             outcomeClass = "blocking";
             outcomeIcon = "⚡";
         } else if (effectiveLev >= 10.0) {
-            outcomeText = `🚀 CONVICTION ROCKET (10.0x | ${totalExposure}%)`;
+            outcomeText = `CONVICTION ROCKET (10.0x | ${totalExposure}%)`;
             outcomeClass = "pass";
             outcomeIcon = "🚀";
         } else {
-            outcomeText = `⚡ BULL LEVERAGE (${effectiveLev.toFixed(1)}x | ${totalExposure}%)`;
+            outcomeText = `BULL LEVERAGE (${effectiveLev.toFixed(1)}x | ${totalExposure}%)`;
             outcomeClass = "pass";
             outcomeIcon = "⚡";
         }
@@ -3445,16 +3445,16 @@ function renderDashboardPipeline(data) {
 
             if (isPosActive) {
                 const rVal = posInfo.open_r !== undefined ? `${posInfo.open_r > 0 ? '+' : ''}${posInfo.open_r}R` : 'פעילה';
-                outcomeTitle = `✅ POS ACTIVE (${rVal})`;
+                outcomeTitle = `POS ACTIVE (${rVal})`;
                 outcomePillClass = "pass";
                 outcomeIcon = "✅";
             } else if (allPass) {
-                outcomeTitle = "🚀 BUY SIGNAL — אות קנייה מופעל (LADDER סגור)!";
+                outcomeTitle = "BUY SIGNAL — אות קנייה מופעל (LADDER סגור)!";
                 outcomePillClass = "pass";
                 outcomeIcon = "🚀";
             } else {
                 const blockerName = firstBlocker ? firstBlocker.shortTitle : "תנאי סיכון";
-                outcomeTitle = `🛑 חסום: ${blockerName} (מעגל פתוח)`;
+                outcomeTitle = `חסום: ${blockerName} (מעגל פתוח)`;
                 outcomePillClass = "blocking";
                 outcomeIcon = "🛑";
             }
@@ -3528,15 +3528,15 @@ function renderDashboardPipeline(data) {
             let outcomeIcon = "";
 
             if (anySellTrip) {
-                outcomeTitle = `🚨 EXIT TRIGGERED: ${triggeredNode ? triggeredNode.shortTitle : 'פקודת יציאה מופעלת'}`;
+                outcomeTitle = `EXIT TRIGGERED: ${triggeredNode ? triggeredNode.shortTitle : 'פקודת יציאה מופעלת'}`;
                 outcomePillClass = "sell-triggered";
                 outcomeIcon = "🚨";
             } else if (isPosActive) {
-                outcomeTitle = "🛡️ POSITION SAFE — כל מנגנוני הבטיחות תקינים";
+                outcomeTitle = "POSITION SAFE — כל מנגנוני הבטיחות תקינים";
                 outcomePillClass = "pass";
                 outcomeIcon = "🛡️";
             } else {
-                outcomeTitle = "ℹ️ אין פוזיציה פתוחה בנכס (מעקב שורט מקרו בלבד)";
+                outcomeTitle = "אין פוזיציה פתוחה בנכס (מעקב שורט מקרו בלבד)";
                 outcomePillClass = "pass";
                 outcomeIcon = "🛡️";
             }

@@ -324,6 +324,7 @@ class PortfolioService:
                 }
 
             holding = portfolio.holdings.get(base)
+            pos_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else (2.0 if self._is_futures else 1.0))
             is_flip = (
                 holding is not None
                 and abs(holding.total) > 1e-6
@@ -350,6 +351,7 @@ class PortfolioService:
                         reason=f"Close previous {current_weight:+.2%} position for regime reversal",
                         candle_ts=target.timestamp_ms,
                         reduce_only=self._is_futures,
+                        leverage=pos_lev,
                     )
                     if close_side == OrderSide.SELL:
                         sell_orders.append(intent_close)
@@ -377,6 +379,7 @@ class PortfolioService:
                         estimated_price=price,
                         reason=f"Open new {target_weight:+.2%} position in {pair_symbol}",
                         candle_ts=target.timestamp_ms,
+                        leverage=pos_lev,
                     )
                     if open_side == OrderSide.SELL:
                         sell_orders.append(intent_open)

@@ -419,18 +419,35 @@ class BotOrchestrator:
 
                         old_usdt = portfolio.holdings.get("USDT")
                         if is_fut:
-                            is_reducing = getattr(intent, "reduce_only", False) or (old_base and (
-                                (old_base.total > 0 and intent.side == OrderSide.SELL) or
-                                (old_base.total < 0 and intent.side == OrderSide.BUY)
-                            ))
-                            margin_delta = (fill_val / lev) if is_reducing else -(fill_val / lev)
-                            delta_usdt = margin_delta - fees_usd
+                            old_qty = old_base.total if old_base else 0.0
+                            if old_qty > 1e-8 and intent.side == OrderSide.SELL:
+                                # Closing/reducing long position
+                                closed_qty = min(old_qty, filled_qty)
+                                opened_qty = max(0.0, filled_qty - old_qty)
+                                real_pnl = (fill_price - old_base.entry_price) * closed_qty if old_base.entry_price > 0 else 0.0
+                                margin_delta = ((closed_qty * fill_price) / lev) - ((opened_qty * fill_price) / lev)
+                            elif old_qty < -1e-8 and intent.side == OrderSide.BUY:
+                                # Covering/reducing short position
+                                closed_qty = min(abs(old_qty), filled_qty)
+                                opened_qty = max(0.0, filled_qty - abs(old_qty))
+                                real_pnl = (old_base.entry_price - fill_price) * closed_qty if old_base.entry_price > 0 else 0.0
+                                margin_delta = ((closed_qty * fill_price) / lev) - ((opened_qty * fill_price) / lev)
+                            else:
+                                # Pure expansion in same direction
+                                closed_qty = 0.0
+                                opened_qty = filled_qty
+                                real_pnl = 0.0
+                                margin_delta = -((opened_qty * fill_price) / lev)
+
+                            delta_usdt = margin_delta + real_pnl - fees_usd
+                            total_usdt_delta = real_pnl - fees_usd
                         else:
                             delta_usdt = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
+                            total_usdt_delta = delta_usdt
 
                         if old_usdt:
                             new_usdt_free = max(0.0, old_usdt.free + delta_usdt)
-                            new_usdt_total = max(0.0, old_usdt.total + (-fees_usd if is_fut else delta_usdt))
+                            new_usdt_total = max(0.0, old_usdt.total + total_usdt_delta)
                             portfolio.holdings["USDT"] = AssetHolding(
                                 symbol="USDT",
                                 free=new_usdt_free,
