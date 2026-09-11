@@ -95,7 +95,7 @@ class PortfolioService:
             else:
                 # If Spot, keep asset values
                 pair = f"{currency}/USDT"
-                price = prices.get(pair, 0.0)
+                price = prices.get(pair, 0.0) or prices.get(f"{pair}:USDT", 0.0) or prices.get(currency, 0.0)
                 if price <= 0:
                     try:
                         price = self._gateway.fetch_ticker_price(pair)
@@ -256,15 +256,37 @@ class PortfolioService:
                     target_allocation=target, total_deviation_pct=0.0,
                 )
 
+        # In Spot mode:
+        # 1. Negative target weights (shorts) are invalid for spot, clamp them to 0.0.
+        # 2. Spot total long exposure cannot exceed 1.0 (100%). If strategy target weights
+        #    sum to > 1.0 (due to leverage engine in bull mode), normalize crypto weights to 1.0
+        #    preserving exact relative asset proportions so no asset is starved or dropped.
+        effective_target_weights = dict(target.weights)
+        if not self._is_futures:
+            crypto_sum = 0.0
+            for sym, w in list(effective_target_weights.items()):
+                if sym in ("USDT", "USD", "BUSD", "USDC", "BNB"):
+                    continue
+                if w < 0:
+                    effective_target_weights[sym] = 0.0
+                else:
+                    crypto_sum += w
+            if crypto_sum > 1.0:
+                scale = 1.0 / crypto_sum
+                for sym in list(effective_target_weights.keys()):
+                    if sym not in ("USDT", "USD", "BUSD", "USDC", "BNB"):
+                        effective_target_weights[sym] = effective_target_weights[sym] * scale
+                effective_target_weights["USDT"] = 0.0
+
         # Compute deviations for all target weights AND untracked portfolio holdings
-        all_symbols = set(target.weights.keys())
+        all_symbols = set(effective_target_weights.keys())
         for base_asset, h_item in portfolio.holdings.items():
             if base_asset in ("USDT", "USD", "BUSD", "USDC", "BNB"):
                 continue
             if abs(h_item.total) > 1e-6:
                 # Find matching symbol in target weights (e.g. "BTC/USDT" or "BTC")
                 matching_sym = None
-                for s in target.weights:
+                for s in effective_target_weights:
                     if s.startswith(base_asset + "/") or s == base_asset:
                         matching_sym = s
                         break
@@ -276,10 +298,10 @@ class PortfolioService:
         for symbol in all_symbols:
             if symbol in ("USDT", "USD", "BUSD", "USDC", "BNB"):
                 continue  # USDT is the residual
-            target_weight = target.weights.get(symbol, 0.0)
+            target_weight = effective_target_weights.get(symbol, 0.0)
             base = symbol.split("/")[0].split(":")[0]
-            if target_weight == 0.0 and base in target.weights:
-                target_weight = target.weights.get(base, 0.0)
+            if target_weight == 0.0 and base in effective_target_weights:
+                target_weight = effective_target_weights.get(base, 0.0)
             current_weight = portfolio.get_weight(base)
             deviation = target_weight - current_weight
             deviations[symbol] = deviation
@@ -304,12 +326,16 @@ class PortfolioService:
                 if qh:
                     spot_quote_budget[qk] = max(0.0, qh.free * 0.998)
 
-        for symbol, deviation in deviations.items():
+        # Deterministic sorting: sells (negative deviation) first so they credit
+        # spot_quote_budget before buys consume it, then buys (positive deviation), tie-broken by symbol.
+        sorted_dev_items = sorted(deviations.items(), key=lambda x: (0 if x[1] < 0 else 1, x[0]))
+
+        for symbol, deviation in sorted_dev_items:
             pair_symbol = symbol if "/" in symbol else f"{symbol}/USDT"
-            target_weight = target.weights.get(symbol, 0.0)
+            target_weight = effective_target_weights.get(symbol, 0.0)
             base = symbol.split("/")[0].split(":")[0]
-            if target_weight == 0.0 and base in target.weights:
-                target_weight = target.weights.get(base, 0.0)
+            if target_weight == 0.0 and base in effective_target_weights:
+                target_weight = effective_target_weights.get(base, 0.0)
             current_weight = portfolio.get_weight(base)
 
             # Skip small deviations unless target is 0.0 and we have an active position to liquidate (long or short)
@@ -374,14 +400,17 @@ class PortfolioService:
 
             is_target_bear = (getattr(target.regime, "value", target.regime) == "bear")
 
-            if (deviation < 0 or target_weight < 0) and is_target_bear:
+            if not self._is_futures:
+                pos_lev = 1.0
+                s_lev = 1.0
+            elif (deviation < 0 or target_weight < 0) and is_target_bear:
                 pos_lev = s_lev
             elif eff_lev is not None:
                 pos_lev = eff_lev
             elif holding and holding.leverage > 1.0:
                 pos_lev = float(holding.leverage)
             else:
-                pos_lev = 2.0 if self._is_futures else 1.0
+                pos_lev = 2.0
 
             is_flip = (
                 holding is not None
@@ -554,6 +583,15 @@ class PortfolioService:
 
             if order_side == OrderSide.SELL:
                 sell_orders.append(intent)
+                if not self._is_futures:
+                    quote_key = pair_symbol.split("/")[1].split(":")[0] if "/" in pair_symbol else "USDT"
+                    sell_proceeds = amount * price * 0.998
+                    if quote_key in spot_quote_budget:
+                        spot_quote_budget[quote_key] += sell_proceeds
+                    elif "USDT" in spot_quote_budget:
+                        spot_quote_budget["USDT"] += sell_proceeds
+                    else:
+                        spot_quote_budget[quote_key] = sell_proceeds
             else:
                 buy_orders.append(intent)
 

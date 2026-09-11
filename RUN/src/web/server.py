@@ -232,6 +232,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
+    def _get_active_state(self) -> Any | None:
+        if self.orchestrator and hasattr(self.orchestrator, "_state") and self.orchestrator._state:
+            return self.orchestrator._state
+        if self.state_store:
+            return self.state_store.load_state()
+        return None
+
     def do_OPTIONS(self) -> None:
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -536,7 +543,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     # ── REST API Handlers ─────────────────────────────────────
 
     def _handle_status(self) -> None:
-        state = self.state_store.load_state() if self.state_store else None
+        state = self._get_active_state()
         critical_errors = state.critical_errors if state else []
         metrics = get_market_metrics_cached()
         last_regime = state.last_regime if (state and state.last_regime) else None
@@ -647,7 +654,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             ps = PortfolioService(self.gateway, is_futures=is_futures)
             snapshot = ps.get_portfolio()
 
-            state = self.state_store.load_state() if self.state_store else None
+            state = self._get_active_state()
             initial_val = state.session_initial_value_usd if state else None
             initial_prices = dict(state.session_initial_prices) if (state and state.session_initial_prices) else {}
             state_updated = False
@@ -777,7 +784,13 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     data["session_initial_value_usd"] = round(snapshot.total_value_usd, 2)
                 if state_updated:
                     state.session_initial_prices = initial_prices
-                    self.state_store.save_state(state)
+                    if self.state_store:
+                        self.state_store.save_state(state)
+                    if self.orchestrator and hasattr(self.orchestrator, "_state") and self.orchestrator._state is not state:
+                        self.orchestrator._state.pnl_history = list(state.pnl_history)
+                        self.orchestrator._state.session_initial_prices = dict(state.session_initial_prices)
+                        if initial_val is None:
+                            self.orchestrator._state.session_initial_value_usd = state.session_initial_value_usd
 
             self._send_json(data)
         except Exception as e:
@@ -793,7 +806,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             }, status=500)
 
     def _handle_orders(self) -> None:
-        state = self.state_store.load_state() if self.state_store else None
+        state = self._get_active_state()
         if not state:
             self._send_json({"pending": [], "completed": []})
             return
@@ -1004,7 +1017,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             from src.core.models import Candle
             from src.strategy.indicators import add_indicators, candles_to_dataframe
 
-            state = self.state_store.load_state() if self.state_store else None
+            state = self._get_active_state()
             last_regime = state.last_regime if (state and state.last_regime) else "BEAR"
             strat_state = state.strategy_state if state else {}
             macro_state = strat_state.get("macro_state", {}) if isinstance(strat_state, dict) else {}
