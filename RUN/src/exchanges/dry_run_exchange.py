@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.core.enums import OrderSide, OrderStatus
 from src.core.models import Candle, OrderIntent, OrderResult
@@ -29,20 +29,20 @@ class DryRunExchange:
 
     def __init__(
         self,
-        initial_balances: Optional[Dict[str, float]] = None,
+        initial_balances: dict[str, float] | None = None,
         fee_rate: float = 0.001,  # 0.1% taker fee
-        on_balance_change: Optional[Any] = None,
+        on_balance_change: Any | None = None,
     ):
-        self._balances: Dict[str, Dict[str, float]] = {}
-        self._positions: Dict[str, Dict[str, Any]] = {}  # Futures positions
-        self._orders: Dict[str, Dict[str, Any]] = {}
-        self._last_prices: Dict[str, float] = {}
+        self._balances: dict[str, dict[str, float]] = {}
+        self._positions: dict[str, dict[str, Any]] = {}  # Futures positions
+        self._orders: dict[str, dict[str, Any]] = {}
+        self._last_prices: dict[str, float] = {}
         self._fee_rate = fee_rate
-        self._markets: Dict[str, Any] = {}
+        self._markets: dict[str, Any] = {}
         self._on_balance_change = on_balance_change
-        self._current_leverage: Dict[str, float] = {}
+        self._current_leverage: dict[str, float] = {}
 
-        self._public_exchange: Optional[Any] = None
+        self._public_exchange: Any | None = None
 
         # Initialize default balances
         defaults = initial_balances or {"USDT": 1000.0}
@@ -60,7 +60,7 @@ class DryRunExchange:
             {k: v["total"] for k, v in self._balances.items()},
         )
 
-    def _get_public_exchange(self) -> Optional[Any]:
+    def _get_public_exchange(self) -> Any | None:
         if self._public_exchange is None:
             try:
                 import ccxt
@@ -98,23 +98,23 @@ class DryRunExchange:
         except Exception:
             return 0.0
 
-    def fetch_ticker_prices(self, symbols: List[str]) -> Dict[str, float]:
+    def fetch_ticker_prices(self, symbols: list[str]) -> dict[str, float]:
         return {s: self.fetch_ticker_price(s) for s in symbols}
 
     def fetch_ohlcv(
         self,
         symbol: str,
         timeframe: str = "4h",
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 500,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """Fetch real public candles from Binance in dry run mode."""
         try:
             ex = self._get_public_exchange()
             if not ex:
                 return []
             raw = ex.fetch_ohlcv(symbol, timeframe, since=since_ms, limit=limit)
-            candles: List[Candle] = []
+            candles: list[Candle] = []
             now_ms = int(time.time() * 1000)
             tf_ms = self._timeframe_to_ms(timeframe)
 
@@ -141,11 +141,11 @@ class DryRunExchange:
         self,
         symbol: str,
         timeframe: str = "4h",
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 1000,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """Paginated fetch for dry run mode."""
-        all_candles: List[Candle] = []
+        all_candles: list[Candle] = []
         current_since = since_ms
         batch_size = min(limit, 1000)
         remaining = limit
@@ -162,7 +162,7 @@ class DryRunExchange:
             current_since = batch[-1].timestamp_ms + 1
 
         seen = set()
-        unique: List[Candle] = []
+        unique: list[Candle] = []
         for c in all_candles:
             if c.timestamp_ms not in seen:
                 seen.add(c.timestamp_ms)
@@ -172,7 +172,7 @@ class DryRunExchange:
 
     # ── Account ──────────────────────────────────────────────
 
-    def fetch_balance(self) -> Dict[str, Dict[str, float]]:
+    def fetch_balance(self) -> dict[str, dict[str, float]]:
         # In futures, update USDT total based on unrealized PnL and compute locked margin
         bal = dict(self._balances)
         if "USDT" in bal:
@@ -192,7 +192,7 @@ class DryRunExchange:
             }
         return bal
 
-    def fetch_positions(self) -> List[Dict[str, Any]]:
+    def fetch_positions(self) -> list[dict[str, Any]]:
         # Update unrealized PnL dynamically
         positions_list = []
         for symbol, pos in self._positions.items():
@@ -218,7 +218,7 @@ class DryRunExchange:
             
         return positions_list
 
-    def set_balances(self, balances: Dict[str, float]) -> None:
+    def set_balances(self, balances: dict[str, float]) -> None:
         """Update or reset simulated holdings in Dry Run mode."""
         self._balances.clear()
         for currency, amount in balances.items():
@@ -235,7 +235,7 @@ class DryRunExchange:
         )
         self._notify_balance_change()
 
-    def set_leverage(self, leverage: int | float, symbol: str) -> None:
+    def set_leverage(self, leverage: float, symbol: str) -> None:
         """Set leverage for a simulated futures market symbol."""
         lev_float = float(leverage)
         if self._current_leverage.get(symbol) == lev_float:
@@ -245,7 +245,22 @@ class DryRunExchange:
 
     def _get_active_leverage(self, symbol: str) -> float:
         levs = getattr(self, "_current_leverage", {})
-        return float(levs.get(symbol, 3.5))
+        if symbol in levs:
+            return float(levs[symbol])
+        clean_sym = symbol.split(":")[0] if ":" in symbol else symbol
+        if clean_sym in levs:
+            return float(levs[clean_sym])
+        if f"{clean_sym}:USDT" in levs:
+            return float(levs[f"{clean_sym}:USDT"])
+        if f"{clean_sym}/USDT" in levs:
+            return float(levs[f"{clean_sym}/USDT"])
+        if f"{clean_sym}/USDT:USDT" in levs:
+            return float(levs[f"{clean_sym}/USDT:USDT"])
+        if "/" in clean_sym:
+            base = clean_sym.split("/")[0]
+            if base in levs:
+                return float(levs[base])
+        return float(levs.get("default", 3.5))
 
     # ── Orders ───────────────────────────────────────────────
 
@@ -415,7 +430,7 @@ class DryRunExchange:
             error_message="Order not found in dry-run store",
         )
 
-    def fetch_open_orders(self, symbol: Optional[str] = None) -> List[OrderResult]:
+    def fetch_open_orders(self, symbol: str | None = None) -> list[OrderResult]:
         # Dry-run fills instantly, so there are never open orders
         return []
 
@@ -428,7 +443,7 @@ class DryRunExchange:
     def price_to_precision(self, symbol: str, price: float) -> float:
         return round(price, 2)
 
-    def get_market_info(self, symbol: str) -> Dict[str, Any]:
+    def get_market_info(self, symbol: str) -> dict[str, Any]:
         return self._markets.get(symbol, {
             "precision": {"amount": 8, "price": 2},
             "limits": {

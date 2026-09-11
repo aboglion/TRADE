@@ -13,8 +13,6 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Optional
-
 
 _SECRET_PATTERN = re.compile(
     r"(api[_-]?key|api[_-]?secret|password|token|secret)"
@@ -42,7 +40,7 @@ class SecretFilter(logging.Filter):
 def setup_logger(
     name: str = "bot",
     level: str = "INFO",
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
 ) -> logging.Logger:
     """
     Configure and return the application logger.

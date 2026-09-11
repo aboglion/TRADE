@@ -18,7 +18,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
 from threading import Lock, Thread
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.utils.network_utils import get_outbound_ip
 
@@ -27,15 +27,15 @@ logger = logging.getLogger("bot.web.server")
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 
 # Global market metrics cache for BTC, ETH, SOL multi-timeframe performance
-_market_metrics_cache: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+_market_metrics_cache: dict[str, Any] = {"timestamp": 0.0, "data": {}}
 _market_metrics_lock = Lock()
 _market_metrics_updating = False
 
-_cached_ccxt_exchange: Optional[Any] = None
+_cached_ccxt_exchange: Any | None = None
 _cached_ccxt_lock = Lock()
 
 
-def _get_shared_exchange(gateway: Optional[Any] = None) -> Optional[Any]:
+def _get_shared_exchange(gateway: Any | None = None) -> Any | None:
     """Reuse existing exchange client or module-level cached ccxt client."""
     if gateway:
         if hasattr(gateway, "exchange"):
@@ -113,7 +113,7 @@ def _fetch_market_metrics_worker() -> None:
         _market_metrics_updating = False
 
 
-def get_market_metrics_cached() -> Dict[str, Any]:
+def get_market_metrics_cached() -> dict[str, Any]:
     global _market_metrics_updating
     now = time.time()
     with _market_metrics_lock:
@@ -142,8 +142,8 @@ class LoginRateLimiter:
         self.max_attempts = max_attempts
         self.lockout_seconds = lockout_seconds
         self.delay_seconds = delay_seconds
-        self.attempts: Dict[str, list[float]] = {}
-        self.lockouts: Dict[str, float] = {}
+        self.attempts: dict[str, list[float]] = {}
+        self.lockouts: dict[str, float] = {}
         self._lock = Lock()
 
     def get_client_ip(self, handler: Any) -> str:
@@ -225,7 +225,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     gateway: Any = None
     state_store: Any = None
     config: Any = None
-    log_file_path: Optional[str] = None
+    log_file_path: str | None = None
     orchestrator: Any = None
     telegram_service: Any = None
 
@@ -426,14 +426,29 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             cm = ConfigManager(str(cfg_path))
             cm.save_run_mode(requested_mode)
 
+            # Keep logs/last_mode in sync across all potential execution locations
+            proj_dir = Path(__file__).resolve().parent.parent.parent.parent
+            for mode_file in (
+                proj_dir / "logs" / "last_mode",
+                Path("logs/last_mode"),
+                Path("RUN/logs/last_mode"),
+                Path("/home/uns/TRADE/logs/last_mode"),
+                Path("/home/uns/TRADE/RUN/logs/last_mode"),
+            ):
+                try:
+                    mode_file.parent.mkdir(parents=True, exist_ok=True)
+                    mode_file.write_text(f"{requested_mode}\n", encoding="utf-8")
+                except Exception:
+                    pass
+
             self._send_json({
                 "success": True,
                 "mode": requested_mode,
                 "message": f"Successfully updated run mode to {requested_mode}. Rebooting bot...",
             })
 
-            import threading
             import subprocess
+            import threading
             def _reboot():
                 time.sleep(0.5)
                 try:
@@ -630,7 +645,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
         try:
             from src.services.portfolio_service import PortfolioService
-            ps = PortfolioService(self.gateway)
+            is_futures = (self.config.exchange.market_type == "future") if (self.config and hasattr(self.config, "exchange")) else False
+            ps = PortfolioService(self.gateway, is_futures=is_futures)
             snapshot = ps.get_portfolio()
 
             state = self.state_store.load_state() if self.state_store else None
@@ -673,11 +689,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 change_pct = 0.0
                 net_change_pct = 0.0
                 if symbol not in ("USDT", "USD", "BUSD", "USDC") and entry_price > 0 and current_price > 0:
-                    change_pct = ((current_price - entry_price) / entry_price) * 100.0
-                    # Net PnL % relative to entry price, deducting 0.1% buy fee and 0.1% estimated sell fee
-                    # Net multiplier = (1 - 0.001) * (1 - 0.001) * (current_price / entry_price)
-                    net_multiplier = 0.998001 * (current_price / entry_price)
-                    net_change_pct = (net_multiplier - 1.0) * 100.0
+                    if h.total < 0:
+                        # Short position: profit when price falls below entry price
+                        change_pct = ((entry_price - current_price) / entry_price) * 100.0
+                        # Net return deducting 0.1% entry fee and 0.1% exit fee
+                        net_change_pct = (((entry_price - current_price) / entry_price) - 0.002) * 100.0
+                    else:
+                        # Long position: profit when price rises above entry price
+                        change_pct = ((current_price - entry_price) / entry_price) * 100.0
+                        net_multiplier = 0.998001 * (current_price / entry_price)
+                        net_change_pct = (net_multiplier - 1.0) * 100.0
 
                 holdings_list.append({
                     "symbol": symbol,
@@ -951,8 +972,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.debug("CCXT fetch_ohlcv failed for %s (%s): %s", symbol, timeframe, e)
 
-        import urllib.request
         import json
+        import urllib.request
         clean_sym = symbol.split(":")[0].replace("/", "").replace("-", "")
         urls = [
             f"https://api.binance.com/api/v3/klines?symbol={clean_sym}&interval={timeframe}&limit={limit}",
@@ -973,10 +994,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
     def _handle_strategy_conditions(self) -> None:
         try:
             import time
+
             import numpy as np
             import pandas as pd
-            from src.strategy.indicators import add_indicators, candles_to_dataframe
+
             from src.core.models import Candle
+            from src.strategy.indicators import add_indicators, candles_to_dataframe
 
             state = self.state_store.load_state() if self.state_store else None
             last_regime = state.last_regime if (state and state.last_regime) else "BEAR"
@@ -1669,6 +1692,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             # Persist to config.yaml so restarts maintain kill switch state
             try:
                 from pathlib import Path
+
                 from src.config.config_manager import ConfigManager
                 cfg_path = "RUN/config.yaml" if Path("RUN/config.yaml").exists() else "config.yaml"
                 cm = ConfigManager(cfg_path)
@@ -1711,6 +1735,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             # Persist to config.yaml on disk so restarts retain these holdings
             try:
                 from pathlib import Path
+
                 from src.config.config_manager import ConfigManager
                 cfg_path = "RUN/config.yaml" if Path("RUN/config.yaml").exists() else "config.yaml"
                 cm = ConfigManager(cfg_path)
@@ -2049,6 +2074,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             # 2. Persist into config.yaml and state_store
             try:
                 from pathlib import Path
+
                 from src.config.config_manager import ConfigManager
                 cfg_path = "RUN/config.yaml" if Path("RUN/config.yaml").exists() else "config.yaml"
                 cm = ConfigManager(cfg_path)
@@ -2227,7 +2253,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     # ── Helpers ──────────────────────────────────────────────
 
-    def _send_json(self, data: Dict[str, Any], status: int = 200) -> None:
+    def _send_json(self, data: dict[str, Any], status: int = 200) -> None:
         try:
             content = json.dumps(data, indent=2, default=str).encode("utf-8")
             self.send_response(status)

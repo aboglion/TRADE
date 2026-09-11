@@ -8,7 +8,7 @@ safe arithmetic to prevent floating-point surprises.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 def parse_precision_to_decimals(precision: Any) -> int:
@@ -98,7 +98,7 @@ def compute_order_amount(
     amount_precision: Any,
     min_amount: float,
     min_notional: float,
-) -> Optional[float]:
+) -> float | None:
     """
     Compute a valid order amount from a target USD value.
 
@@ -113,7 +113,7 @@ def compute_order_amount(
     return amount
 
 
-def get_market_constraints(market_info: Dict[str, Any]) -> Dict[str, Any]:
+def get_market_constraints(market_info: dict[str, Any]) -> dict[str, Any]:
     """
     Extract precision and limit constraints from CCXT market info.
 

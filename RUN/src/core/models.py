@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.core.enums import (
     AssetRegime,
@@ -21,7 +21,6 @@ from src.core.enums import (
     PositionAction,
     Regime,
 )
-
 
 # ── Market Data ──────────────────────────────────────────────
 
@@ -66,7 +65,7 @@ class AssetHolding:
 class PortfolioSnapshot:
     """Point-in-time view of the entire account."""
     timestamp_ms: int
-    holdings: Dict[str, AssetHolding]   # symbol → AssetHolding
+    holdings: dict[str, AssetHolding]   # symbol → AssetHolding
     total_value_usd: float
 
     def get_weight(self, symbol: str) -> float:
@@ -86,7 +85,7 @@ class PortfolioSnapshot:
 @dataclass(frozen=True)
 class TargetAllocation:
     """Desired portfolio allocation."""
-    weights: Dict[str, float]           # symbol → target weight (0.0–1.0)
+    weights: dict[str, float]           # symbol → target weight (0.0–1.0)
     regime: Regime
     timestamp_ms: int
 
@@ -106,10 +105,10 @@ class OrderIntent:
     side: OrderSide
     order_type: OrderType
     amount: float                       # In base currency units
-    price: Optional[float] = None       # Required for LIMIT orders
-    estimated_price: Optional[float] = None # Reference price for risk check / market order valuation
+    price: float | None = None       # Required for LIMIT orders
+    estimated_price: float | None = None # Reference price for risk check / market order valuation
     reason: str = ""                    # Human-readable justification
-    candle_ts: Optional[int] = None     # Candle that triggered this intent
+    candle_ts: int | None = None     # Candle that triggered this intent
     reduce_only: bool = False           # Flag for position-reducing / closing orders in futures
 
     @staticmethod
@@ -125,14 +124,14 @@ class OrderResult:
     """Result of submitting an order to the exchange."""
     client_order_id: str
     symbol: str = ""
-    exchange_order_id: Optional[str] = None
+    exchange_order_id: str | None = None
     status: OrderStatus = OrderStatus.UNKNOWN
     filled_amount: float = 0.0
     average_price: float = 0.0
     fees: float = 0.0
     fee_currency: str = ""
     timestamp_ms: int = 0
-    raw_response: Dict[str, Any] = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
     error_message: str = ""
 
 
@@ -153,9 +152,9 @@ class StrategyDecision:
     """Complete strategy output for one cycle."""
     regime: Regime
     target_allocation: TargetAllocation
-    signals: List[StrategySignal]
+    signals: list[StrategySignal]
     timestamp_ms: int
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Rebalancing ──────────────────────────────────────────────
@@ -163,7 +162,7 @@ class StrategyDecision:
 @dataclass(frozen=True)
 class RebalancePlan:
     """Minimal set of trades to move from current to target allocation."""
-    orders: List[OrderIntent]
+    orders: list[OrderIntent]
     current_snapshot: PortfolioSnapshot
     target_allocation: TargetAllocation
     total_deviation_pct: float          # Sum of absolute weight diffs
@@ -177,21 +176,21 @@ class BotState:
     Persistent bot state.  This is the *only* mutable model — it gets
     serialized to disk after every cycle.
     """
-    last_processed_candle_ts: Dict[str, int] = field(default_factory=dict)  # symbol → ts_ms
-    last_regime: Optional[str] = None
-    pending_orders: List[Dict[str, Any]] = field(default_factory=list)
-    completed_orders: List[Dict[str, Any]] = field(default_factory=list)
-    last_run_ts: Optional[int] = None
+    last_processed_candle_ts: dict[str, int] = field(default_factory=dict)  # symbol → ts_ms
+    last_regime: str | None = None
+    pending_orders: list[dict[str, Any]] = field(default_factory=list)
+    completed_orders: list[dict[str, Any]] = field(default_factory=list)
+    last_run_ts: int | None = None
     last_cycle_success: bool = True
-    critical_errors: List[str] = field(default_factory=list)
-    strategy_state: Dict[str, Any] = field(default_factory=dict)
-    session_initial_value_usd: Optional[float] = None
-    session_fees: Dict[str, float] = field(default_factory=dict)
-    session_initial_prices: Dict[str, float] = field(default_factory=dict)
-    pnl_history: List[Dict[str, Any]] = field(default_factory=list)
+    critical_errors: list[str] = field(default_factory=list)
+    strategy_state: dict[str, Any] = field(default_factory=dict)
+    session_initial_value_usd: float | None = None
+    session_fees: dict[str, float] = field(default_factory=dict)
+    session_initial_prices: dict[str, float] = field(default_factory=dict)
+    pnl_history: list[dict[str, Any]] = field(default_factory=list)
     version: int = 1
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "last_processed_candle_ts": self.last_processed_candle_ts,
@@ -209,7 +208,7 @@ class BotState:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BotState":
+    def from_dict(cls, data: dict[str, Any]) -> BotState:
         return cls(
             version=data.get("version", 1),
             last_processed_candle_ts=data.get("last_processed_candle_ts", {}),

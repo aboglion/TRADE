@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, List, Optional
+from typing import Any
 
 from src.core.enums import OrderStatus, RunMode
 from src.core.exceptions import (
@@ -42,7 +42,7 @@ class OrderManager:
         gateway,
         state: BotState,
         run_mode: RunMode,
-        telegram_service: Optional[Any] = None,
+        telegram_service: Any | None = None,
     ):
         """
         Args:
@@ -142,14 +142,14 @@ class OrderManager:
             )
             raise UnknownOrderStateError(str(e)) from e
 
-    def check_pending_orders(self) -> List[OrderResult]:
+    def check_pending_orders(self) -> list[OrderResult]:
         """
         On startup/recovery: check status of any pending/unknown orders.
 
         Queries the exchange for orders we think might still be open.
         Updates local state to match exchange reality.
         """
-        results: List[OrderResult] = []
+        results: list[OrderResult] = []
         pending = [
             o for o in self._state.pending_orders
             if o.get("status") in ("submitted", "unknown", "open", "intent")
@@ -217,7 +217,7 @@ class OrderManager:
 
         return results
 
-    def check_open_orders_on_exchange(self) -> List[OrderResult]:
+    def check_open_orders_on_exchange(self) -> list[OrderResult]:
         """
         Check for open orders on the exchange that we don't know about.
 
@@ -319,6 +319,7 @@ class OrderManager:
                     OrderStatus.FILLED,
                     OrderStatus.CANCELLED,
                     OrderStatus.FAILED,
+                    OrderStatus.EXPIRED,
                 ):
                     self._state.completed_orders.append(order_data)
                     if result.status == OrderStatus.FILLED:

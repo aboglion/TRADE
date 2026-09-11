@@ -9,7 +9,6 @@ comes from CSV files or from the exchange.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 from src.core.interfaces import IMarketDataProvider
 from src.core.models import Candle
@@ -32,9 +31,9 @@ class LiveDataProvider(IMarketDataProvider):
         self,
         symbol: str,
         timeframe: str,
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 500,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """
         Fetch candles from the live exchange.
 

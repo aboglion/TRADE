@@ -8,7 +8,7 @@ inconsistencies.  The exchange is ALWAYS the source of truth.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from src.core.enums import OrderStatus
 from src.core.models import BotState
@@ -27,8 +27,8 @@ class ReconciliationService:
         self,
         gateway,
         state: BotState,
-        telegram_service: Optional[Any] = None,
-        run_mode: Optional[Any] = None,
+        telegram_service: Any | None = None,
+        run_mode: Any | None = None,
     ):
         self._gateway = gateway
         self._state = state
@@ -112,6 +112,7 @@ class ReconciliationService:
                         OrderStatus.FILLED,
                         OrderStatus.CANCELLED,
                         OrderStatus.EXPIRED,
+                        OrderStatus.FAILED,
                     ):
                         self._state.completed_orders.append(local_order)
                         if result.status == OrderStatus.FILLED and self._telegram_service:

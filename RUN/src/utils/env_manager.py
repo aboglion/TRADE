@@ -11,7 +11,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 logger = logging.getLogger("bot.utils.env_manager")
 
@@ -26,7 +26,7 @@ def get_project_dirs() -> tuple[Path, Path]:
     return _RUN_DIR, _PROJECT_DIR
 
 
-def find_env_file(preferred_path: Optional[Union[str, Path]] = None) -> Path:
+def find_env_file(preferred_path: str | Path | None = None) -> Path:
     """
     Find the canonical .env file location.
     Prioritizes explicit path, then RUN/.env, then PROJECT_ROOT/.env.
@@ -71,15 +71,15 @@ def ensure_env_symlink() -> None:
 
 
 def load_dotenv(
-    path: Optional[Union[str, Path]] = None,
+    path: str | Path | None = None,
     override: bool = False,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """
     Load .env files into environment variables from canonical candidate locations.
     Returns a dictionary of parsed environment variables.
     """
     ensure_env_symlink()
-    loaded_vars: Dict[str, str] = {}
+    loaded_vars: dict[str, str] = {}
 
     candidates = []
     if path:
@@ -131,8 +131,8 @@ def load_dotenv(
 
 
 def update_env_file(
-    updates: Dict[str, Any],
-    path: Optional[Union[str, Path]] = None,
+    updates: dict[str, Any],
+    path: str | Path | None = None,
 ) -> bool:
     """
     Safely update or insert key-value pairs directly in the .env file.
@@ -146,7 +146,7 @@ def update_env_file(
     env_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert values to strings
-    clean_updates: Dict[str, str] = {}
+    clean_updates: dict[str, str] = {}
     for k, v in updates.items():
         key = str(k).strip()
         if not key:

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.config.config_manager import BotConfig
 from src.core.enums import OrderSide, OrderStatus, Regime
@@ -61,8 +61,8 @@ class BotOrchestrator:
         risk_manager: RiskManager,
         state_store: JsonStateStore,
         state: BotState,
-        clock: Optional[SystemClock] = None,
-        telegram_service: Optional[Any] = None,
+        clock: SystemClock | None = None,
+        telegram_service: Any | None = None,
     ):
         self._config = config
         self._gateway = gateway
@@ -96,7 +96,7 @@ class BotOrchestrator:
         )
 
         self._consecutive_errors = 0
-        self._last_scan_time: Optional[float] = None
+        self._last_scan_time: float | None = None
         import threading
         self._cycle_lock = threading.Lock()
 
@@ -181,7 +181,7 @@ class BotOrchestrator:
             pairs = {name: cfg.pair for name, cfg in assets.items()}
 
             has_new_candles = False
-            new_candles_by_pair: Dict[str, list] = {}
+            new_candles_by_pair: dict[str, list] = {}
 
             for _asset_name, pair in pairs.items():
                 last_ts = self._state.last_processed_candle_ts.get(pair)
@@ -219,7 +219,7 @@ class BotOrchestrator:
 
             target_up_to_ts = max(all_latest_ts) if all_latest_ts else now_ms
 
-            candles_by_asset: Dict[str, list] = {}
+            candles_by_asset: dict[str, list] = {}
             for _asset_name, pair in pairs.items():
                 try:
                     full_history = self._candle_service.get_full_history(
@@ -357,7 +357,7 @@ class BotOrchestrator:
                             delta_qty = -filled_qty if intent.side == OrderSide.SELL else filled_qty
                             new_total = old_base.total + delta_qty
                             new_free = max(0.0, old_base.free + delta_qty)
-                            new_val = max(0.0, new_total * fill_price)
+                            new_val = abs(new_total) * fill_price
                             portfolio.holdings[base_sym] = AssetHolding(
                                 symbol=base_sym,
                                 free=new_free,
@@ -376,12 +376,36 @@ class BotOrchestrator:
                                 total=filled_qty,
                                 value_usd=fill_val,
                             )
+                        elif intent.side == OrderSide.SELL:
+                            # New short position opened
+                            portfolio.holdings[base_sym] = AssetHolding(
+                                symbol=base_sym,
+                                free=0.0,
+                                locked=0.0,
+                                total=-filled_qty,
+                                value_usd=fill_val,
+                            )
 
                         old_usdt = portfolio.holdings.get("USDT")
-                        delta_usdt = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
+                        is_fut = (
+                            getattr(self._config.exchange, "market_type", "") == "future"
+                            or (old_base and (old_base.leverage > 1.0 or old_base.total < 0))
+                            or intent.symbol.endswith(":USDT")
+                        )
+                        if is_fut:
+                            lev = max(1.0, float(old_base.leverage if (old_base and old_base.leverage > 1.0) else 2.0))
+                            is_reducing = getattr(intent, "reduce_only", False) or (old_base and (
+                                (old_base.total > 0 and intent.side == OrderSide.SELL) or
+                                (old_base.total < 0 and intent.side == OrderSide.BUY)
+                            ))
+                            margin_delta = (fill_val / lev) if is_reducing else -(fill_val / lev)
+                            delta_usdt = margin_delta - fees_usd
+                        else:
+                            delta_usdt = (fill_val - fees_usd) if intent.side == OrderSide.SELL else (-fill_val - fees_usd)
+
                         if old_usdt:
                             new_usdt_free = max(0.0, old_usdt.free + delta_usdt)
-                            new_usdt_total = max(0.0, old_usdt.total + delta_usdt)
+                            new_usdt_total = max(0.0, old_usdt.total + (-fees_usd if is_fut else delta_usdt))
                             portfolio.holdings["USDT"] = AssetHolding(
                                 symbol="USDT",
                                 free=new_usdt_free,
@@ -389,7 +413,7 @@ class BotOrchestrator:
                                 total=new_usdt_total,
                                 value_usd=new_usdt_total,
                             )
-                        elif intent.side == OrderSide.SELL:
+                        elif intent.side == OrderSide.SELL and not is_fut:
                             portfolio.holdings["USDT"] = AssetHolding(
                                 symbol="USDT",
                                 free=max(0.0, delta_usdt),

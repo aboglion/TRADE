@@ -12,7 +12,7 @@ import json
 import logging
 import urllib.request
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("bot.services.telegram")
 
@@ -83,9 +83,9 @@ class TelegramService:
 
     def send_trade_notification(
         self,
-        order_data: Dict[str, Any],
+        order_data: dict[str, Any],
         run_mode: str = "DRY_RUN",
-        dashboard_url: Optional[str] = None,
+        dashboard_url: str | None = None,
         is_test: bool = False,
     ) -> bool:
         """
@@ -177,9 +177,9 @@ class TelegramService:
 
     def send_test_notification(
         self,
-        last_trade: Optional[Dict[str, Any]] = None,
+        last_trade: dict[str, Any] | None = None,
         run_mode: str = "DRY_RUN",
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Send a test message to verify Telegram Bot Token and Chat ID.
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import ccxt
 
@@ -63,14 +63,14 @@ class ExchangeGateway:
     def __init__(self, config: ExchangeConfig, run_mode: RunMode):
         self._config = config
         self._run_mode = run_mode
-        self._exchange: Optional[ccxt.Exchange] = None
-        self._markets: Dict[str, Any] = {}
+        self._exchange: ccxt.Exchange | None = None
+        self._markets: dict[str, Any] = {}
         self._initialized = False
-        self._current_leverage: Dict[str, int] = {}
+        self._current_leverage: dict[str, int] = {}
 
     def initialize(self) -> None:
         """Create the CCXT exchange instance and load markets."""
-        options: Dict[str, Any] = {
+        options: dict[str, Any] = {
             "enableRateLimit": self._config.rate_limit,
             "timeout": self._config.timeout_ms,
             "defaultType": self._config.market_type,
@@ -147,13 +147,12 @@ class ExchangeGateway:
                 if symbol in self._markets:
                     self.set_leverage(2, symbol)
 
-    def set_leverage(self, leverage: int | float, symbol: str) -> None:
+    def set_leverage(self, leverage: float, symbol: str) -> None:
         """Set leverage for a futures market symbol."""
         if self._config.market_type != "future":
             return
         lev_int = int(round(leverage))
-        if lev_int < 1:
-            lev_int = 1
+        lev_int = max(lev_int, 1)
         if self._current_leverage.get(symbol) == lev_int:
             return
 
@@ -188,7 +187,7 @@ class ExchangeGateway:
         return self._exchange
 
     @property
-    def markets(self) -> Dict[str, Any]:
+    def markets(self) -> dict[str, Any]:
         return self._markets
 
     # ── Market Data ──────────────────────────────────────────
@@ -197,9 +196,9 @@ class ExchangeGateway:
         self,
         symbol: str,
         timeframe: str = "4h",
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 500,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """
         Fetch OHLCV candles.
 
@@ -212,7 +211,7 @@ class ExchangeGateway:
             )
         )
 
-        candles: List[Candle] = []
+        candles: list[Candle] = []
         now_ms = int(time.time() * 1000)
         tf_ms = self._timeframe_to_ms(timeframe)
 
@@ -235,15 +234,15 @@ class ExchangeGateway:
         self,
         symbol: str,
         timeframe: str = "4h",
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 1000,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """
         Paginated fetch to get more than the default limit of candles.
 
         Fetches in batches and concatenates results.
         """
-        all_candles: List[Candle] = []
+        all_candles: list[Candle] = []
         current_since = since_ms
         if current_since is None and limit > 1000:
             now_ms = int(time.time() * 1000)
@@ -269,7 +268,7 @@ class ExchangeGateway:
 
         # Deduplicate by timestamp
         seen = set()
-        unique: List[Candle] = []
+        unique: list[Candle] = []
         for c in all_candles:
             if c.timestamp_ms not in seen:
                 seen.add(c.timestamp_ms)
@@ -279,7 +278,7 @@ class ExchangeGateway:
 
     # ── Account ──────────────────────────────────────────────
 
-    def fetch_balance(self) -> Dict[str, Dict[str, float]]:
+    def fetch_balance(self) -> dict[str, dict[str, float]]:
         """
         Fetch account balances.
 
@@ -300,7 +299,7 @@ class ExchangeGateway:
                     raise e from err
             else:
                 raise
-        result: Dict[str, Dict[str, float]] = {}
+        result: dict[str, dict[str, float]] = {}
         for currency, balance in raw.items():
             if isinstance(balance, dict) and "free" in balance:
                 total = float(balance.get("total", 0) or 0)
@@ -314,7 +313,7 @@ class ExchangeGateway:
             result["USDT"] = {"free": 0.0, "used": 0.0, "total": 0.0}
         return result
 
-    def fetch_positions(self) -> List[Dict[str, Any]]:
+    def fetch_positions(self) -> list[dict[str, Any]]:
         """
         Fetch active futures positions.
         """
@@ -345,9 +344,9 @@ class ExchangeGateway:
         ticker = self._retry(lambda: self.exchange.fetch_ticker(sym))
         return float(ticker.get("last", 0) or ticker.get("close", 0))
 
-    def fetch_ticker_prices(self, symbols: List[str]) -> Dict[str, float]:
+    def fetch_ticker_prices(self, symbols: list[str]) -> dict[str, float]:
         """Fetch prices for multiple symbols."""
-        prices: Dict[str, float] = {}
+        prices: dict[str, float] = {}
         for symbol in symbols:
             try:
                 prices[symbol] = self.fetch_ticker_price(symbol)
@@ -364,7 +363,7 @@ class ExchangeGateway:
         Uses clientOrderId (newClientOrderId) for idempotency.
         """
         resolved_sym = self._resolve_market_symbol(intent.symbol)
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "newClientOrderId": intent.client_order_id,
         }
         if intent.order_type.value == "limit" and "timeInForce" not in params:
@@ -448,7 +447,7 @@ class ExchangeGateway:
             raise InvalidOrderError(str(e)) from e
 
     @staticmethod
-    def _extract_fee(raw: Dict[str, Any]) -> Tuple[float, str]:
+    def _extract_fee(raw: dict[str, Any]) -> tuple[float, str]:
         """Safely extract fee cost and currency from CCXT order dictionary."""
         if not isinstance(raw, dict):
             return 0.0, ""
@@ -465,13 +464,41 @@ class ExchangeGateway:
                     if f.get("currency"):
                         currs.add(str(f.get("currency")))
             return total_cost, ",".join(sorted(currs))
+        # Check trades list in CCXT order
+        trades_list = raw.get("trades")
+        if isinstance(trades_list, list) and len(trades_list) > 0:
+            total_cost = 0.0
+            currs = set()
+            for t in trades_list:
+                if isinstance(t, dict):
+                    tf = t.get("fee")
+                    if isinstance(tf, dict) and tf.get("cost") is not None:
+                        total_cost += float(tf.get("cost") or 0.0)
+                        if tf.get("currency"):
+                            currs.add(str(tf.get("currency")))
+            if total_cost > 0:
+                return total_cost, ",".join(sorted(currs))
+        # Check raw Binance fills in info
+        if isinstance(raw.get("info"), dict):
+            fills = raw["info"].get("fills")
+            if isinstance(fills, list) and len(fills) > 0:
+                total_cost = 0.0
+                currs = set()
+                for fill in fills:
+                    if isinstance(fill, dict):
+                        comm = float(fill.get("commission", 0.0) or 0.0)
+                        total_cost += comm
+                        if fill.get("commissionAsset"):
+                            currs.add(str(fill.get("commissionAsset")))
+                if total_cost > 0:
+                    return total_cost, ",".join(sorted(currs))
         return 0.0, ""
 
     def cancel_order(self, symbol: str, order_id: str) -> OrderResult:
         """Cancel an open order, supporting numeric exchange order IDs and client order IDs."""
         sym = self._resolve_market_symbol(symbol)
-        params: Dict[str, Any] = {}
-        target_id: Optional[str] = order_id
+        params: dict[str, Any] = {}
+        target_id: str | None = order_id
         if order_id and not str(order_id).isdigit():
             params["origClientOrderId"] = str(order_id)
             target_id = None
@@ -504,8 +531,8 @@ class ExchangeGateway:
     def fetch_order(self, symbol: str, order_id: str) -> OrderResult:
         """Get current status of an order, supporting numeric exchange order IDs and client order IDs."""
         sym = self._resolve_market_symbol(symbol)
-        params: Dict[str, Any] = {}
-        target_id: Optional[str] = order_id
+        params: dict[str, Any] = {}
+        target_id: str | None = order_id
         if order_id and not str(order_id).isdigit():
             params["origClientOrderId"] = str(order_id)
             target_id = None
@@ -547,10 +574,10 @@ class ExchangeGateway:
             raw_response=raw,
         )
 
-    def fetch_open_orders(self, symbol: Optional[str] = None) -> List[OrderResult]:
+    def fetch_open_orders(self, symbol: str | None = None) -> list[OrderResult]:
         """List open orders on the exchange."""
         raw_list = self._retry(lambda: self.exchange.fetch_open_orders(symbol))
-        results: List[OrderResult] = []
+        results: list[OrderResult] = []
         for raw in raw_list:
             results.append(OrderResult(
                 client_order_id=raw.get("clientOrderId", ""),
@@ -595,7 +622,7 @@ class ExchangeGateway:
         sym = self._resolve_market_symbol(symbol)
         return float(self.exchange.price_to_precision(sym, price))
 
-    def get_market_info(self, symbol: str) -> Dict[str, Any]:
+    def get_market_info(self, symbol: str) -> dict[str, Any]:
         """Get market info for a symbol."""
         sym = self._resolve_market_symbol(symbol)
         if sym in self._markets:
@@ -604,7 +631,7 @@ class ExchangeGateway:
 
     # ── Internal helpers ─────────────────────────────────────
 
-    def _retry(self, func, max_retries: Optional[int] = None):
+    def _retry(self, func, max_retries: int | None = None):
         """Execute *func* with exponential backoff on transient errors."""
         retries = max_retries or self._config.max_retries
         delay_ms = self._config.retry_delay_base_ms

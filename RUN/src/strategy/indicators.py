@@ -11,15 +11,13 @@ strategy parity with the backtest.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 import numpy as np
 import pandas as pd
 
 from src.core.models import Candle
 
 
-def candles_to_dataframe(candles: List[Candle]) -> pd.DataFrame:
+def candles_to_dataframe(candles: list[Candle]) -> pd.DataFrame:
     """Convert a list of Candle objects to a DataFrame matching engine.py format."""
     if not candles:
         empty_df = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
@@ -153,7 +151,7 @@ DEFAULT_MICRO_CFG = dict(
 
 def add_micro_indicators(
     df: pd.DataFrame,
-    cfg: Optional[Dict] = None,
+    cfg: dict | None = None,
 ) -> pd.DataFrame:
     """
     Add micro satellite indicators and regime classification.

@@ -7,7 +7,6 @@ This enables easy swapping between live, dry-run, and test backends.
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
 
 from src.core.models import (
     BotState,
@@ -27,9 +26,9 @@ class IMarketDataProvider(ABC):
         self,
         symbol: str,
         timeframe: str,
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 500,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """
         Fetch candles for *symbol* at *timeframe* granularity.
 
@@ -49,7 +48,7 @@ class IPortfolioProvider(ABC):
     """Reads current account holdings."""
 
     @abstractmethod
-    def get_portfolio(self, prices: Dict[str, float]) -> PortfolioSnapshot:
+    def get_portfolio(self, prices: dict[str, float]) -> PortfolioSnapshot:
         """
         Build a point-in-time portfolio snapshot.
 
@@ -81,7 +80,7 @@ class IOrderExecutor(ABC):
         ...
 
     @abstractmethod
-    def get_open_orders(self, symbol: Optional[str] = None) -> List[OrderResult]:
+    def get_open_orders(self, symbol: str | None = None) -> list[OrderResult]:
         """List all open orders, optionally filtered by symbol."""
         ...
 
@@ -132,7 +131,7 @@ class IRiskManager(ABC):
         self,
         intent: OrderIntent,
         portfolio: PortfolioSnapshot,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Evaluate whether *intent* is safe to execute.
 
@@ -153,7 +152,7 @@ class IStrategy(ABC):
     @abstractmethod
     def compute_signals(
         self,
-        candles_by_asset: Dict[str, List[Candle]],
+        candles_by_asset: dict[str, list[Candle]],
         portfolio: PortfolioSnapshot,
     ) -> StrategyDecision:
         """

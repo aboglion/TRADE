@@ -5,13 +5,19 @@ Micro Satellite Strategy for short-term momentum and trend acceleration trades.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from src.core.enums import AssetRegime, PositionAction, Regime
-from src.core.models import Candle, PortfolioSnapshot, StrategyDecision, StrategySignal, TargetAllocation
+from src.core.models import (
+    Candle,
+    PortfolioSnapshot,
+    StrategyDecision,
+    StrategySignal,
+    TargetAllocation,
+)
 from src.strategy.regime_adaptive_strategy import candles_to_dataframe
 
 logger = logging.getLogger("bot.strategy.micro")
@@ -44,12 +50,12 @@ class MicroSatelliteStrategy:
 
     def __init__(
         self,
-        asset_weights: Optional[Dict[str, float]] = None,
-        config: Optional[Dict[str, Any]] = None,
+        asset_weights: dict[str, float] | None = None,
+        config: dict[str, Any] | None = None,
     ):
         self._weights = asset_weights or {}
         self._cfg = {**DEFAULT_MICRO_CFG, **(config or {})}
-        self._positions: Dict[str, Dict[str, Any]] = {}
+        self._positions: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _to_asset_regime(mode_val: Any) -> AssetRegime:
@@ -62,10 +68,10 @@ class MicroSatelliteStrategy:
                 pass
         return AssetRegime.MICRO_NEUTRAL
 
-    def export_state(self) -> Dict[str, Any]:
+    def export_state(self) -> dict[str, Any]:
         return {"positions": self._positions}
 
-    def import_state(self, state_dict: Dict[str, Any]) -> None:
+    def import_state(self, state_dict: dict[str, Any]) -> None:
         if not isinstance(state_dict, dict):
             return
         positions = state_dict.get("positions")
@@ -75,14 +81,14 @@ class MicroSatelliteStrategy:
 
     def compute_signals(
         self,
-        candles_by_asset: Dict[str, List[Candle]],
+        candles_by_asset: dict[str, list[Candle]],
         portfolio: PortfolioSnapshot,
     ) -> StrategyDecision:
         """
         Compute micro-satellite trading signals from candle data.
         """
-        target_weights: Dict[str, float] = {}
-        signals: List[StrategySignal] = []
+        target_weights: dict[str, float] = {}
+        signals: list[StrategySignal] = []
 
         for symbol, candles in candles_by_asset.items():
             if not candles:

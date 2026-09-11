@@ -8,12 +8,11 @@ from __future__ import annotations
 import logging
 import re
 import socket
-from typing import Optional
 import urllib.request
 
 logger = logging.getLogger("bot.utils.network")
 
-_cached_outbound_ip: Optional[str] = None
+_cached_outbound_ip: str | None = None
 _IPV4_REGEX = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
 
 

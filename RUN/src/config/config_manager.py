@@ -13,7 +13,7 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -48,7 +48,7 @@ class AssetConfig:
 @dataclass
 class StrategyConfig:
     timeframe: str = "4h"
-    assets: Dict[str, AssetConfig] = field(default_factory=dict)
+    assets: dict[str, AssetConfig] = field(default_factory=dict)
     warmup_candles: int = 1200
     sma_regime_period: int = 150
     conviction_leverage: float = 10.0
@@ -61,14 +61,14 @@ class StrategyConfig:
     safe_spot_weight: float = 0.30
     safe_micro_weight: float = 0.10
     flash_wick_limit: float = -0.038
-    ladder_steps: List[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0])
+    ladder_steps: list[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0])
     bear_short_hedge_weight: float = 0.35   # 0.35 for 35% margin @ 2.0x short hedge on BTC
     short_leverage: float = 2.0            # 2.0x leverage for short hedge
     cash_apr: float = 0.04
     core_ratio: float = 0.80               # Macro/Micro allocation split
     # Macro per-asset configs are kept as dicts matching engine.py constants
-    macro_configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    micro_config: Dict[str, Any] = field(default_factory=dict)
+    macro_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    micro_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -77,8 +77,8 @@ class RiskConfig:
     max_single_order_usd: float = 10000.0
     max_portfolio_change_pct: float = 3.5
     min_seconds_between_orders: int = 10
-    allowed_symbols: List[str] = field(default_factory=list)
-    banned_symbols: List[str] = field(default_factory=list)
+    allowed_symbols: list[str] = field(default_factory=list)
+    banned_symbols: list[str] = field(default_factory=list)
     allow_market_orders: bool = False
     kill_switch: bool = False
     max_drawdown_pct: float = 0.60
@@ -105,7 +105,7 @@ class SchedulerConfig:
 
 @dataclass
 class DryRunConfig:
-    initial_balances: Dict[str, float] = field(
+    initial_balances: dict[str, float] = field(
         default_factory=lambda: {"USDT": 1000.0}
     )
 
@@ -140,13 +140,13 @@ class ConfigManager:
     Priority: environment variables > YAML file > defaults.
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self._config_path = config_path
-        self._config: Optional[BotConfig] = None
+        self._config: BotConfig | None = None
 
     def load(self) -> BotConfig:
         """Load and validate configuration."""
-        raw: Dict[str, Any] = {}
+        raw: dict[str, Any] = {}
         if self._config_path:
             cfg_p = Path(self._config_path)
             if not cfg_p.exists():
@@ -187,7 +187,7 @@ class ConfigManager:
 
     # ── Section loaders ──────────────────────────────────────
 
-    def _load_run_mode(self, config: BotConfig, raw: Dict) -> None:
+    def _load_run_mode(self, config: BotConfig, raw: dict) -> None:
         mode_str = os.environ.get("RUN_MODE", raw.get("run_mode", "DRY_RUN"))
         try:
             config.run_mode = RunMode[mode_str.upper()]
@@ -197,7 +197,7 @@ class ConfigManager:
                 f"Valid: {[m.name for m in RunMode]}"
             ) from err
 
-    def _load_exchange(self, config: BotConfig, raw: Dict) -> None:
+    def _load_exchange(self, config: BotConfig, raw: dict) -> None:
         ex_raw = raw.get("exchange", {})
         config.exchange = ExchangeConfig(
             name=ex_raw.get("name", "binance"),
@@ -211,7 +211,7 @@ class ConfigManager:
             portfolio_margin=ex_raw.get("portfolio_margin", False),
         )
 
-    def _load_strategy(self, config: BotConfig, raw: Dict) -> None:
+    def _load_strategy(self, config: BotConfig, raw: dict) -> None:
         s_raw = raw.get("strategy", {})
         assets_raw = s_raw.get("assets", {
             "BTC": {"weight": 0.40, "pair": "BTC/USDT"},
@@ -248,7 +248,7 @@ class ConfigManager:
             micro_config=s_raw.get("micro_config", {}),
         )
 
-    def _load_risk(self, config: BotConfig, raw: Dict) -> None:
+    def _load_risk(self, config: BotConfig, raw: dict) -> None:
         r_raw = raw.get("risk", {})
         config.risk = RiskConfig(
             max_orders_per_cycle=r_raw.get("max_orders_per_cycle", 6),
@@ -263,35 +263,47 @@ class ConfigManager:
             min_order_value_usd=r_raw.get("min_order_value_usd", 11.0),
         )
 
-    def _load_state(self, config: BotConfig, raw: Dict) -> None:
+    def _load_state(self, config: BotConfig, raw: dict) -> None:
         s_raw = raw.get("state", {})
+        raw_state_path = s_raw.get("path", "data/bot_state.json")
+        state_path = Path(raw_state_path)
+        if not state_path.is_absolute() and self._config_path:
+            cfg_parent = Path(self._config_path).resolve().parent
+            if (cfg_parent / raw_state_path).exists():
+                state_path = cfg_parent / raw_state_path
         config.state = StateConfig(
             backend=s_raw.get("backend", "json"),
-            path=s_raw.get("path", "data/bot_state.json"),
+            path=str(state_path),
         )
 
-    def _load_logging(self, config: BotConfig, raw: Dict) -> None:
+    def _load_logging(self, config: BotConfig, raw: dict) -> None:
         l_raw = raw.get("logging", {})
+        raw_log_file = l_raw.get("file", "logs/bot.log")
+        log_file = Path(raw_log_file)
+        if not log_file.is_absolute() and self._config_path:
+            cfg_parent = Path(self._config_path).resolve().parent
+            if (cfg_parent / raw_log_file).exists():
+                log_file = cfg_parent / raw_log_file
         config.logging = LoggingConfig(
             level=l_raw.get("level", "INFO"),
-            file=l_raw.get("file", "logs/bot.log"),
+            file=str(log_file),
         )
 
-    def _load_scheduler(self, config: BotConfig, raw: Dict) -> None:
+    def _load_scheduler(self, config: BotConfig, raw: dict) -> None:
         sc_raw = raw.get("scheduler", {})
         config.scheduler = SchedulerConfig(
             poll_interval_seconds=sc_raw.get("poll_interval_seconds", 300),
             max_consecutive_errors=sc_raw.get("max_consecutive_errors", 10),
         )
 
-    def _load_dry_run(self, config: BotConfig, raw: Dict) -> None:
+    def _load_dry_run(self, config: BotConfig, raw: dict) -> None:
         dr_raw = raw.get("dry_run", {})
         init_bal = dr_raw.get("initial_balances", {"USDT": 1000.0})
         # Ensure values are float
         parsed_bal = {str(k).upper(): float(v) for k, v in init_bal.items()}
         config.dry_run = DryRunConfig(initial_balances=parsed_bal)
 
-    def _load_telegram(self, config: BotConfig, raw: Dict) -> None:
+    def _load_telegram(self, config: BotConfig, raw: dict) -> None:
         is_test = self._config_path and any(x in str(self._config_path) for x in ("/tmp", "pytest", "tempfile"))
         if not is_test:
             try:
@@ -408,7 +420,7 @@ class ConfigManager:
                 logger.warning("Could not backup Telegram settings to state store: %s", ex)
 
 
-    def save_dry_run_balances(self, balances: Dict[str, float]) -> None:
+    def save_dry_run_balances(self, balances: dict[str, float]) -> None:
         """Persist updated dry_run.initial_balances back to config.yaml."""
         parsed = {str(k).upper(): round(float(v), 8) for k, v in balances.items() if float(v) >= 0}
         if self._config:

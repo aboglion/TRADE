@@ -9,7 +9,6 @@ The bot operates on 4-hour candles aligned to midnight UTC:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from src.core.interfaces import IClock
 
@@ -65,7 +64,7 @@ def next_candle_open_ms(timestamp_ms: int, timeframe: str) -> int:
     return current_open + tf_ms
 
 
-def is_candle_closed(candle_open_ms_val: int, timeframe: str, now_ms: Optional[int] = None) -> bool:
+def is_candle_closed(candle_open_ms_val: int, timeframe: str, now_ms: int | None = None) -> bool:
     """Check whether the candle that opened at *candle_open_ms_val* is now closed."""
     if now_ms is None:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)

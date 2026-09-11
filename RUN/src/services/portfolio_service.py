@@ -8,7 +8,7 @@ targets, and generates the minimal set of trades needed to rebalance.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.exchanges.exchange_gateway import ExchangeGateway
@@ -63,7 +63,7 @@ class PortfolioService:
 
     def get_portfolio(
         self,
-        prices: Optional[Dict[str, float]] = None,
+        prices: dict[str, float] | None = None,
     ) -> PortfolioSnapshot:
         """
         Build a current portfolio snapshot from exchange balances.
@@ -78,7 +78,7 @@ class PortfolioService:
         if prices is None:
             prices = {}
 
-        holdings: Dict[str, AssetHolding] = {}
+        holdings: dict[str, AssetHolding] = {}
         total_value = 0.0
 
         for currency, bal in balances.items():
@@ -196,7 +196,7 @@ class PortfolioService:
         self,
         portfolio: PortfolioSnapshot,
         target: TargetAllocation,
-        prices: Dict[str, float],
+        prices: dict[str, float],
     ) -> RebalancePlan:
         """
         Compute the minimal set of orders to reach target allocation.
@@ -233,7 +233,7 @@ class PortfolioService:
                     matching_sym = f"{base_asset}/USDT"
                 all_symbols.add(matching_sym)
 
-        deviations: Dict[str, float] = {}
+        deviations: dict[str, float] = {}
         for symbol in all_symbols:
             if symbol in ("USDT", "USD", "BUSD", "USDC", "BNB"):
                 continue  # USDT is the residual
@@ -254,8 +254,8 @@ class PortfolioService:
         )
 
         # Generate orders for significant deviations
-        sell_orders: List[OrderIntent] = []
-        buy_orders: List[OrderIntent] = []
+        sell_orders: list[OrderIntent] = []
+        buy_orders: list[OrderIntent] = []
 
         for symbol, deviation in deviations.items():
             pair_symbol = symbol if "/" in symbol else f"{symbol}/USDT"
@@ -443,8 +443,8 @@ class PortfolioService:
 
         # Separate reducing vs expanding orders:
         # Sells that reduce longs come before sells that open shorts
-        reducing_sells: List[OrderIntent] = []
-        expanding_sells: List[OrderIntent] = []
+        reducing_sells: list[OrderIntent] = []
+        expanding_sells: list[OrderIntent] = []
         for o in sell_orders:
             base = o.symbol.split("/")[0].split(":")[0]
             holding = portfolio.holdings.get(base)
@@ -458,8 +458,8 @@ class PortfolioService:
                 expanding_sells.append(o)
 
         # Buys that cover shorts come before buys that open longs
-        reducing_buys: List[OrderIntent] = []
-        expanding_buys: List[OrderIntent] = []
+        reducing_buys: list[OrderIntent] = []
+        expanding_buys: list[OrderIntent] = []
         for o in buy_orders:
             base = o.symbol.split("/")[0].split(":")[0]
             holding = portfolio.holdings.get(base)

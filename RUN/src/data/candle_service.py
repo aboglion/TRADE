@@ -12,7 +12,6 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 from src.core.exceptions import DataGapError, InsufficientDataError
 from src.core.interfaces import IMarketDataProvider
@@ -44,9 +43,9 @@ class CandleService:
     def get_new_closed_candles(
         self,
         symbol: str,
-        last_processed_ts: Optional[int],
+        last_processed_ts: int | None,
         now_ms: int,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """
         Fetch closed candles that haven't been processed yet.
 
@@ -76,7 +75,7 @@ class CandleService:
         )
 
         # Filter: only closed candles that are after last_processed_ts
-        new_closed: List[Candle] = []
+        new_closed: list[Candle] = []
         for c in candles:
             if not c.is_closed:
                 continue
@@ -104,8 +103,8 @@ class CandleService:
         self,
         symbol: str,
         up_to_ts: int,
-        min_candles: Optional[int] = None,
-    ) -> List[Candle]:
+        min_candles: int | None = None,
+    ) -> list[Candle]:
         """
         Fetch enough historical candles for indicator computation.
 
@@ -146,7 +145,7 @@ class CandleService:
 
         return closed
 
-    def validate_continuity(self, candles: List[Candle]) -> bool:
+    def validate_continuity(self, candles: list[Candle]) -> bool:
         """
         Check that candles form a continuous sequence with no gaps.
 
@@ -174,10 +173,10 @@ class CandleService:
 
         return True
 
-    def _deduplicate(self, candles: List[Candle]) -> List[Candle]:
+    def _deduplicate(self, candles: list[Candle]) -> list[Candle]:
         """Remove duplicate candles by timestamp, keep first occurrence."""
         seen: set = set()
-        unique: List[Candle] = []
+        unique: list[Candle] = []
         for c in candles:
             if c.timestamp_ms not in seen:
                 seen.add(c.timestamp_ms)

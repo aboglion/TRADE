@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from src.core.models import Candle, PortfolioSnapshot
 
@@ -42,14 +42,14 @@ class HybridStrategy:
             self._satellite_ratio * 100,
         )
 
-    def export_state(self) -> Dict[str, Any]:
+    def export_state(self) -> dict[str, Any]:
         """Export state for both strategies."""
         return {
             "macro_state": self._macro.export_state(),
             "micro_state": self._micro.export_state(),
         }
 
-    def import_state(self, state_dict: Dict[str, Any]) -> None:
+    def import_state(self, state_dict: dict[str, Any]) -> None:
         """Import state for both strategies with fallback for legacy state structure."""
         if not isinstance(state_dict, dict):
             return
@@ -67,7 +67,7 @@ class HybridStrategy:
 
     def compute_signals(
         self,
-        candles_by_asset: Dict[str, List[Candle]],
+        candles_by_asset: dict[str, list[Candle]],
         portfolio: PortfolioSnapshot,
     ) -> Any:
         """
@@ -91,7 +91,7 @@ class HybridStrategy:
                 timestamp_ms=macro_decision.timestamp_ms,
             )
 
-        combined_weights: Dict[str, float] = {}
+        combined_weights: dict[str, float] = {}
 
         # In Bear Regime, macro strategy controls 100% of capital (short hedge + cash).
         # Do NOT dilute bear hedge with the micro satellite split.

@@ -16,7 +16,7 @@ The strategy:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -84,7 +84,7 @@ _CFG_SOL = dict(
     trend_adx_min=24.0, init_risk_atr=3.0,
 )
 
-ASSET_CONFIGS: Dict[str, Dict[str, Any]] = {
+ASSET_CONFIGS: dict[str, dict[str, Any]] = {
     "BTC": _CFG_BTC,
     "ETH": _CFG_ETH,
     "SOL": _CFG_SOL,
@@ -109,22 +109,22 @@ class RegimeAdaptiveStrategy(IStrategy):
 
     def __init__(
         self,
-        asset_weights: Optional[Dict[str, float]] = None,
+        asset_weights: dict[str, float] | None = None,
         sma_regime_period: int = 150,
-        conviction_leverage: Optional[float] = None,
+        conviction_leverage: float | None = None,
         bull_leverage: float = 10.0,
         mid_leverage: float = 5.0,
         base_leverage: float = 2.5,
         min_leverage: float = 1.0,
-        momentum_cutoff_pct: Optional[float] = None,
+        momentum_cutoff_pct: float | None = None,
         safe_cash_weight: float = 0.60,
         safe_spot_weight: float = 0.30,
         safe_micro_weight: float = 0.10,
         flash_wick_limit: float = -0.038,
-        ladder_steps: Optional[List[float]] = None,
+        ladder_steps: list[float] | None = None,
         bear_short_hedge_weight: float = 0.35,
-        short_leverage: Optional[float] = None,
-        asset_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        short_leverage: float | None = None,
+        asset_configs: dict[str, dict[str, Any]] | None = None,
         core_ratio: float = 0.80,
     ):
         self._weights = asset_weights or DEFAULT_WEIGHTS
@@ -148,17 +148,17 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         # Active position tracking state per asset symbol
         # {"BTC": {"active": bool, "entry_px": float, "atr_at_entry": float, "high_water": float, "mode": str}}
-        self._positions: Dict[str, Dict[str, Any]] = {}
+        self._positions: dict[str, dict[str, Any]] = {}
         self._bull_peak: float = 0.0
         self._bars_since_circuit_trip: int = 999
         self._effective_leverage: float = 1.0
         self._in_momentum: bool = False
         self._safe_haven_active: bool = False
         self._dist_from_5d_high_pct: float = 0.0
-        self._prev_regime: Optional[Regime] = None
-        self._prev_safe_haven: Optional[bool] = None
+        self._prev_regime: Regime | None = None
+        self._prev_safe_haven: bool | None = None
 
-    def export_state(self) -> Dict[str, Any]:
+    def export_state(self) -> dict[str, Any]:
         """Export state for persistence in BotState.strategy_state."""
         return {
             "positions": self._positions,
@@ -170,7 +170,7 @@ class RegimeAdaptiveStrategy(IStrategy):
             "dist_from_5d_high_pct": self._dist_from_5d_high_pct,
         }
 
-    def import_state(self, state_dict: Dict[str, Any]) -> None:
+    def import_state(self, state_dict: dict[str, Any]) -> None:
         """Import position tracking state from BotState.strategy_state."""
         if not isinstance(state_dict, dict):
             return
@@ -196,7 +196,7 @@ class RegimeAdaptiveStrategy(IStrategy):
 
     def compute_signals(
         self,
-        candles_by_asset: Dict[str, List[Candle]],
+        candles_by_asset: dict[str, list[Candle]],
         portfolio: PortfolioSnapshot,
     ) -> StrategyDecision:
         """
@@ -259,13 +259,13 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         return decision
 
-    def _find_btc_key(self, candles_by_asset: Dict[str, List[Candle]]) -> str:
+    def _find_btc_key(self, candles_by_asset: dict[str, list[Candle]]) -> str:
         for key in candles_by_asset:
             if "BTC" in key.upper():
                 return key
         raise ValueError("BTC candles not found in candles_by_asset")
 
-    def _determine_regime(self, btc_candles: List[Candle]) -> Regime:
+    def _determine_regime(self, btc_candles: list[Candle]) -> Regime:
         """
         Determine Bull/Bear regime from BTC SMA-150.
         Uses daily resampling of 4H candles, matching engine.py (lines 757-761).
@@ -314,18 +314,18 @@ class RegimeAdaptiveStrategy(IStrategy):
 
     def _evaluate_strategy(
         self,
-        candles_by_asset: Dict[str, List[Candle]],
+        candles_by_asset: dict[str, list[Candle]],
         regime: Regime,
         portfolio: PortfolioSnapshot,
-    ) -> tuple[Dict[str, float], List[StrategySignal], Regime]:
+    ) -> tuple[dict[str, float], list[StrategySignal], Regime]:
         """
         Evaluate full per-asset strategy matching BACK_TEST/engine.py:
         - Bullish Risk Guard (BTC daily close vs EMA20 & pullback > 8%)
         - Entry gating (Donchian30 breakout + ADX >= trend_adx_min + EMA20 re-entry)
         - Exits (ATR Trailing Stop, Initial Risk Stop, EMA50/200 breakdown)
         """
-        target_weights: Dict[str, float] = {}
-        signals: List[StrategySignal] = []
+        target_weights: dict[str, float] = {}
+        signals: list[StrategySignal] = []
 
         # 1. Indicators for Macro / Tactical Regime & Crash Shield
         btc_key = self._find_btc_key(candles_by_asset)
@@ -386,7 +386,7 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         # Macro & Tactical Bear Detection (Parity with engine.py lines 827-828):
         # Bear regime triggers if BTC < SMA150 OR fast breakdown (BTC < EMA20 and EMA20 < EMA50)
-        is_fast_bear_breakdown = (latest_btc < latest_ema20) and (latest_ema20 < latest_ema50)
+        is_fast_bear_breakdown = (latest_btc < latest_ema20 < latest_ema50)
         is_bear = (latest_btc < latest_sma150) or is_fast_bear_breakdown or (regime == Regime.BEAR)
         is_bullish = (latest_btc >= latest_ema20) and not is_bear
 
@@ -443,8 +443,7 @@ class RegimeAdaptiveStrategy(IStrategy):
 
         # ── 2. BULL / PULLBACK REGIME ────────────────────────
         # Update persistent bull peak
-        if latest_btc > self._bull_peak:
-            self._bull_peak = latest_btc
+        self._bull_peak = max(self._bull_peak, latest_btc)
             
         peak_btc = self._bull_peak if self._bull_peak > 0 else latest_btc
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Tuple
 
 from src.config.config_manager import RiskConfig
 from src.core.enums import OrderType
@@ -47,7 +46,7 @@ class RiskManager(IRiskManager):
         self,
         intent: OrderIntent,
         portfolio: PortfolioSnapshot,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Evaluate whether the order is safe to execute.
 
@@ -107,14 +106,14 @@ class RiskManager(IRiskManager):
 
     def _check_kill_switch(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         if self._config.kill_switch:
             return False, "Kill switch is ACTIVE — all trading halted"
         return True, ""
 
     def _check_symbol_allowed(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         clean_sym = intent.symbol.split(":")[0] if ":" in intent.symbol else intent.symbol
         if intent.symbol in self._config.banned_symbols or clean_sym in self._config.banned_symbols:
             return False, f"Symbol {intent.symbol} is banned"
@@ -125,7 +124,7 @@ class RiskManager(IRiskManager):
 
     def _check_market_order(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         if (
             intent.order_type == OrderType.MARKET
             and not self._config.allow_market_orders
@@ -139,7 +138,7 @@ class RiskManager(IRiskManager):
 
     def _check_max_order_value(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         if self._is_position_reducing_order(intent, portfolio):
             return True, ""
         order_value = self._get_order_value(intent)
@@ -153,7 +152,7 @@ class RiskManager(IRiskManager):
 
     def _check_max_orders_per_cycle(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         if self._is_position_reducing_order(intent, portfolio):
             return True, ""
         if self._cycle_order_count >= self._config.max_orders_per_cycle:
@@ -165,7 +164,10 @@ class RiskManager(IRiskManager):
 
     def _check_min_time_between_orders(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
+        # Position reduction / emergency stop orders must not be delayed by time throttling
+        if self._is_position_reducing_order(intent, portfolio):
+            return True, ""
         if self._last_order_time > 0:
             elapsed = time.time() - self._last_order_time
             # Allow 0.05s tolerance for OS scheduler sleep jitter
@@ -181,20 +183,22 @@ class RiskManager(IRiskManager):
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
     ) -> bool:
         """Check if an order only reduces or closes an existing position without flipping/expanding."""
+        if getattr(intent, "reduce_only", False):
+            return True
         base = intent.symbol.split("/")[0].split(":")[0]
         holding = portfolio.holdings.get(base)
         if holding is None:
             return False
         current_qty = holding.total
         if current_qty > 1e-8 and intent.side.value.upper() == "SELL":
-            return intent.amount <= (current_qty + 1e-6)
+            return intent.amount <= (current_qty + 1e-5)
         if current_qty < -1e-8 and intent.side.value.upper() == "BUY":
-            return intent.amount <= (abs(current_qty) + 1e-6)
+            return intent.amount <= (abs(current_qty) + 1e-5)
         return False
 
     def _check_max_portfolio_change(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         if portfolio.total_value_usd <= 0:
             return True, ""
         # Position reduction/liquidation orders reduce risk and must not be blocked by portfolio change caps
@@ -212,7 +216,7 @@ class RiskManager(IRiskManager):
 
     def _check_min_order_value(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         order_value = self._get_order_value(intent)
         if order_value < self._config.min_order_value_usd:
             return (
@@ -224,7 +228,7 @@ class RiskManager(IRiskManager):
 
     def _check_sufficient_balance(
         self, intent: OrderIntent, portfolio: PortfolioSnapshot
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Check that account has sufficient free balance or margin to execute the order.
         Position-reducing orders always pass since they release capital/margin.
@@ -246,19 +250,21 @@ class RiskManager(IRiskManager):
                         f"Insufficient free balance for {base}: need {intent.amount:.8f}, available {available_qty:.8f}",
                     )
 
-        # Buy orders require sufficient quote currency (USDT)
+        # Buy orders require sufficient quote currency (USDT, USDC, etc.)
         if intent.side.value.upper() == "BUY":
-            usdt_holding = portfolio.holdings.get("USDT")
-            free_usdt = usdt_holding.free if usdt_holding else 0.0
+            parts = intent.symbol.split("/")
+            quote = parts[1].split(":")[0] if len(parts) > 1 else "USDT"
+            quote_holding = portfolio.holdings.get(quote) or portfolio.holdings.get("USDT") or portfolio.holdings.get("USD")
+            free_quote = quote_holding.free if quote_holding else 0.0
             order_value = self._get_order_value(intent)
-            if free_usdt <= 0.0 and order_value > 0.0:
-                return False, f"Insufficient balance: free USDT is ${free_usdt:.2f}"
+            if free_quote <= 0.0 and order_value > 0.0:
+                return False, f"Insufficient balance: free {quote} is ${free_quote:.2f}"
 
             is_futures_portfolio = self._is_futures or any(h.total < 0 or h.leverage > 1.0 for h in portfolio.holdings.values())
-            if not is_futures_portfolio and order_value > (free_usdt + 1e-4):
+            if not is_futures_portfolio and order_value > (free_quote + 1e-4):
                 return (
                     False,
-                    f"Insufficient balance: need ${order_value:.2f}, free USDT is ${free_usdt:.2f}",
+                    f"Insufficient balance: need ${order_value:.2f}, free {quote} is ${free_quote:.2f}",
                 )
 
         return True, ""

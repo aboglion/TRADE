@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List, Optional
 
 import pandas as pd
 
-from src.core.interfaces import IMarketDataProvider
 from src.core.exceptions import InsufficientDataError
+from src.core.interfaces import IMarketDataProvider
 from src.core.models import Candle
 
 logger = logging.getLogger("bot.data.historical")
@@ -32,15 +31,15 @@ class HistoricalDataProvider(IMarketDataProvider):
             data_dir: Path to directory containing CSV files.
         """
         self._data_dir = data_dir
-        self._cache: dict[str, List[Candle]] = {}
+        self._cache: dict[str, list[Candle]] = {}
 
     def fetch_candles(
         self,
         symbol: str,
         timeframe: str,
-        since_ms: Optional[int] = None,
+        since_ms: int | None = None,
         limit: int = 500,
-    ) -> List[Candle]:
+    ) -> list[Candle]:
         """
         Load candles from CSV.  Caches on first load.
 
@@ -89,7 +88,7 @@ class HistoricalDataProvider(IMarketDataProvider):
         df = df.dropna(subset=["Date", "Open", "High", "Low", "Close"])
         df = df.sort_values("Date")
 
-        candles: List[Candle] = []
+        candles: list[Candle] = []
         for _, row in df.iterrows():
             ts_ms = int(row["Date"].timestamp() * 1000)
             candles.append(Candle(
