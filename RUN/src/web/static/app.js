@@ -3069,7 +3069,7 @@ function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActiv
     let tHtml = `<div class="pipeline-track ladder-circuit">`;
     tHtml += `
         <div class="ladder-power-rail energized" title="מתח פיקוד ראשי (Power Rail)">
-            <span class="rail-tag">⚡ LADDER POWER</span>
+            <span class="rail-tag">⚡ ON</span>
         </div>
     `;
     const firstState = evaluatedNodes.length > 0 ? evaluatedNodes[0].circuitState : 'dormant';
