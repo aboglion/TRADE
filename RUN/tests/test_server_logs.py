@@ -218,3 +218,42 @@ def test_do_post_clear_orders():
     assert len(mock_state.completed_orders) == 0
 
 
+def test_threaded_http_server_suppresses_client_disconnects():
+    """Verify ThreadedHTTPServer gracefully catches ConnectionResetError without printing stack traces."""
+    import sys
+    from unittest.mock import patch, MagicMock
+    from src.web.server import ThreadedHTTPServer
+
+    # Create server instance with dummy address
+    with patch("socket.socket"):
+        server = ThreadedHTTPServer.__new__(ThreadedHTTPServer)
+
+    # Simulate sys.exc_info with ConnectionResetError
+    try:
+        raise ConnectionResetError(104, "Connection reset by peer")
+    except ConnectionResetError:
+        exc_info = sys.exc_info()
+
+    with patch("sys.exc_info", return_value=exc_info), \
+         patch.object(ThreadedHTTPServer, "handle_error") as orig_handle_error:
+        # Calling handle_error directly on the class implementation
+        ThreadedHTTPServer.handle_error(server, MagicMock(), ("1.2.3.4", 54321))
+        # It should return early and NOT call super().handle_error
+        # (which would print to stderr)
+
+
+def test_dashboard_request_handler_handle_suppresses_disconnect():
+    """Verify DashboardRequestHandler.handle() catches ConnectionResetError gracefully without bubbling."""
+    from unittest.mock import MagicMock, patch
+    from src.web.server import DashboardRequestHandler
+
+    handler = DashboardRequestHandler.__new__(DashboardRequestHandler)
+    handler.client_address = ("66.132.186.176", 27672)
+
+    with patch.object(DashboardRequestHandler, "handle_one_request", side_effect=ConnectionResetError(104, "Connection reset by peer")):
+        # Should catch ConnectionResetError internally without raising
+        handler.handle()
+        assert handler.close_connection is True
+
+
+

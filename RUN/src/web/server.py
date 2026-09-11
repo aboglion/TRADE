@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import socket
+import sys
 import time
 from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -217,6 +218,14 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
                 pass
         super().server_bind()
 
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Handle request errors gracefully, suppressing expected client disconnects."""
+        exc_type, exc_val, _ = sys.exc_info()
+        if exc_type and issubclass(exc_type, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, socket.timeout)):
+            logger.debug("Client %s disconnected abruptly: %s", client_address, exc_val)
+            return
+        super().handle_error(request, client_address)
+
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
     """Custom request handler serving REST API endpoints and static dashboard files."""
@@ -231,6 +240,14 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
+
+    def handle(self) -> None:
+        """Handle incoming HTTP requests, catching early client disconnects."""
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, socket.timeout) as ex:
+            self.close_connection = True
+            logger.debug("Client %s disconnected during request processing: %s", getattr(self, "client_address", "unknown"), ex)
 
     def _get_active_state(self) -> Any | None:
         if self.orchestrator and hasattr(self.orchestrator, "_state") and self.orchestrator._state:
@@ -439,6 +456,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 Path("RUN/logs/last_mode"),
                 Path("/home/uns/TRADE/logs/last_mode"),
                 Path("/home/uns/TRADE/RUN/logs/last_mode"),
+                Path("/root/TRADE/logs/last_mode"),
+                Path("/root/TRADE/RUN/logs/last_mode"),
             ):
                 try:
                     mode_file.parent.mkdir(parents=True, exist_ok=True)

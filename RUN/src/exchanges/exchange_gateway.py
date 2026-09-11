@@ -132,7 +132,7 @@ class ExchangeGateway:
         # Ensure One-Way Mode on Binance Futures (required for directional trading & short hedges)
         if self._config.market_type == "future":
             try:
-                self._retry(lambda: self._exchange.set_position_mode(hedged=False))
+                self._exchange.set_position_mode(hedged=False)
                 logger.info("Binance Futures position mode verified: One-Way Mode")
             except Exception as ex:
                 err_str = str(ex)

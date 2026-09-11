@@ -69,7 +69,7 @@ dry_run:
     ETH: 0.10713016
     SOL: 0.0
 telegram:
-  enabled: true
-  bot_token: 123456:FAKE_BOT_TOKEN_FOR_TEST
-  chat_id: '987654321'
+  enabled: false
+  bot_token: ""
+  chat_id: ""
   dashboard_url: http://localhost:8090

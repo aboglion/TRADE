@@ -41,8 +41,12 @@ class TelegramService:
         self.timeout_seconds = timeout_seconds
 
     def is_configured(self) -> bool:
-        """Returns True if bot_token and chat_id are present."""
-        return bool(self.bot_token and self.chat_id)
+        """Returns True if bot_token and chat_id are present and not placeholders."""
+        if not self.bot_token or not self.chat_id:
+            return False
+        if "FAKE" in self.bot_token or "your_" in self.bot_token.lower():
+            return False
+        return True
 
     def send_message(self, text: str) -> bool:
         """

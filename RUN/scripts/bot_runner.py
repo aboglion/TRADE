@@ -67,14 +67,15 @@ def log_runner(msg: str) -> None:
     formatted = f"[{timestamp}] [RUNNER] {msg}"
     print(formatted, flush=True)
     
-    # Also append to logs/bot.log so it appears in the log viewer
-    log_path = PROJECT_DIR / "logs" / "bot.log"
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"{formatted}\n")
-    except Exception:
-        pass
+    # Only append to logs/bot.log if stdout is interactive (when daemonized, stdout is already bot.log)
+    if sys.stdout.isatty():
+        log_path = PROJECT_DIR / "logs" / "bot.log"
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"{formatted}\n")
+        except Exception:
+            pass
 
 
 def send_telegram_crash_alert(exit_code: int, last_logs: List[str]) -> None:
@@ -110,7 +111,7 @@ def send_telegram_crash_alert(exit_code: int, last_logs: List[str]) -> None:
                 if not dash_url:
                     dash_url = str(tg_cfg.get("dashboard_url", "")).strip() or "http://localhost:8090"
 
-        if not enabled or not bot_token or not chat_id:
+        if not enabled or not bot_token or not chat_id or "FAKE" in bot_token or "your_" in bot_token.lower():
             return
 
         if dash_url and not dash_url.startswith("http"):
@@ -167,6 +168,13 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
                 pass
         super().server_bind()
 
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Handle request errors gracefully, suppressing abrupt client disconnects."""
+        exc_type, exc_val, _ = sys.exc_info()
+        if exc_type and issubclass(exc_type, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, socket.timeout)):
+            return
+        super().handle_error(request, client_address)
+
 
 class FallbackCrashHandler(SimpleHTTPRequestHandler):
     """Emergency HTTP Request Handler served when main.py crashes or stops."""
@@ -178,6 +186,13 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
     server_instance: Optional[ThreadedHTTPServer] = None
     last_crash_error: str = ""
     system_status: str = "CRASHED"  # "CRASHED" | "STOPPED" | "UPDATING"
+
+    def handle(self) -> None:
+        """Handle incoming HTTP requests, catching early client disconnects."""
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, socket.timeout):
+            self.close_connection = True
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -1135,7 +1150,7 @@ def main() -> None:
             if is_update_flag:
                 status = "UPDATING"
                 error_summary = "System update in progress (Git Pull & Engine Restart)."
-            elif exit_code != 0 and not is_stop_flag:
+            elif exit_code not in (0, -15, -2, 143, 130) and not is_stop_flag:
                 status = "CRASHED"
                 error_summary = "\n".join(crash_lines)
             else:
