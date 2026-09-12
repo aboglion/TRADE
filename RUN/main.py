@@ -229,7 +229,7 @@ def main() -> None:
     )
 
     logger.info("=" * 60)
-    logger.info("Dynamic Regime-Adaptive 10x Trading Bot (Institutional Crash Shield & Conviction Rocket)")
+    logger.info("Dynamic Regime-Adaptive 20X Trading Bot (Institutional Crash Shield & Conviction Rocket)")
     logger.info("Mode: %s", config.run_mode.name)
     logger.info("=" * 60)
 

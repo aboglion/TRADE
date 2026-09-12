@@ -5,9 +5,16 @@ Tests data loading, RSI edge cases, indicator calculations, backtesting engine,
 and dynamic 2.0x regime allocation with risk management guardrails.
 """
 
+import sys
+from pathlib import Path
 import pytest
 import numpy as np
 import pandas as pd
+
+backtest_dir = Path(__file__).resolve().parent.parent
+if str(backtest_dir) not in sys.path:
+    sys.path.insert(0, str(backtest_dir))
+
 import engine
 
 def test_load_real_data():

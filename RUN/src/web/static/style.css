@@ -513,6 +513,7 @@ body {
 .mini-pnl-pills .pnl-pill {
     font-size: 0.68rem;
     padding: 0.1rem 0.45rem;
+    white-space: nowrap;
 }
 
 .mini-chart-wrapper {

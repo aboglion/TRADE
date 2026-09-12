@@ -1,10 +1,10 @@
 """
-DYNAMIC REGIME-ADAPTIVE 2.0x MASTER PRODUCTION CLI LAUNCHER
-============================================================
-Primary entry point for the Dynamic Regime-Adaptive 2.0x Strategy.
+DYNAMIC REGIME-ADAPTIVE GUARDED 20x MASTER PRODUCTION CLI LAUNCHER
+===================================================================
+Primary entry point for the Dynamic Regime-Adaptive Guarded 20x Strategy.
 
 Usage:
-  python3 main.py             # Runs 2.0x Dynamic Adaptive Strategy & generates dashboard.html
+  python3 main.py             # Runs Guarded 20x Dynamic Adaptive Strategy & generates dashboard.html
   python3 main.py --dashboard # Generates dashboard.html
   python3 main.py --oos       # Runs leak-free Out-of-Sample (OOS 2024-2026) validation
 """
@@ -21,10 +21,13 @@ def main():
     elif '--dashboard' in args:
         engine.generate_dashboard_html()
     else:
-        print("⚡ Running Dynamic Regime-Adaptive 3.5x Flash-Guarded Production Engine (with Re-Entry Ladder)...")
-        dyn_eq, hy_aligned, bh_aligned = engine.run_dynamic_adaptive_engine(bull_leverage=3.5)
+        print("⚡ Running Dynamic Regime-Adaptive Guarded 20x Production Engine (with Binance Tiered Brackets & Stepped Ladder)...")
+        dyn_eq, hy_aligned, bh_aligned = engine.run_dynamic_adaptive_20x_engine(
+            initial_capital=1000.0,
+            clamp_binance_brackets=True
+        )
         m = engine.calculate_metrics(dyn_eq, pd.DataFrame(), bh_aligned)
-        print("\n🏆 DYNAMIC REGIME-ADAPTIVE 3.5x FLASH-GUARDED RESULTS:")
+        print("\n🏆 DYNAMIC REGIME-ADAPTIVE GUARDED 20x (BINANCE BRACKETS) RESULTS:")
         for k, v in m.items():
             print(f"  • {k:<16}: {v}")
         engine.generate_dashboard_html()

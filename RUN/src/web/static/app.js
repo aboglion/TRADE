@@ -2927,11 +2927,18 @@ function renderBinaryTree(data) {
                     <div class="outcome-desc">צניחה תוך-יומית חדה מנר הפתיחה. המינוף נחתך מיידית ל-1.0x לספיגת הירידה בהון עצמי נקי, ונכנס לתוקף סולם חזרה מדורג ב-4 שלבים.</div>
                 </div>
             `;
+        } else if (effectiveLev >= 15.0) {
+            html += `
+                <div class="tree-leaf-outcome outcome-buy-success">
+                    <div class="outcome-title">🚀 סופר רקטת שכנוע 20X פעילה (SUPER CONVICTION ROCKET: ${effectiveLev.toFixed(1)}x — ${totalExposure}% EXPOSURE)</div>
+                    <div class="outcome-desc">מומנטום שיא מאושר (מעל EMA9 ובטווח ${Math.abs(cutoffPct).toFixed(1)}% משיא 5 ימים), תנודתיות רגועה (ATR ${btcAtr.toFixed(2)}%) ו-ADX מובהק (${btcAdx.toFixed(1)}). המערכת מזנקת למינוף מירבי פי 20 למקסום רווח שיא!</div>
+                </div>
+            `;
         } else if (effectiveLev >= 8.0) {
             html += `
                 <div class="tree-leaf-outcome outcome-buy-success">
-                    <div class="outcome-title">🚀 רקטת שכנוע 10x פעילה (MAX CONVICTION ROCKET: ${effectiveLev.toFixed(1)}x — ${totalExposure}% EXPOSURE)</div>
-                    <div class="outcome-desc">מומנטום חי מאושר (מעל EMA9 ובטווח ${Math.abs(cutoffPct).toFixed(1)}% משיא 5 ימים), תנודתיות נמוכה (ATR ${btcAtr.toFixed(2)}%) ו-ADX מובהק (${btcAdx.toFixed(1)}). המערכת מזנקת למינוף מירבי פי 10 למקסום רווח שיא!</div>
+                    <div class="outcome-title">🚀 רקטת שכנוע 10x פעילה (CONVICTION ROCKET: ${effectiveLev.toFixed(1)}x — ${totalExposure}% EXPOSURE)</div>
+                    <div class="outcome-desc">מומנטום חי מאושר (מעל EMA9 ובטווח ${Math.abs(cutoffPct).toFixed(1)}% משיא 5 ימים), תנודתיות נמוכה (ATR ${btcAtr.toFixed(2)}%) ו-ADX מובהק (${btcAdx.toFixed(1)}). המערכת מזנקת למינוף פי 10.</div>
                 </div>
             `;
         } else {
@@ -3953,6 +3960,21 @@ function updatePnlAndFeesDisplay(tf = "all") {
     }
 }
 
+function getPointPnlPct(d) {
+    if (!d) return 0.0;
+    const initialVal = latestPortfolioData?.session_initial_value_usd || 0;
+    if (d.pnl_pct !== undefined && d.pnl_pct !== null && Math.abs(d.pnl_pct) > 0.0001) {
+        return Number(d.pnl_pct);
+    }
+    if (initialVal > 0 && d.pnl_usd !== undefined) {
+        return (Number(d.pnl_usd) / initialVal) * 100.0;
+    }
+    if (d.pnl_pct !== undefined && d.pnl_pct !== null) {
+        return Number(d.pnl_pct);
+    }
+    return Number(d.pnl_usd || 0.0);
+}
+
 function renderPnlChart() {
     const canvas = document.getElementById("pnlCanvas");
     const emptyOverlay = document.getElementById("pnlChartEmpty");
@@ -3984,88 +4006,133 @@ function renderPnlChart() {
         }
     }
 
-    // High & Low calculation
-    let highPnl = -Infinity;
-    let lowPnl = Infinity;
+    // High & Low calculation in both percentage (%) and USD ($)
+    let highPct = -Infinity;
+    let lowPct = Infinity;
+    let highUsd = -Infinity;
+    let lowUsd = Infinity;
+
     filteredData.forEach(d => {
-        const pnl = d.pnl_usd !== undefined ? d.pnl_usd : 0.0;
-        if (pnl > highPnl) highPnl = pnl;
-        if (pnl < lowPnl) lowPnl = pnl;
+        const pct = getPointPnlPct(d);
+        const usd = d.pnl_usd !== undefined ? Number(d.pnl_usd) : 0.0;
+        if (pct > highPct) highPct = pct;
+        if (pct < lowPct) lowPct = pct;
+        if (usd > highUsd) highUsd = usd;
+        if (usd < lowUsd) lowUsd = usd;
     });
 
-    if (highPnl === -Infinity) highPnl = 0.0;
-    if (lowPnl === Infinity) lowPnl = 0.0;
+    if (highPct === -Infinity) highPct = 0.0;
+    if (lowPct === Infinity) lowPct = 0.0;
+    if (highUsd === -Infinity) highUsd = 0.0;
+    if (lowUsd === Infinity) lowUsd = 0.0;
 
     const highPill = document.getElementById("pnlHighPill");
     const lowPill = document.getElementById("pnlLowPill");
-    if (highPill) highPill.textContent = `High: ${highPnl >= 0 ? '+' : ''}$${highPnl.toFixed(3)}`;
-    if (lowPill) lowPill.textContent = `Low: ${lowPnl >= 0 ? '+' : ''}$${lowPnl.toFixed(3)}`;
+    if (highPill) {
+        const sign = highPct >= 0 ? '+' : '';
+        const usdSign = highUsd >= 0 ? '+' : '';
+        highPill.textContent = `H: ${sign}${highPct.toFixed(2)}%`;
+        highPill.title = `Session High: ${sign}${highPct.toFixed(3)}% (${usdSign}$${highUsd.toFixed(2)})`;
+    }
+    if (lowPill) {
+        const sign = lowPct >= 0 ? '+' : '';
+        const usdSign = lowUsd >= 0 ? '+' : '';
+        lowPill.textContent = `L: ${sign}${lowPct.toFixed(2)}%`;
+        lowPill.title = `Session Low: ${sign}${lowPct.toFixed(3)}% (${usdSign}$${lowUsd.toFixed(2)})`;
+    }
 
     // Canvas Paddings for embedded mini-chart
-    const paddingLeft = 56;
+    const paddingLeft = 52;
     const paddingRight = 12;
-    const paddingTop = 12;
+    const paddingTop = 14;
     const paddingBottom = 20;
 
     const plotWidth = width - paddingLeft - paddingRight;
     const plotHeight = height - paddingTop - paddingBottom;
 
-    let maxVal = Math.max(...filteredData.map(d => d.pnl_usd || 0.0), 0.001);
-    let minVal = Math.min(...filteredData.map(d => d.pnl_usd || 0.0), -0.001);
-    if (maxVal === minVal) {
-        maxVal += 0.01;
-        minVal -= 0.01;
+    // 0.5% Resolution calibration
+    const baseResolution = 0.5; // 0.5% resolution steps
+    let maxVal = Math.ceil(highPct / baseResolution) * baseResolution;
+    let minVal = Math.floor(lowPct / baseResolution) * baseResolution;
+
+    // Ensure minimum range of at least 1.0% (-0.5% to +0.5%) centered around 0
+    if (maxVal - minVal < 1.0) {
+        if (minVal >= 0) {
+            minVal = -0.5;
+            maxVal = Math.max(maxVal, 0.5);
+        } else if (maxVal <= 0) {
+            maxVal = 0.5;
+            minVal = Math.min(minVal, -0.5);
+        } else {
+            minVal = -0.5;
+            maxVal = 0.5;
+        }
     }
+
+    // Determine grid step: default is 0.5%. For larger ranges, use multiples of 0.5% (1.0%, 2.0%, 2.5%)
+    let gridStep = baseResolution;
+    const totalSpan = maxVal - minVal;
+    if (totalSpan > 15.0) {
+        gridStep = 2.5;
+    } else if (totalSpan > 8.0) {
+        gridStep = 2.0;
+    } else if (totalSpan > 4.0) {
+        gridStep = 1.0;
+    }
+
+    // Re-align bounds to gridStep
+    maxVal = Math.ceil(maxVal / gridStep) * gridStep;
+    minVal = Math.floor(minVal / gridStep) * gridStep;
     const valRange = maxVal - minVal;
 
-    // Grid Lines & Y-Axis Labels
+    // Grid Lines & Y-Axis Labels (0.5% resolution steps)
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
-    ctx.fillStyle = "#64748b";
     ctx.font = "10px 'JetBrains Mono', monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
 
-    const steps = 3;
-    for (let i = 0; i <= steps; i++) {
-        const y = paddingTop + (plotHeight * i / steps);
-        const val = maxVal - (valRange * i / steps);
-        
+    for (let v = maxVal; v >= minVal - 0.0001; v -= gridStep) {
+        const normVal = Math.abs(v) < 1e-6 ? 0.0 : v;
+        const y = paddingTop + plotHeight * (1 - (normVal - minVal) / valRange);
+
         ctx.beginPath();
+        if (Math.abs(normVal) < 1e-6) {
+            // Distinct Zero Baseline
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+            ctx.lineWidth = 1.5;
+        } else {
+            ctx.setLineDash([]);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+            ctx.lineWidth = 1;
+        }
         ctx.moveTo(paddingLeft, y);
         ctx.lineTo(width - paddingRight, y);
         ctx.stroke();
-
-        const valStr = `${val >= 0 ? '+' : ''}$${val.toFixed(3)}`;
-        ctx.fillText(valStr, paddingLeft - 5, y);
-    }
-
-    // Zero Baseline Line
-    if (minVal <= 0 && maxVal >= 0) {
-        const zeroY = paddingTop + plotHeight * (1 - (0 - minVal) / valRange);
-        ctx.beginPath();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
-        ctx.lineWidth = 1.5;
-        ctx.moveTo(paddingLeft, zeroY);
-        ctx.lineTo(width - paddingRight, zeroY);
-        ctx.stroke();
         ctx.setLineDash([]);
+
+        const sign = normVal > 0.0001 ? '+' : '';
+        const decimals = (gridStep % 1 === 0) ? 0 : 1;
+        const labelStr = Math.abs(normVal) < 1e-6 ? '0.0%' : `${sign}${normVal.toFixed(decimals)}%`;
+        ctx.fillStyle = Math.abs(normVal) < 1e-6 ? "#94a3b8" : "#64748b";
+        ctx.fillText(labelStr, paddingLeft - 6, y);
     }
 
     // Plot Points
     currentChartPoints = [];
     const count = filteredData.length;
-    
+
     filteredData.forEach((d, idx) => {
         const x = count === 1 ? paddingLeft + plotWidth / 2 : paddingLeft + (plotWidth * idx / (count - 1));
-        const pnl = d.pnl_usd || 0.0;
-        const y = paddingTop + plotHeight * (1 - (pnl - minVal) / valRange);
-        currentChartPoints.push({ x, y, data: d });
+        const pct = getPointPnlPct(d);
+        const clampedPct = Math.max(minVal, Math.min(maxVal, pct));
+        const y = paddingTop + plotHeight * (1 - (clampedPct - minVal) / valRange);
+        currentChartPoints.push({ x, y, data: d, pct });
     });
 
-    const lastPnl = filteredData[filteredData.length - 1]?.pnl_usd || 0.0;
-    const isPositive = lastPnl >= 0;
+    const lastPoint = currentChartPoints[currentChartPoints.length - 1];
+    const lastPct = lastPoint ? lastPoint.pct : 0.0;
+    const isPositive = lastPct >= 0;
     const strokeColor = isPositive ? "#10b981" : "#f43f5e";
     const gradientTop = isPositive ? "rgba(16, 185, 129, 0.3)" : "rgba(244, 63, 94, 0.3)";
     const gradientBottom = isPositive ? "rgba(16, 185, 129, 0.0)" : "rgba(244, 63, 94, 0.0)";
@@ -4144,17 +4211,19 @@ function handleChartHover(e, canvas, tooltip) {
     if (closest && minDistance < 50) {
         const d = closest.data;
         const date = new Date(d.ts || Date.now());
-        const timeStr = date.toLocaleString();
-        const pnl = d.pnl_usd !== undefined ? d.pnl_usd : 0.0;
-        const pnlPct = d.pnl_pct !== undefined ? d.pnl_pct : 0.0;
-        const totalVal = d.val !== undefined ? d.val : 0.0;
-        const sign = pnl >= 0 ? "+" : "";
+        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const pnlUsd = d.pnl_usd !== undefined ? Number(d.pnl_usd) : 0.0;
+        const pnlPct = closest.pct !== undefined ? closest.pct : getPointPnlPct(d);
+        const totalVal = d.val !== undefined ? Number(d.val) : 0.0;
+        const sign = pnlUsd >= 0 ? "+" : "";
+        const signPct = pnlPct >= 0 ? "+" : "";
 
         tooltip.innerHTML = `
-            <div style="font-weight: 700; color: #94a3b8; margin-bottom: 3px; font-size: 0.72rem;">${timeStr}</div>
-            <div style="color: #ffffff;">Value: <strong>$${totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
-            <div style="color: ${pnl >= 0 ? '#34d399' : '#fecdd3'}; font-weight: 700;">
-                PNL: ${sign}$${pnl.toFixed(3)} (${sign}${pnlPct.toFixed(3)}%)
+            <div style="font-weight: 700; color: #94a3b8; margin-bottom: 3px; font-size: 0.72rem;">${dateStr} ${timeStr}</div>
+            <div style="color: #ffffff; font-size: 0.75rem;">Value: <strong>$${totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+            <div style="color: ${pnlPct >= 0 ? '#34d399' : '#fecdd3'}; font-weight: 700; font-size: 0.8rem; margin-top: 2px;">
+                PNL: ${signPct}${pnlPct.toFixed(2)}% (${sign}$${pnlUsd.toFixed(3)})
             </div>
         `;
         tooltip.style.display = "block";

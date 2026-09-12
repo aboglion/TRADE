@@ -773,8 +773,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     point = {
                         "ts": current_time_ms,
                         "val": round(net_total_value_usd, 2),
-                        "pnl_usd": round(net_pnl_usd, 2),
-                        "pnl_pct": round(net_pnl_pct, 2),
+                        "pnl_usd": round(net_pnl_usd, 4),
+                        "pnl_pct": round(net_pnl_pct, 4),
                     }
                     state.pnl_history.append(point)
                     if len(state.pnl_history) > 5000:

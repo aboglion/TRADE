@@ -16,10 +16,10 @@ strategy:
   mid_leverage: 5.0
   base_leverage: 2.5
   min_leverage: 1.0
-  momentum_cutoff_pct: -0.030
-  safe_cash_weight: 0.70
-  safe_spot_weight: 0.20
-  safe_micro_weight: 0.10
+  momentum_cutoff_pct: -0.03
+  safe_cash_weight: 0.7
+  safe_spot_weight: 0.2
+  safe_micro_weight: 0.1
   flash_wick_limit: -0.038
   flash_wick_limit_20x: -0.022
   atr_20x_limit: 0.021
@@ -68,12 +68,11 @@ scheduler:
   max_consecutive_errors: 10
 dry_run:
   initial_balances:
-    USDT: 2299.18390299
-    BTC: 0.00454624
-    ETH: 0.10713016
-    SOL: 0.0
+    USDT: 2539.02328911
+    BTC: 0.00305951
+    ETH: 0.07054558
 telegram:
   enabled: false
-  bot_token: ""
-  chat_id: ""
+  bot_token: ''
+  chat_id: ''
   dashboard_url: http://localhost:8090
