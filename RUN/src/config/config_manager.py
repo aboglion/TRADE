@@ -53,8 +53,8 @@ class StrategyConfig:
     sma_regime_period: int = 150
     conviction_leverage: float = 20.0
     bull_leverage: float = 10.0
-    mid_leverage: float = 5.0
-    base_leverage: float = 2.5
+    mid_leverage: float = 6.0
+    base_leverage: float = 3.0
     min_leverage: float = 1.0
     momentum_cutoff_pct: float = -0.030
     safe_cash_weight: float = 0.70
@@ -63,7 +63,7 @@ class StrategyConfig:
     flash_wick_limit: float = -0.038
     flash_wick_limit_20x: float = -0.022
     atr_20x_limit: float = 0.021
-    ladder_steps: list[float] = field(default_factory=lambda: [1.0, 2.0, 4.0, 10.0, 20.0])
+    ladder_steps: list[float] = field(default_factory=lambda: [1.0, 3.0, 6.0, 10.0, 20.0])
     bear_short_hedge_weight: float = 0.45   # 0.45 for 45% margin @ 2.0x short hedge on BTC
     short_leverage: float = 2.0            # 2.0x leverage for short hedge
     cash_apr: float = 0.04
@@ -234,15 +234,15 @@ class ConfigManager:
             sma_regime_period=s_raw.get("sma_regime_period", 150),
             conviction_leverage=s_raw.get("conviction_leverage", 10.0),
             bull_leverage=s_raw.get("bull_leverage", 10.0),
-            mid_leverage=s_raw.get("mid_leverage", 5.0),
-            base_leverage=s_raw.get("base_leverage", 2.5),
+            mid_leverage=s_raw.get("mid_leverage", 6.0),
+            base_leverage=s_raw.get("base_leverage", 3.0),
             min_leverage=s_raw.get("min_leverage", 1.0),
             momentum_cutoff_pct=s_raw.get("momentum_cutoff_pct", -0.045),
             safe_cash_weight=s_raw.get("safe_cash_weight", 0.60),
             safe_spot_weight=s_raw.get("safe_spot_weight", 0.30),
             safe_micro_weight=s_raw.get("safe_micro_weight", 0.10),
             flash_wick_limit=s_raw.get("flash_wick_limit", -0.038),
-            ladder_steps=s_raw.get("ladder_steps", [1.0, 2.0, 4.0, 10.0]),
+            ladder_steps=s_raw.get("ladder_steps", [1.0, 3.0, 6.0, 10.0, 20.0]),
             bear_short_hedge_weight=s_raw.get("bear_short_hedge_weight", 0.35),
             short_leverage=s_raw.get("short_leverage", 2.0),
             cash_apr=s_raw.get("cash_apr", 0.04),

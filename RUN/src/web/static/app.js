@@ -2791,9 +2791,9 @@ function renderBinaryTree(data) {
             {
                 id: "risk_node_conviction_tier",
                 title: "3. מנוע רקטת שכנוע ותנודתיות (Conviction Rocket 20x Engine)",
-                subtitle: "קביעת מינוף דינמי: ATR < 2.1% & ADX >= 25 (רקטת 20x מוגנת) | ATR < 2.2% (10x) | ATR < 2.8% (5.0x) | בסיס (2.5x)",
-                criteria: "ATR < 2.1% & ADX >= 25 -> 20x | ATR < 2.2% -> 10x | ATR < 2.8% -> 5x | Base -> 2.5x",
-                actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || (effectiveLev >= 15 ? '🚀 20x Super Conviction Rocket' : (effectiveLev >= 8 ? '🚀 10x Conviction Rocket' : (effectiveLev >= 4 ? '5.0x Tier' : '2.5x Base Tier')))}`,
+                subtitle: "קביעת מינוף דינמי: ATR < 2.1% & ADX >= 25 (רקטת 20x מוגנת) | ATR < 2.2% (10x) | ATR < 2.8% (6.0x) | בסיס (3.0x)",
+                criteria: "ATR < 2.1% & ADX >= 25 -> 20x | ATR < 2.2% -> 10x | ATR < 2.8% -> 6x | Base -> 3.0x",
+                actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || (effectiveLev >= 15 ? '🚀 20x Super Conviction Rocket' : (effectiveLev >= 8 ? '🚀 10x Conviction Rocket' : (effectiveLev >= 5 ? '6.0x Tier' : '3.0x Base Tier')))}`,
                 met: isBull && inMomentum && !safeHavenActive,
             },
             {
@@ -2805,8 +2805,8 @@ function renderBinaryTree(data) {
                 met: true,
             },
             {
-                id: "risk_node_flash_breaker",
-                title: "5. מפסק ביטחון לנרות פלאש (Intraday Flash Circuit Breaker)",
+                id: "risk_node_flash_circuit",
+                title: "5. מפסק פלאש תוך-יומי (Intraday Flash Circuit Breaker)",
                 subtitle: "צניחה תוך-יומית מנר הפתיחה מעבר ל-2.2%- ב-20x (או 3.8%- בבסיס) חותכת מיידית ל-1.0x ספוט",
                 criteria: `Intraday Dip >= ${flashLimit.toFixed(1)}% (נר בטוח)`,
                 actual: `${intradayDip.toFixed(2)}% מהפתיחה ${flashTriggered ? '⚠️ הופעל מפסק ביטחון!' : '✓ תקין ומוגן'}`,
@@ -2815,8 +2815,8 @@ function renderBinaryTree(data) {
             {
                 id: "risk_node_reentry_ladder",
                 title: "6. סולם כניסה מחדש ב-5 שלבים (5-Step Controlled Re-Entry Ladder)",
-                subtitle: "חזרה מדורגת לאחר מפסק: שלב 1 (1.0x) ← שלב 2 (2.0x) ← שלב 3 (4.0x) ← שלב 4 (10.0x) ← שלב 5 (20.0x)",
-                criteria: "שלב 1: 1.0x | שלב 2: 2.0x | שלב 3: 4.0x | שלב 4: 10.0x | שלב 5: 20.0x",
+                subtitle: "חזרה מדורגת לאחר מפסק: שלב 1 (1.0x) ← שלב 2 (3.0x) ← שלב 3 (6.0x) ← שלב 4 (10.0x) ← שלב 5 (20.0x)",
+                criteria: "שלב 1: 1.0x | שלב 2: 3.0x | שלב 3: 6.0x | שלב 4: 10.0x | שלב 5: 20.0x",
                 actual: `${ladderStep} (תקרה: ${ladderCap.toFixed(1)}x, נרות מאז טריגר: ${barsSinceTrip})`,
                 met: barsSinceTrip > 4,
             },
@@ -2960,7 +2960,7 @@ function renderBinaryTree(data) {
 
             if (isBuyMode) {
                 treeTitle = `עץ תנאי כניסה (BUY TREE) — ${coin}`;
-                treeSub = `בדיקה בינארית מדורגת של תנאי הסף לקנייה ופתיחת פוזיציה ב-${coin}`;
+                treeSub = `בדיקה בינארית מדורגת של תנאי הסף לקנייה ופתיחה פוזיציה ב-${coin}`;
                 nodes = coinData.buy_tree_nodes || [];
             } else if (isSellMode) {
                 treeTitle = `עץ תנאי יציאה ומכירה (SELL TREE) — ${coin}`;
@@ -3060,7 +3060,7 @@ function renderBinaryTree(data) {
                     html += `
                         <div class="tree-leaf-outcome outcome-buy-waiting">
                             <div class="outcome-title">⏳ ממתין להתקיימות תנאים (WAITING FOR ENTRY)</div>
-                            <div class="outcome-desc">לא כל תנאי הקנייה מתקיימים. פתיחת פוזיציה ב-${coin} כרגע חסומה להגנה על ההון.</div>
+                            <div class="outcome-desc">לא כל תנאי הקנייה מתקיימים. פתיחת פוזיציה ב-${coin} כרגע חסوמה להגנה על ההון.</div>
                         </div>
                     `;
                 }
@@ -3297,7 +3297,7 @@ function renderDashboardPipeline(data) {
         const barsSinceTrip = macro.bars_since_circuit_trip || 999;
         const ladderStep = macro.ladder_step || "Completed";
         const ladderCap = macro.ladder_cap || 10.0;
-        const effectiveLev = macro.effective_leverage || (isBull ? 2.5 : 0.0);
+        const effectiveLev = macro.effective_leverage || (isBull ? 3.0 : 0.0);
         const totalExposure = macro.total_crypto_weight_pct || (isBull ? 205 : 0);
         const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -3.0;
         const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
@@ -3319,7 +3319,7 @@ function renderDashboardPipeline(data) {
         const r2_prog = inMomentum ? 100 : Math.max(15, Math.min(95, Math.round(100 + pbGap * 15)));
         const r2_label = inMomentum ? "✓ 100% מומנטום" : `חריגה ${Math.abs(pbGap).toFixed(1)}% משיא 5d`;
 
-        const r3_prog = effectiveLev >= 20.0 ? 100 : (effectiveLev >= 10.0 ? 80 : (effectiveLev >= 5.0 ? 50 : 25));
+        const r3_prog = effectiveLev >= 20.0 ? 100 : (effectiveLev >= 10.0 ? 80 : (effectiveLev >= 6.0 ? 50 : 25));
         const r3_label = `מינוף ${effectiveLev.toFixed(1)}x פעיל`;
 
         const r4_bracket_prog = isBracketClamped ? Math.round((bracketMaxLev / 20.0) * 100) : 100;
@@ -3369,14 +3369,14 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_3",
                 shortTitle: "3. מנוע מינוף",
                 fullTitle: "3. מנוע מינוף דינמי ורקטת שכנוע (Conviction Rocket 20x Engine)",
-                criteria: "ATR < 2.1% & ADX >= 25 (20x) | ATR < 2.2% (10x) | ATR < 2.8% (5x) | Base (2.5x)",
+                criteria: "ATR < 2.1% & ADX >= 25 (20x) | ATR < 2.2% (10x) | ATR < 2.8% (6x) | Base (3.0x)",
                 actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || `${effectiveLev.toFixed(1)}x Tier`}`,
                 live_val: `${effectiveLev.toFixed(1)}x Tier`,
                 badge: `${effectiveLev.toFixed(1)}x`,
                 progress_pct: r3_prog,
                 progress_label: r3_label,
-                met: isBull && inMomentum && effectiveLev >= 2.5,
-                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 20x ברגיעה ומומנטום מובהק, 10x/5.0x/2.5x בתנודתיות, או 1.0x ספוט."
+                met: isBull && inMomentum && effectiveLev >= 3.0,
+                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 20x ברגיעה ומומנטום מובהק, 10x/6.0x/3.0x בתנודתיות, או 1.0x ספוט."
             },
             {
                 id: "dash_risk_4",
@@ -3408,7 +3408,7 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_6",
                 shortTitle: "6. סולם חזרה",
                 fullTitle: "6. סולם כניסה מחדש מדורג ב-5 שלבים (5-Step Re-Entry Ladder)",
-                criteria: "התאוששות 5 שלבים: 1.0x → 2.0x → 4.0x → 10.0x → 20.0x",
+                criteria: "התאוששות 5 שלבים: 1.0x → 3.0x → 6.0x → 10.0x → 20.0x",
                 actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
                 live_val: ladderStep,
                 badge: `תקרה ${ladderCap.toFixed(0)}x`,

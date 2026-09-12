@@ -13,8 +13,8 @@ strategy:
   sma_regime_period: 150
   conviction_leverage: 20.0
   bull_leverage: 10.0
-  mid_leverage: 5.0
-  base_leverage: 2.5
+  mid_leverage: 6.0
+  base_leverage: 3.0
   min_leverage: 1.0
   momentum_cutoff_pct: -0.03
   safe_cash_weight: 0.7
@@ -25,8 +25,8 @@ strategy:
   atr_20x_limit: 0.021
   ladder_steps:
   - 1.0
-  - 2.0
-  - 4.0
+  - 3.0
+  - 6.0
   - 10.0
   - 20.0
   bear_short_hedge_weight: 0.45

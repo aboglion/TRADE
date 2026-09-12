@@ -1194,19 +1194,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             safe_haven_active = (macro_regime == "BULL") and not in_momentum
 
             try:
-                mid_lev = float(getattr(strat_cfg, "mid_leverage", 5.0))
+                mid_lev = float(getattr(strat_cfg, "mid_leverage", 6.0))
             except (TypeError, ValueError):
-                mid_lev = 5.0
+                mid_lev = 6.0
 
             try:
-                base_lev = float(getattr(strat_cfg, "base_leverage", 2.5))
+                base_lev = float(getattr(strat_cfg, "base_leverage", 3.0))
             except (TypeError, ValueError):
-                base_lev = 2.5
+                base_lev = 3.0
 
-            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 2.0, 4.0, 10.0, 20.0])
-            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 2.0, 4.0, 10.0, 20.0]
+            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 3.0, 6.0, 10.0, 20.0])
+            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 3.0, 6.0, 10.0, 20.0]
             if not ladder_steps:
-                ladder_steps = [1.0, 2.0, 4.0, 10.0, 20.0]
+                ladder_steps = [1.0, 3.0, 6.0, 10.0, 20.0]
 
             if macro_regime == "BEAR":
                 leverage = short_lev

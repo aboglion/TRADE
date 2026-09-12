@@ -1041,8 +1041,8 @@ def run_dynamic_adaptive_20x_engine(
     # ── Leverage tiers (mirrors RUN live defaults) ──────────────────────────
     conviction_leverage=20.0,    # RUN: conviction_leverage → 20x Super Rocket
     bull_leverage=10.0,          # RUN: bull_leverage=10.0
-    mid_leverage=5.0,            # RUN: mid_leverage=5.0
-    base_leverage=2.5,           # RUN: base_leverage=2.5
+    mid_leverage=6.0,            # RUN: mid_leverage=6.0
+    base_leverage=3.0,           # RUN: base_leverage=3.0
     min_leverage=1.0,            # RUN: min_leverage=1.0
     # ── Regime gate (None = Legacy stepped guard, matches RUN default) ──────
     momentum_cutoff_pct=-0.030,  # RUN config_manager.py default: -3.0% momentum gate
@@ -1059,7 +1059,7 @@ def run_dynamic_adaptive_20x_engine(
     flash_wick_limit_20x=-0.022, # RUN: -2.2% tighter CB when lev > 10x
     atr_20x_limit=0.021,         # RUN: ATR < 2.1% required for 20x rocket
     # ── Re-entry Ladder (matches RUN default) ───────────────────────────────
-    ladder_steps=(1.0, 2.0, 4.0, 10.0, 20.0),  # RUN: [1,2,4,10,20]
+    ladder_steps=(1.0, 3.0, 6.0, 10.0, 20.0),  # RUN: [1,3,6,10,20]
     clamp_binance_brackets=True, # RUN: Binance tiered margin brackets enforced
     start_date=None              # אם מוגדר: מאפס הון בתאריך — מדמה בוט חדש שמתחיל live
 ):
@@ -1069,7 +1069,7 @@ def run_dynamic_adaptive_20x_engine(
       - momentum_cutoff_pct=None  → Legacy stepped pullback guard (matches RUN default)
       - flash_wick_limit_20x      → Separate tighter CB for lev > 10x (RUN: -2.2%)
       - atr_20x_limit             → ATR gate for 20x tier (RUN: 0.021)
-      - ladder_steps              → Re-entry ladder post-CB (RUN: [1,2,4,10,20])
+      - ladder_steps              → Re-entry ladder post-CB (RUN: [1,3,6,10,20])
     """
     return run_dynamic_adaptive_engine(
         initial_capital=initial_capital,
