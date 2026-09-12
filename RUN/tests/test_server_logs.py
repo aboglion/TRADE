@@ -102,6 +102,8 @@ def test_handle_strategy_conditions_crash_shield():
     handler.config.strategy.mid_leverage = 5.0
     handler.config.strategy.base_leverage = 2.5
     handler.config.strategy.ladder_steps = [1.0, 2.0, 4.0, 10.0]
+    handler.config.strategy.safe_spot_weight = 0.30
+    handler.config.strategy.safe_cash_weight = 0.60
     handler.state_store = MagicMock()
     handler.state_store.load_state.return_value = MagicMock(strategy_state={})
 

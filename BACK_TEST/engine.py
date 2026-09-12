@@ -1041,15 +1041,15 @@ def run_dynamic_adaptive_20x_engine(
     # ── Leverage tiers (mirrors RUN live defaults) ──────────────────────────
     conviction_leverage=20.0,    # RUN: conviction_leverage → 20x Super Rocket
     bull_leverage=10.0,          # RUN: bull_leverage=10.0
-    mid_leverage=6.0,            # RUN: mid_leverage=6.0
-    base_leverage=3.0,           # RUN: base_leverage=3.0
+    mid_leverage=5.5,            # RUN: mid_leverage=5.5
+    base_leverage=2.5,           # RUN: base_leverage=2.5
     min_leverage=1.0,            # RUN: min_leverage=1.0
     # ── Regime gate (None = Legacy stepped guard, matches RUN default) ──────
-    momentum_cutoff_pct=-0.030,  # RUN config_manager.py default: -3.0% momentum gate
+    momentum_cutoff_pct=-0.018,  # RUN: -1.8% momentum cutoff
     # ── Safe Haven weights (matches RUN defaults) ───────────────────────────
-    safe_cash_weight=0.70,       # RUN: 70% cash during safe haven
-    safe_spot_weight=0.20,       # RUN: 20% spot during safe haven
-    safe_micro_weight=0.10,      # RUN: 10% micro during safe haven
+    safe_cash_weight=0.75,       # RUN: 75% cash during safe haven
+    safe_spot_weight=0.18,       # RUN: 18% spot during safe haven
+    safe_micro_weight=0.07,      # RUN: 7% micro during safe haven
     # ── Bear hedge ──────────────────────────────────────────────────────────
     bear_short_hedge=0.45,
     short_leverage=2.0,
@@ -1059,17 +1059,17 @@ def run_dynamic_adaptive_20x_engine(
     flash_wick_limit_20x=-0.022, # RUN: -2.2% tighter CB when lev > 10x
     atr_20x_limit=0.021,         # RUN: ATR < 2.1% required for 20x rocket
     # ── Re-entry Ladder (matches RUN default) ───────────────────────────────
-    ladder_steps=(1.0, 3.0, 6.0, 10.0, 20.0),  # RUN: [1,3,6,10,20]
+    ladder_steps=(1.0, 2.5, 5.5, 10.0, 20.0),  # RUN: [1.0, 2.5, 5.5, 10.0, 20.0]
     clamp_binance_brackets=True, # RUN: Binance tiered margin brackets enforced
     start_date=None              # אם מוגדר: מאפס הון בתאריך — מדמה בוט חדש שמתחיל live
 ):
     """100% RUN Live Strategy parity engine — Guarded 20x Conviction Rocket.
 
     Parameter alignment with RUN/src/strategy/regime_adaptive_strategy.py:
-      - momentum_cutoff_pct=None  → Legacy stepped pullback guard (matches RUN default)
+      - momentum_cutoff_pct=-0.018→ Early momentum pullback cutoff
       - flash_wick_limit_20x      → Separate tighter CB for lev > 10x (RUN: -2.2%)
       - atr_20x_limit             → ATR gate for 20x tier (RUN: 0.021)
-      - ladder_steps              → Re-entry ladder post-CB (RUN: [1,3,6,10,20])
+      - ladder_steps              → Re-entry ladder post-CB (RUN: [1.0, 2.5, 5.5, 10.0, 20.0])
     """
     return run_dynamic_adaptive_engine(
         initial_capital=initial_capital,

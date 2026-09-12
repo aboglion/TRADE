@@ -113,13 +113,13 @@ class RegimeAdaptiveStrategy(IStrategy):
         sma_regime_period: int = 150,
         conviction_leverage: float | None = None,
         bull_leverage: float = 10.0,
-        mid_leverage: float = 6.0,
-        base_leverage: float = 3.0,
+        mid_leverage: float = 5.5,
+        base_leverage: float = 2.5,
         min_leverage: float = 1.0,
         momentum_cutoff_pct: float | None = None,
-        safe_cash_weight: float = 0.70,
-        safe_spot_weight: float = 0.20,
-        safe_micro_weight: float = 0.10,
+        safe_cash_weight: float = 0.75,
+        safe_spot_weight: float = 0.18,
+        safe_micro_weight: float = 0.07,
         flash_wick_limit: float = -0.038,
         flash_wick_limit_20x: float = -0.022,
         atr_20x_limit: float = 0.021,
@@ -143,7 +143,7 @@ class RegimeAdaptiveStrategy(IStrategy):
         self._flash_wick_limit = flash_wick_limit
         self._flash_wick_limit_20x = flash_wick_limit_20x
         self._atr_20x_limit = atr_20x_limit
-        self._ladder_steps = ladder_steps if ladder_steps is not None else [1.0, 3.0, 6.0, 10.0, 20.0]
+        self._ladder_steps = ladder_steps if ladder_steps is not None else [1.0, 2.5, 5.5, 10.0, 20.0]
         self._bear_short_hedge = bear_short_hedge_weight
         self._short_leverage = short_leverage if short_leverage is not None else 2.0
         self._asset_configs = asset_configs or ASSET_CONFIGS
@@ -505,10 +505,10 @@ class RegimeAdaptiveStrategy(IStrategy):
                     selected_lev = min(10.0, self._conviction_leverage) if self._conviction_leverage < 20.0 else 10.0
                     lev_reason = f"🚀 Conviction Rocket 10x (ATR%={latest_atr_pct*100:.2f}%, ADX={latest_adx:.1f})"
                 elif latest_atr_pct < 0.028:
-                    selected_lev = self._mid_leverage # 6.0x
+                    selected_lev = self._mid_leverage # 5.5x
                     lev_reason = f"Mid Volatility Tier (ATR%={latest_atr_pct*100:.2f}%)"
                 else:
-                    selected_lev = self._base_leverage # 3.0x
+                    selected_lev = self._base_leverage # 2.5x
                     lev_reason = f"Base Bull Tier (ATR%={latest_atr_pct*100:.2f}%)"
                 total_crypto_weight = 0.70 * selected_lev + 0.30
         else:

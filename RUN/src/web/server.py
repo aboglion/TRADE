@@ -1142,11 +1142,11 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             cash_yield_pct = max(0.0, 1.0 - bear_hedge_w) * 100.0
 
             raw_cash_w = getattr(strat_cfg, "safe_cash_weight", None)
-            safe_cash_w = float(raw_cash_w) if isinstance(raw_cash_w, (int, float)) else 0.60
+            safe_cash_w = float(raw_cash_w) if isinstance(raw_cash_w, (int, float)) else 0.75
             raw_spot_w = getattr(strat_cfg, "safe_spot_weight", None)
-            safe_spot_w = float(raw_spot_w) if isinstance(raw_spot_w, (int, float)) else 0.30
+            safe_spot_w = float(raw_spot_w) if isinstance(raw_spot_w, (int, float)) else 0.18
             raw_micro_w = getattr(strat_cfg, "safe_micro_weight", None)
-            safe_micro_w = float(raw_micro_w) if isinstance(raw_micro_w, (int, float)) else 0.10
+            safe_micro_w = float(raw_micro_w) if isinstance(raw_micro_w, (int, float)) else 0.07
             cash_w = safe_cash_w * 100.0
 
             account_equity = 2000.0
@@ -1163,10 +1163,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     account_equity = float(state.session_initial_value_usd)
 
             try:
-                raw_cutoff = getattr(strat_cfg, "momentum_cutoff_pct", -0.030)
-                cutoff_pct = float(raw_cutoff) * 100.0 if raw_cutoff is not None else -3.0
+                raw_cutoff = getattr(strat_cfg, "momentum_cutoff_pct", -0.018)
+                cutoff_pct = float(raw_cutoff) * 100.0 if raw_cutoff is not None else -1.8
             except (TypeError, ValueError):
-                cutoff_pct = -3.0
+                cutoff_pct = -1.8
 
             try:
                 conviction_lev = float(getattr(strat_cfg, "conviction_leverage", 20.0))
@@ -1194,19 +1194,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             safe_haven_active = (macro_regime == "BULL") and not in_momentum
 
             try:
-                mid_lev = float(getattr(strat_cfg, "mid_leverage", 6.0))
+                mid_lev = float(getattr(strat_cfg, "mid_leverage", 5.5))
             except (TypeError, ValueError):
-                mid_lev = 6.0
+                mid_lev = 5.5
 
             try:
-                base_lev = float(getattr(strat_cfg, "base_leverage", 3.0))
+                base_lev = float(getattr(strat_cfg, "base_leverage", 2.5))
             except (TypeError, ValueError):
-                base_lev = 3.0
+                base_lev = 2.5
 
-            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 3.0, 6.0, 10.0, 20.0])
-            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 3.0, 6.0, 10.0, 20.0]
+            raw_ladder = getattr(strat_cfg, "ladder_steps", [1.0, 2.5, 5.5, 10.0, 20.0])
+            ladder_steps = [float(x) for x in raw_ladder] if isinstance(raw_ladder, (list, tuple)) else [1.0, 2.5, 5.5, 10.0, 20.0]
             if not ladder_steps:
-                ladder_steps = [1.0, 3.0, 6.0, 10.0, 20.0]
+                ladder_steps = [1.0, 2.5, 5.5, 10.0, 20.0]
 
             if macro_regime == "BEAR":
                 leverage = short_lev

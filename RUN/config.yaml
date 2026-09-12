@@ -13,20 +13,20 @@ strategy:
   sma_regime_period: 150
   conviction_leverage: 20.0
   bull_leverage: 10.0
-  mid_leverage: 6.0
-  base_leverage: 3.0
+  mid_leverage: 5.5
+  base_leverage: 2.5
   min_leverage: 1.0
-  momentum_cutoff_pct: -0.03
-  safe_cash_weight: 0.7
-  safe_spot_weight: 0.2
-  safe_micro_weight: 0.1
+  momentum_cutoff_pct: -0.018
+  safe_cash_weight: 0.75
+  safe_spot_weight: 0.18
+  safe_micro_weight: 0.07
   flash_wick_limit: -0.038
   flash_wick_limit_20x: -0.022
   atr_20x_limit: 0.021
   ladder_steps:
   - 1.0
-  - 3.0
-  - 6.0
+  - 2.5
+  - 5.5
   - 10.0
   - 20.0
   bear_short_hedge_weight: 0.45
@@ -68,9 +68,9 @@ scheduler:
   max_consecutive_errors: 10
 dry_run:
   initial_balances:
-    USDT: 2539.02328911
-    BTC: 0.00305951
-    ETH: 0.07054558
+    USDT: 2592.46499491
+    BTC: 0.00276228
+    ETH: 0.06323647
 telegram:
   enabled: false
   bot_token: ''

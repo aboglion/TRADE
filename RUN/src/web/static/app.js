@@ -2760,11 +2760,11 @@ function renderBinaryTree(data) {
         const safeHavenActive = macro.safe_haven_active !== undefined ? !!macro.safe_haven_active : !inMomentum;
         const effectiveLev = macro.effective_leverage || (isBull ? (safeHavenActive ? 1.0 : 2.5) : 0.0);
         const totalExposure = macro.total_crypto_weight_pct || (isBull ? (safeHavenActive ? 30 : 205) : 0);
-        const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -3.0;
+        const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -1.8;
         const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
         const bearHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 45;
         const netShortPct = Math.round(bearHedgePct * parseFloat(shortLev));
-        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 70;
+        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 75;
         const binanceBracket = macro.binance_tier_bracket || {};
         const accountEquity = binanceBracket.account_equity || 2000;
         const bracketTier = binanceBracket.tier || 1;
@@ -2791,9 +2791,9 @@ function renderBinaryTree(data) {
             {
                 id: "risk_node_conviction_tier",
                 title: "3. מנוע רקטת שכנוע ותנודתיות (Conviction Rocket 20x Engine)",
-                subtitle: "קביעת מינוף דינמי: ATR < 2.1% & ADX >= 25 (רקטת 20x מוגנת) | ATR < 2.2% (10x) | ATR < 2.8% (6.0x) | בסיס (3.0x)",
-                criteria: "ATR < 2.1% & ADX >= 25 -> 20x | ATR < 2.2% -> 10x | ATR < 2.8% -> 6x | Base -> 3.0x",
-                actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || (effectiveLev >= 15 ? '🚀 20x Super Conviction Rocket' : (effectiveLev >= 8 ? '🚀 10x Conviction Rocket' : (effectiveLev >= 5 ? '6.0x Tier' : '3.0x Base Tier')))}`,
+                subtitle: "קביעת מינוף דינמי: ATR < 2.1% & ADX >= 25 (רקטת 20x מוגנת) | ATR < 2.2% (10x) | ATR < 2.8% (5.5x) | בסיס (2.5x)",
+                criteria: "ATR < 2.1% & ADX >= 25 -> 20x | ATR < 2.2% -> 10x | ATR < 2.8% -> 5.5x | Base -> 2.5x",
+                actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || (effectiveLev >= 15 ? '🚀 20x Super Conviction Rocket' : (effectiveLev >= 8 ? '🚀 10x Conviction Rocket' : (effectiveLev >= 5 ? '5.5x Tier' : '2.5x Base Tier')))}`,
                 met: isBull && inMomentum && !safeHavenActive,
             },
             {
@@ -2815,15 +2815,15 @@ function renderBinaryTree(data) {
             {
                 id: "risk_node_reentry_ladder",
                 title: "6. סולם כניסה מחדש ב-5 שלבים (5-Step Controlled Re-Entry Ladder)",
-                subtitle: "חזרה מדורגת לאחר מפסק: שלב 1 (1.0x) ← שלב 2 (3.0x) ← שלב 3 (6.0x) ← שלב 4 (10.0x) ← שלב 5 (20.0x)",
-                criteria: "שלב 1: 1.0x | שלב 2: 3.0x | שלב 3: 6.0x | שלב 4: 10.0x | שלב 5: 20.0x",
+                subtitle: "חזרה מדורגת לאחר מפסק: שלב 1 (1.0x) ← שלב 2 (2.5x) ← שלב 3 (5.5x) ← שלב 4 (10.0x) ← שלב 5 (20.0x)",
+                criteria: "שלב 1: 1.0x | שלב 2: 2.5x | שלב 3: 5.5x | שלב 4: 10.0x | שלב 5: 20.0x",
                 actual: `${ladderStep} (תקרה: ${ladderCap.toFixed(1)}x, נרות מאז טריגר: ${barsSinceTrip})`,
                 met: barsSinceTrip > 4,
             },
             {
                 id: "risk_node_safe_haven",
-                title: "7. עוגן מזומן בתשואה חסרת סיכון (Safe Haven 70% Cash Yield)",
-                subtitle: "70% מזומן דולרי בריבית 4% APY + 20% ספוט סולידי + 10% מיקרו לוויין בזמן תיקונים",
+                title: "7. עוגן מזומן בתשואה חסרת סיכון (Safe Haven 75% Cash Yield)",
+                subtitle: "75% מזומן דולרי בריבית 4% APY + 18% ספוט סולידי + 7% מיקרו לוויין בזמן תיקונים",
                 criteria: `${safeCashPct}% Cash @ 4.0% APY במצב הגנה | 100% מושקע במומנטום מלא`,
                 actual: safeHavenActive ? `🛡️ ${safeCashPct}% Cash Buffer (4% APY) + ${100-safeCashPct}% Spot/Micro` : "🚀 100% Capital Deployed in Momentum",
                 met: true,
@@ -3297,13 +3297,13 @@ function renderDashboardPipeline(data) {
         const barsSinceTrip = macro.bars_since_circuit_trip || 999;
         const ladderStep = macro.ladder_step || "Completed";
         const ladderCap = macro.ladder_cap || 10.0;
-        const effectiveLev = macro.effective_leverage || (isBull ? 3.0 : 0.0);
+        const effectiveLev = macro.effective_leverage || (isBull ? 2.5 : 0.0);
         const totalExposure = macro.total_crypto_weight_pct || (isBull ? 205 : 0);
-        const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -3.0;
+        const cutoffPct = (macro && typeof macro.momentum_cutoff_pct === 'number') ? macro.momentum_cutoff_pct : -1.8;
         const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
         const bearHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 45;
         const netShortPct = Math.round(bearHedgePct * parseFloat(shortLev));
-        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 70;
+        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 75;
         const binanceBracket = macro.binance_tier_bracket || {};
         const accountEquity = binanceBracket.account_equity || 2000;
         const bracketTier = binanceBracket.tier || 1;
@@ -3319,7 +3319,7 @@ function renderDashboardPipeline(data) {
         const r2_prog = inMomentum ? 100 : Math.max(15, Math.min(95, Math.round(100 + pbGap * 15)));
         const r2_label = inMomentum ? "✓ 100% מומנטום" : `חריגה ${Math.abs(pbGap).toFixed(1)}% משיא 5d`;
 
-        const r3_prog = effectiveLev >= 20.0 ? 100 : (effectiveLev >= 10.0 ? 80 : (effectiveLev >= 6.0 ? 50 : 25));
+        const r3_prog = effectiveLev >= 20.0 ? 100 : (effectiveLev >= 10.0 ? 80 : (effectiveLev >= 5.5 ? 50 : 25));
         const r3_label = `מינוף ${effectiveLev.toFixed(1)}x פעיל`;
 
         const r4_bracket_prog = isBracketClamped ? Math.round((bracketMaxLev / 20.0) * 100) : 100;
@@ -3369,14 +3369,14 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_3",
                 shortTitle: "3. מנוע מינוף",
                 fullTitle: "3. מנוע מינוף דינמי ורקטת שכנוע (Conviction Rocket 20x Engine)",
-                criteria: "ATR < 2.1% & ADX >= 25 (20x) | ATR < 2.2% (10x) | ATR < 2.8% (6x) | Base (3.0x)",
+                criteria: "ATR < 2.1% & ADX >= 25 (20x) | ATR < 2.2% (10x) | ATR < 2.8% (5.5x) | Base (2.5x)",
                 actual: `ATR% = ${btcAtr.toFixed(2)}%, ADX = ${btcAdx.toFixed(1)} → ${macro.active_tier || `${effectiveLev.toFixed(1)}x Tier`}`,
                 live_val: `${effectiveLev.toFixed(1)}x Tier`,
                 badge: `${effectiveLev.toFixed(1)}x`,
                 progress_pct: r3_prog,
                 progress_label: r3_label,
-                met: isBull && inMomentum && effectiveLev >= 3.0,
-                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 20x ברגיעה ומומנטום מובהק, 10x/6.0x/3.0x בתנודתיות, או 1.0x ספוט."
+                met: isBull && inMomentum && effectiveLev >= 2.5,
+                explanation: "התאמת מינוף אגרסיבי במצבי וודאות מוחלטת: עד 20x ברגיעה ומומנטום מובהק, 10x/5.5x/2.5x בתנודתיות, או 1.0x ספוט."
             },
             {
                 id: "dash_risk_4",
@@ -3408,7 +3408,7 @@ function renderDashboardPipeline(data) {
                 id: "dash_risk_6",
                 shortTitle: "6. סולם חזרה",
                 fullTitle: "6. סולם כניסה מחדש מדורג ב-5 שלבים (5-Step Re-Entry Ladder)",
-                criteria: "התאוששות 5 שלבים: 1.0x → 3.0x → 6.0x → 10.0x → 20.0x",
+                criteria: "התאוששות 5 שלבים: 1.0x → 2.5x → 5.5x → 10.0x → 20.0x",
                 actual: `${ladderStep} (תקרה ${ladderCap.toFixed(1)}x)`,
                 live_val: ladderStep,
                 badge: `תקרה ${ladderCap.toFixed(0)}x`,
@@ -3693,7 +3693,7 @@ function renderStrategyConditions(data) {
         const lev = macro.effective_leverage || 1.0;
         const isSafeHaven = !!(macro && macro.safe_haven_active);
         const bearHedgePct = (macro && typeof macro.bear_short_hedge_pct === 'number') ? Math.round(macro.bear_short_hedge_pct) : 45;
-        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 70;
+        const safeCashPct = (macro && typeof macro.safe_cash_weight_pct === 'number') ? macro.safe_cash_weight_pct : 75;
         const shortLev = (macro && macro.effective_leverage && !isBull) ? Number(macro.effective_leverage).toFixed(1) : "2.0";
         levEl.textContent = isBull ? (isSafeHaven ? `Safe Haven: 1.0x (${safeCashPct}% Cash)` : `Leverage: ${lev.toFixed(1)}x`) : `Short Hedge: ${bearHedgePct}% @ ${shortLev}x`;
     }
