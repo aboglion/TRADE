@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=28">
+    <link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
     <div class="ambient-glow bg-glow-1"></div>
@@ -981,6 +981,15 @@
                 </div>
             </div>
 
+            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-outline" onclick="closeModeSwitchModal()">ביטול / Cancel</button>
+                <button class="btn btn-primary" id="confirmModeSwitchBtn" onclick="executeModeSwitch()">
+                    <span>🔄</span> <span id="confirmModeBtnText">אשר והחלף מצב</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Trade & Tax History Modal (היסטוריית פעולות ומס) -->
     <div class="modal-backdrop" id="tradeHistoryModal">
         <div class="modal-content glass shadow-2xl modal-extra-large modal-tax-history">
@@ -1162,6 +1171,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=30"></script>
+    <script src="app.js?v=32"></script>
 </body>
 </html>

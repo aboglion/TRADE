@@ -4772,9 +4772,16 @@ let taxCustomEndTs = null;
 
 function openTradeHistoryModal() {
     const modal = document.getElementById("tradeHistoryModal");
-    if (!modal) return;
+    if (!modal) {
+        console.error("Modal #tradeHistoryModal not found in DOM!");
+        return;
+    }
     modal.classList.add("active");
     modal.style.display = "flex";
+    modal.style.visibility = "visible";
+    modal.style.opacity = "1";
+    modal.style.pointerEvents = "auto";
+    modal.style.zIndex = "999999";
 
     // Fetch initial history if empty
     if (taxTradesList.length === 0) {
@@ -4787,6 +4794,9 @@ function closeTradeHistoryModal() {
     if (!modal) return;
     modal.classList.remove("active");
     modal.style.display = "none";
+    modal.style.visibility = "hidden";
+    modal.style.opacity = "0";
+    modal.style.pointerEvents = "none";
 }
 
 function selectTaxTimeframe(tf) {
