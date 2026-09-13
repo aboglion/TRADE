@@ -360,6 +360,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_tax_history()
         elif clean_api_path in ("/api/history/download", "/api/tax_report/download"):
             self._handle_download_tax_report()
+        elif clean_api_path in ("/api/history/manual-deposits", "/api/tax/manual-deposits"):
+            self._handle_get_manual_deposits()
         elif clean_path.startswith("/api/"):
             self._send_json({"error": f"API endpoint '{clean_path}' not found"}, status=404)
         else:
@@ -418,6 +420,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_switch_mode()
         elif clean_path in ("/api/restart", "/api/system/restart"):
             self._handle_system_restart()
+        elif clean_path in ("/api/history/manual-deposits", "/api/tax/manual-deposits"):
+            self._handle_add_manual_deposit()
+        elif clean_path in ("/api/history/manual-deposits/delete", "/api/tax/manual-deposits/delete"):
+            self._handle_delete_manual_deposit()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -942,6 +948,65 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error("Failed to download tax report: %s", e)
             self._send_json({"error": f"Failed to download tax report: {e}"}, status=500)
+
+    def _handle_get_manual_deposits(self) -> None:
+        try:
+            from src.services.tax_history_service import get_tax_history_service
+            svc = get_tax_history_service(self.state_store, self.config)
+            deposits = svc.get_manual_deposits()
+            self._send_json({"deposits": deposits})
+        except Exception as e:
+            logger.error("Failed to get manual deposits: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_add_manual_deposit(self) -> None:
+        try:
+            from src.services.tax_history_service import get_tax_history_service
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+
+            coin = str(data.get("coin", "USDT")).strip().upper()
+            amount = float(data.get("amount", 0.0))
+            price = float(data.get("price", 0.0))
+            notes = str(data.get("notes", ""))
+            timestamp_ms = data.get("timestamp_ms")
+
+            if amount <= 0:
+                self._send_json({"error": "יש להזין כמות גדולה מ-0"}, status=400)
+                return
+
+            svc = get_tax_history_service(self.state_store, self.config)
+            record = svc.add_manual_deposit({
+                "coin": coin,
+                "amount": amount,
+                "price": price,
+                "notes": notes,
+                "timestamp_ms": timestamp_ms,
+            })
+            self._send_json({"success": True, "deposit": record})
+        except Exception as e:
+            logger.error("Failed to add manual deposit: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_delete_manual_deposit(self) -> None:
+        try:
+            from src.services.tax_history_service import get_tax_history_service
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length > 0 else b"{}"
+            data = json.loads(body.decode("utf-8"))
+
+            dep_id = str(data.get("id", "")).strip()
+            if not dep_id:
+                self._send_json({"error": "Missing deposit id"}, status=400)
+                return
+
+            svc = get_tax_history_service(self.state_store, self.config)
+            success = svc.delete_manual_deposit(dep_id)
+            self._send_json({"success": success})
+        except Exception as e:
+            logger.error("Failed to delete manual deposit: %s", e)
+            self._send_json({"error": str(e)}, status=500)
 
     def _get_active_log_path(self) -> Path:
         candidate_paths = []

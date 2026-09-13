@@ -3870,8 +3870,8 @@ body {
 .tax-data-table {
     width: 100%;
     font-size: 0.78rem;
-    direction: rtl;
-    text-align: right;
+    direction: ltr !important;
+    text-align: left;
     border-collapse: separate;
     border-spacing: 0;
 }
@@ -3882,31 +3882,83 @@ body {
     text-transform: uppercase;
     color: #94a3b8;
     padding: 9px 8px;
-    background: #0b1329 !important; /* Solid opaque dark surface - stops bleed-through! */
+    background: #0b1329 !important; /* Solid opaque dark surface - stops bleed-through */
     border-bottom: 2px solid rgba(255, 255, 255, 0.12);
     white-space: nowrap;
     position: sticky !important;
     top: 0 !important;
     z-index: 40 !important;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.6);
-    text-align: right;
+    text-align: left;
 }
 
 .tax-data-table td {
     padding: 7px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     white-space: nowrap;
-    text-align: right;
+    text-align: left;
 }
 
 .tax-data-table tr:hover td {
     background: rgba(255, 255, 255, 0.04);
 }
 
+/* Sticky Key Identifying Columns (#, Date, Asset) on Left so they never scroll off screen! */
+.tax-data-table th:nth-child(1),
+.tax-data-table td:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 42 !important;
+    background: #0b1329 !important;
+    width: 40px;
+    min-width: 40px;
+    text-align: center;
+}
+
+.tax-data-table th:nth-child(2),
+.tax-data-table td:nth-child(2) {
+    position: sticky;
+    left: 40px;
+    z-index: 42 !important;
+    background: #0b1329 !important;
+    width: 135px;
+    min-width: 135px;
+}
+
+.tax-data-table th:nth-child(3),
+.tax-data-table td:nth-child(3) {
+    position: sticky;
+    left: 175px;
+    z-index: 42 !important;
+    background: #0b1329 !important;
+    box-shadow: 4px 0 8px -2px rgba(0, 0, 0, 0.6);
+    width: 85px;
+    min-width: 85px;
+}
+
 .tax-data-table .num-cell {
     font-family: var(--font-mono);
-    direction: ltr;
-    text-align: left;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.btn-tax-deposit {
+    background: rgba(245, 158, 11, 0.15) !important;
+    border-color: rgba(245, 158, 11, 0.4) !important;
+    color: #fbbf24 !important;
+    font-weight: 600 !important;
+}
+
+.btn-tax-deposit:hover {
+    background: rgba(245, 158, 11, 0.3) !important;
+    border-color: #f59e0b !important;
+    color: #ffffff !important;
+}
+
+.badge-dep-manual {
+    background: rgba(245, 158, 11, 0.25);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.5);
 }
 
 .badge-side {

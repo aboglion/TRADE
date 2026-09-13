@@ -59,16 +59,142 @@ class TaxHistoryService:
         self._cache_ts: float = 0.0
         self._cache_ttl_seconds: float = 45.0  # Cache for 45s to protect API limits
 
+    def clear_cache(self) -> None:
+        """Clear cached tax history data."""
+        with self._lock:
+            self._cache.clear()
+            self._cache_ts = 0.0
+
+    def _get_manual_deposits_file(self) -> Path:
+        """Resolve canonical path for manual deposits & cost basis storage."""
+        candidates = [
+            Path("/home/uns/TRADE/RUN/data/manual_deposits.json"),
+            Path("/home/uns/TRADE/data/manual_deposits.json"),
+            Path("RUN/data/manual_deposits.json"),
+            Path("data/manual_deposits.json"),
+        ]
+        for p in candidates:
+            if p.exists():
+                return p
+        default_p = Path("/home/uns/TRADE/RUN/data/manual_deposits.json")
+        default_p.parent.mkdir(parents=True, exist_ok=True)
+        return default_p
+
+    def get_manual_deposits(self) -> List[Dict[str, Any]]:
+        """Return all user-recorded manual deposits and opening balances."""
+        p = self._get_manual_deposits_file()
+        if not p.exists():
+            return []
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.warning("Failed to load manual deposits: %s", e)
+            return []
+
+    def add_manual_deposit(self, deposit_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Record a manual deposit / initial cost basis lot.
+        Persists to disk, feeds FIFO cost basis queue, and clears cache.
+        """
+        with self._lock:
+            items = self.get_manual_deposits()
+            ts = int(deposit_data.get("timestamp_ms") or int(time.time() * 1000))
+            coin = str(deposit_data.get("coin", "USDT")).upper().strip()
+            amount = float(deposit_data.get("amount", 0.0))
+            price = float(deposit_data.get("price", 0.0))
+            total_usd = float(deposit_data.get("total_usd") or (amount * price))
+            notes = str(deposit_data.get("notes", "") or "הפקדה / יתרת פתיחה ידנית")
+
+            dep_id = f"manual_{int(time.time())}_{coin.lower()}"
+            dt_utc = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+            dt_local = datetime.fromtimestamp(ts / 1000.0)
+
+            record = {
+                "id": dep_id,
+                "timestamp_ms": ts,
+                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
+                "coin": coin,
+                "side": "DEPOSIT",
+                "action_type": "DEPOSIT",
+                "market": "MANUAL",
+                "amount": amount,
+                "price": price,
+                "total_usd": round(total_usd, 2),
+                "cost_basis_usd": round(total_usd, 2),
+                "fee_usd": 0.0,
+                "fee_currency": "USD",
+                "realized_pnl_usd": 0.0,
+                "realized_pnl_pct": 0.0,
+                "client_order_id": dep_id,
+                "exchange_order_id": dep_id,
+                "trade_id": dep_id,
+                "status": "CONFIRMED",
+                "source": "MANUAL_ENTRY",
+                "notes": notes,
+            }
+            items.append(record)
+
+            target_file = self._get_manual_deposits_file()
+            with open(target_file, "w", encoding="utf-8") as f:
+                json.dump(items, f, indent=2, ensure_ascii=False)
+
+            self.clear_cache()
+            return record
+
+    def delete_manual_deposit(self, deposit_id: str) -> bool:
+        """Delete a manual deposit record by ID and invalidate cache."""
+        with self._lock:
+            items = self.get_manual_deposits()
+            initial_len = len(items)
+            filtered = [x for x in items if str(x.get("id")) != str(deposit_id)]
+            if len(filtered) < initial_len:
+                target_file = self._get_manual_deposits_file()
+                with open(target_file, "w", encoding="utf-8") as f:
+                    json.dump(filtered, f, indent=2, ensure_ascii=False)
+                self.clear_cache()
+                return True
+            return False
+
     def _get_binance_credentials(self) -> Tuple[str, str]:
-        """Load API credentials safely from environment or .env."""
+        """Load API credentials safely from environment or .env files."""
         try:
             from src.utils.env_manager import load_dotenv
             load_dotenv()
         except Exception:
-            pass
+            try:
+                from RUN.src.utils.env_manager import load_dotenv
+                load_dotenv()
+            except Exception:
+                pass
 
         key = os.environ.get("BINANCE_API_KEY", "").strip().strip("'\"").strip()
         secret = os.environ.get("BINANCE_API_SECRET", "").strip().strip("'\"").strip()
+
+        if not key or not secret or key == "your_api_key_here":
+            candidate_envs = [
+                Path("/home/uns/TRADE/.env"),
+                Path("/home/uns/TRADE/RUN/.env"),
+                Path(".env"),
+                Path("RUN/.env"),
+            ]
+            for p in candidate_envs:
+                if p.exists():
+                    try:
+                        for line in p.read_text(encoding="utf-8").splitlines():
+                            line = line.strip()
+                            if line.startswith("BINANCE_API_KEY="):
+                                key = line.split("=", 1)[1].strip().strip("'\"").strip()
+                            elif line.startswith("BINANCE_API_SECRET="):
+                                secret = line.split("=", 1)[1].strip().strip("'\"").strip()
+                    except Exception:
+                        pass
+                if key and secret and key != "your_api_key_here":
+                    break
+
         return key, secret
 
     def _get_tracked_symbols(self) -> List[str]:
@@ -235,12 +361,21 @@ class TaxHistoryService:
 
         # 2. Fetch local bot-recorded orders (always included as ground truth of bot activity)
         bot_trades = self._fetch_bot_state_orders(since_ms, until_ms)
-        binance_status["bot_orders_count"] = len(bot_trades)
 
-        # 3. Merge & Deduplicate
+        # 3. Include user-recorded manual deposits & opening balances
+        manual_deposits = self.get_manual_deposits()
+        for m in manual_deposits:
+            m_ts = int(m.get("timestamp_ms", 0))
+            if m_ts >= since_ms and (until_ms <= 0 or m_ts <= until_ms):
+                bot_trades.append(m)
+
+        binance_status["bot_orders_count"] = len(bot_trades)
+        binance_status["manual_deposits_count"] = len(manual_deposits)
+
+        # 4. Merge & Deduplicate
         merged = self._merge_and_deduplicate(binance_trades, bot_trades)
 
-        # 4. Apply FIFO Cost Basis & Realized Capital Gain/Loss Engine (Israeli Tax Authority Standards)
+        # 5. Apply FIFO Cost Basis & Realized Capital Gain/Loss Engine (Israeli Tax Authority Standards)
         merged = self._apply_fifo_cost_basis(merged)
 
         # Sort chronologically descending (newest first for UI inspection)
@@ -498,7 +633,8 @@ class TaxHistoryService:
     ) -> List[Dict[str, Any]]:
         """
         Fetch Crypto Deposits, Crypto Withdrawals, and Fiat Orders from Binance SAPI.
-        Bypasses web UI 1-year limits and logs all movements for tax reconciliation.
+        Bypasses 90-day SAPI query limits by chunking time ranges into <= 85-day segments.
+        Logs all movements for Israeli Tax Authority compliance (סעיפים 88-91).
         """
         results: List[Dict[str, Any]] = []
         if not api_key or not api_secret:
@@ -510,157 +646,199 @@ class TaxHistoryService:
                 "apiKey": api_key,
                 "secret": api_secret,
                 "enableRateLimit": True,
-                "timeout": 10000,
+                "timeout": 12000,
                 "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
             })
 
+            DAY_MS = 86400 * 1000
+            WINDOW_MS = 85 * DAY_MS
+            MAX_CHUNKS = 35  # Covers ~8.15 years (reaches back to 2021, 2020, 2019)
+
+            now_ms = int(time.time() * 1000)
+            target_until = until_ms if until_ms > 0 else now_ms
+            target_since = since_ms if since_ms > 0 else max(0, target_until - (MAX_CHUNKS * WINDOW_MS))
+
+            # Build 85-day chunks from newest to oldest
+            chunks: List[Tuple[int, int]] = []
+            curr_end = target_until
+            while curr_end > target_since and len(chunks) < MAX_CHUNKS:
+                curr_start = max(target_since, curr_end - WINDOW_MS)
+                chunks.append((curr_start, curr_end))
+                curr_end = curr_start - 1
+
+            seen_transfer_ids = set()
+
             # 1. Crypto Deposits (sapiGetCapitalDepositHisrec)
-            try:
-                dep_params: Dict[str, Any] = {"limit": 1000}
-                if since_ms > 0:
-                    dep_params["startTime"] = since_ms
-                if until_ms > 0:
-                    dep_params["endTime"] = until_ms
+            for c_start, c_end in chunks:
+                try:
+                    dep_params = {"startTime": c_start, "endTime": c_end, "limit": 1000}
+                    deposits = ex.sapiGetCapitalDepositHisrec(dep_params)
+                    if isinstance(deposits, list):
+                        for d in deposits:
+                            status_code = d.get("status")
+                            # Binance deposit status: 1 = Success, 6 = Credited. Skip failed/pending!
+                            if status_code not in (1, 6):
+                                logger.debug("Ignoring non-successful deposit status %s (txId: %s)", status_code, d.get("txId"))
+                                continue
 
-                deposits = ex.sapiGetCapitalDepositHisrec(dep_params)
-                if isinstance(deposits, list):
-                    for d in deposits:
-                        insert_ts = int(d.get("insertTime", 0))
-                        if insert_ts < since_ms or insert_ts > until_ms:
-                            continue
+                            insert_ts = int(d.get("insertTime", 0))
+                            tx_id = str(d.get("txId", "") or insert_ts)
+                            dep_id = f"dep_{tx_id}"
+                            if dep_id in seen_transfer_ids:
+                                continue
+                            seen_transfer_ids.add(dep_id)
 
-                        coin = str(d.get("coin", "USDT")).upper()
-                        amount = float(d.get("amount", 0.0))
-                        dt_utc = datetime.fromtimestamp(insert_ts / 1000.0, tz=timezone.utc)
-                        dt_local = datetime.fromtimestamp(insert_ts / 1000.0)
-                        status_code = d.get("status")
-                        status_str = "SUCCESS" if status_code == 1 else f"STATUS_{status_code}"
+                            coin = str(d.get("coin", "USDT")).upper()
+                            amount = float(d.get("amount", 0.0))
+                            dt_utc = datetime.fromtimestamp(insert_ts / 1000.0, tz=timezone.utc)
+                            dt_local = datetime.fromtimestamp(insert_ts / 1000.0)
 
-                        results.append({
-                            "id": f"dep_{d.get('txId', '') or insert_ts}",
-                            "timestamp_ms": insert_ts,
-                            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                            "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
-                            "coin": coin,
-                            "side": "DEPOSIT",
-                            "action_type": "DEPOSIT",
-                            "market": "TRANSFER",
-                            "amount": amount,
-                            "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                            "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                            "cost_basis_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                            "fee_usd": 0.0,
-                            "fee_currency": coin,
-                            "realized_pnl_usd": 0.0,
-                            "realized_pnl_pct": 0.0,
-                            "client_order_id": "",
-                            "exchange_order_id": str(d.get("txId", "")),
-                            "trade_id": str(d.get("id", "") or d.get("txId", "")),
-                            "status": status_str,
-                            "source": "BINANCE_DEPOSIT",
-                            "notes": f"הפקדת קריפטו לרשת {d.get('network', '')} | TxID: {str(d.get('txId', ''))[:16]}...",
-                        })
-            except Exception as e_dep:
-                logger.debug("Could not fetch crypto deposits: %s", e_dep)
+                            results.append({
+                                "id": dep_id,
+                                "timestamp_ms": insert_ts,
+                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                                "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
+                                "coin": coin,
+                                "side": "DEPOSIT",
+                                "action_type": "DEPOSIT",
+                                "market": "TRANSFER",
+                                "amount": amount,
+                                "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                "cost_basis_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                "fee_usd": 0.0,
+                                "fee_currency": coin,
+                                "realized_pnl_usd": 0.0,
+                                "realized_pnl_pct": 0.0,
+                                "client_order_id": "",
+                                "exchange_order_id": str(d.get("txId", "")),
+                                "trade_id": str(d.get("id", "") or tx_id),
+                                "status": "SUCCESS",
+                                "source": "BINANCE_DEPOSIT",
+                                "notes": f"הפקדת קריפטו מוצלחת לרשת {d.get('network', '')} | TxID: {str(tx_id)[:16]}...",
+                            })
+                except Exception as e_dep:
+                    logger.debug("Could not fetch crypto deposits for chunk [%s-%s]: %s", c_start, c_end, e_dep)
+                    if any(x in str(e_dep) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                        break
 
             # 2. Crypto Withdrawals (sapiGetCapitalWithdrawHistory)
-            try:
-                wd_params: Dict[str, Any] = {"limit": 1000}
-                if since_ms > 0:
-                    wd_params["startTime"] = since_ms
-                if until_ms > 0:
-                    wd_params["endTime"] = until_ms
+            for c_start, c_end in chunks:
+                try:
+                    wd_params = {"startTime": c_start, "endTime": c_end, "limit": 1000}
+                    withdrawals = ex.sapiGetCapitalWithdrawHistory(wd_params)
+                    if isinstance(withdrawals, list):
+                        for w in withdrawals:
+                            status_code = w.get("status")
+                            # Binance withdrawal status: 6 = Completed/Success. Skip Cancelled (1), Rejected (3), Failure (5)!
+                            if status_code != 6:
+                                logger.debug("Ignoring non-completed withdrawal status %s (txId: %s)", status_code, w.get("txId"))
+                                continue
 
-                withdrawals = ex.sapiGetCapitalWithdrawHistory(wd_params)
-                if isinstance(withdrawals, list):
-                    for w in withdrawals:
-                        apply_time_str = str(w.get("applyTime", ""))
-                        try:
-                            dt_apply = datetime.strptime(apply_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                            w_ts = int(dt_apply.timestamp() * 1000)
-                        except Exception:
-                            w_ts = since_ms
+                            apply_time_str = str(w.get("applyTime", ""))
+                            try:
+                                dt_apply = datetime.strptime(apply_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                                w_ts = int(dt_apply.timestamp() * 1000)
+                            except Exception:
+                                w_ts = c_start
 
-                        if w_ts < since_ms or w_ts > until_ms:
-                            continue
+                            tx_id = str(w.get("txId", "") or w_ts)
+                            wd_id = f"wd_{tx_id}"
+                            if wd_id in seen_transfer_ids:
+                                continue
+                            seen_transfer_ids.add(wd_id)
 
-                        coin = str(w.get("coin", "USDT")).upper()
-                        amount = float(w.get("amount", 0.0))
-                        tx_fee = float(w.get("transactionFee", 0.0))
-                        dt_utc = datetime.fromtimestamp(w_ts / 1000.0, tz=timezone.utc)
-                        dt_local = datetime.fromtimestamp(w_ts / 1000.0)
-                        status_code = w.get("status")
-                        status_str = "SUCCESS" if status_code == 6 else f"STATUS_{status_code}"
+                            coin = str(w.get("coin", "USDT")).upper()
+                            amount = float(w.get("amount", 0.0))
+                            tx_fee = float(w.get("transactionFee", 0.0))
+                            dt_utc = datetime.fromtimestamp(w_ts / 1000.0, tz=timezone.utc)
+                            dt_local = datetime.fromtimestamp(w_ts / 1000.0)
 
-                        results.append({
-                            "id": f"wd_{w.get('txId', '') or w_ts}",
-                            "timestamp_ms": w_ts,
-                            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                            "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
-                            "coin": coin,
-                            "side": "WITHDRAW",
-                            "action_type": "WITHDRAW",
-                            "market": "TRANSFER",
-                            "amount": amount,
-                            "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                            "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                            "cost_basis_usd": 0.0,
-                            "fee_usd": round(tx_fee, 4),
-                            "fee_currency": coin,
-                            "realized_pnl_usd": 0.0,
-                            "realized_pnl_pct": 0.0,
-                            "client_order_id": "",
-                            "exchange_order_id": str(w.get("txId", "")),
-                            "trade_id": str(w.get("id", "") or w.get("txId", "")),
-                            "status": status_str,
-                            "source": "BINANCE_WITHDRAWAL",
-                            "notes": f"משיכת קריפטו לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
-                        })
-            except Exception as e_wd:
-                logger.debug("Could not fetch crypto withdrawals: %s", e_wd)
+                            results.append({
+                                "id": wd_id,
+                                "timestamp_ms": w_ts,
+                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                                "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
+                                "coin": coin,
+                                "side": "WITHDRAW",
+                                "action_type": "WITHDRAW",
+                                "market": "TRANSFER",
+                                "amount": amount,
+                                "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                "cost_basis_usd": 0.0,
+                                "fee_usd": round(tx_fee, 4),
+                                "fee_currency": coin,
+                                "realized_pnl_usd": 0.0,
+                                "realized_pnl_pct": 0.0,
+                                "client_order_id": "",
+                                "exchange_order_id": str(w.get("txId", "")),
+                                "trade_id": str(w.get("id", "") or tx_id),
+                                "status": "SUCCESS",
+                                "source": "BINANCE_WITHDRAWAL",
+                                "notes": f"משיכת קריפטו מוצלחת לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
+                            })
+                except Exception as e_wd:
+                    logger.debug("Could not fetch crypto withdrawals for chunk [%s-%s]: %s", c_start, c_end, e_wd)
+                    if any(x in str(e_wd) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                        break
 
             # 3. Fiat Orders (Deposits & Withdrawals)
-            try:
-                fiat_res = ex.sapiGetFiatOrders({"transactionType": "0", "limit": 500})
-                fiat_list = fiat_res.get("data", []) if isinstance(fiat_res, dict) else []
-                for f_ord in fiat_list:
-                    f_ts = int(f_ord.get("createTime", 0))
-                    if f_ts < since_ms or f_ts > until_ms:
-                        continue
-                    fiat_curr = str(f_ord.get("fiatCurrency", "USD")).upper()
-                    fiat_amt = float(f_ord.get("amount", 0.0))
-                    dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
-                    dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+            for c_start, c_end in chunks:
+                for t_type, act_side, act_title in (("0", "DEPOSIT", "הפקדת פיאט"), ("1", "WITHDRAW", "משיכת פיאט")):
+                    try:
+                        fiat_res = ex.sapiGetFiatOrders({"transactionType": t_type, "beginTime": c_start, "endTime": c_end, "limit": 500})
+                        fiat_list = fiat_res.get("data", []) if isinstance(fiat_res, dict) else []
+                        for f_ord in fiat_list:
+                            raw_status = str(f_ord.get("status", "")).strip().upper()
+                            # CRITICAL: Only include SUCCESSFUL fiat orders! Skip Failed, Cancelled, Expired!
+                            if raw_status not in ("SUCCESSFUL", "SUCCESS", "COMPLETED"):
+                                logger.debug("Skipping failed/cancelled fiat order %s with status '%s'", f_ord.get("orderNo"), raw_status)
+                                continue
 
-                    results.append({
-                        "id": f"fiat_dep_{f_ord.get('orderNo', '')}",
-                        "timestamp_ms": f_ts,
-                        "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                        "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                        "symbol": f"{fiat_curr}/USDT",
-                        "coin": fiat_curr,
-                        "side": "DEPOSIT",
-                        "action_type": "FIAT_DEPOSIT",
-                        "market": "FIAT",
-                        "amount": fiat_amt,
-                        "price": 1.0,
-                        "total_usd": round(fiat_amt, 2),
-                        "cost_basis_usd": round(fiat_amt, 2),
-                        "fee_usd": float(f_ord.get("totalFee", 0.0)),
-                        "fee_currency": fiat_curr,
-                        "realized_pnl_usd": 0.0,
-                        "realized_pnl_pct": 0.0,
-                        "client_order_id": "",
-                        "exchange_order_id": str(f_ord.get("orderNo", "")),
-                        "trade_id": str(f_ord.get("orderNo", "")),
-                        "status": f_ord.get("status", "SUCCESS"),
-                        "source": "BINANCE_FIAT",
-                        "notes": f"הפקדת פיאט: {fiat_amt} {fiat_curr} באמצעות {f_ord.get('method', 'Bank/Card')}",
-                    })
-            except Exception as e_fiat:
-                logger.debug("Could not fetch fiat orders: %s", e_fiat)
+                            f_ts = int(f_ord.get("createTime", 0))
+                            ord_no = str(f_ord.get("orderNo", "") or f_ts)
+                            f_id = f"fiat_{act_side.lower()}_{ord_no}"
+                            if f_id in seen_transfer_ids:
+                                continue
+                            seen_transfer_ids.add(f_id)
+
+                            fiat_curr = str(f_ord.get("fiatCurrency", "USD")).upper()
+                            fiat_amt = float(f_ord.get("amount", 0.0))
+                            dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
+                            dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+
+                            results.append({
+                                "id": f_id,
+                                "timestamp_ms": f_ts,
+                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                                "symbol": f"{fiat_curr}/USDT",
+                                "coin": fiat_curr,
+                                "side": act_side,
+                                "action_type": f"FIAT_{act_side}",
+                                "market": "FIAT",
+                                "amount": fiat_amt,
+                                "price": 1.0,
+                                "total_usd": round(fiat_amt, 2),
+                                "cost_basis_usd": round(fiat_amt, 2) if act_side == "DEPOSIT" else 0.0,
+                                "fee_usd": float(f_ord.get("totalFee", 0.0)),
+                                "fee_currency": fiat_curr,
+                                "realized_pnl_usd": 0.0,
+                                "realized_pnl_pct": 0.0,
+                                "client_order_id": "",
+                                "exchange_order_id": ord_no,
+                                "trade_id": ord_no,
+                                "status": "SUCCESS",
+                                "source": "BINANCE_FIAT",
+                                "notes": f"{act_title} מוצלחת: {fiat_amt} {fiat_curr} באמצעות {f_ord.get('method', 'Bank/Card')}",
+                            })
+                    except Exception as e_fiat:
+                        logger.debug("Could not fetch fiat orders [%s]: %s", act_side, e_fiat)
+                        if any(x in str(e_fiat) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                            break
 
         except Exception as ex:
             logger.debug("Error in deposit/withdrawal master fetcher: %s", ex)
@@ -804,6 +982,15 @@ class TaxHistoryService:
         inventory: Dict[str, List[Dict[str, Any]]] = {}
 
         for t in sorted_trades:
+            status = str(t.get("status", "SUCCESS")).upper()
+            is_successful = t.get("is_successful", True)
+            if not is_successful or status in ("FAILED", "CANCELLED", "REJECTED", "EXPIRED"):
+                t["cost_basis_usd"] = 0.0
+                t["realized_pnl_usd"] = 0.0
+                t["realized_pnl_pct"] = 0.0
+                t["pnl_note"] = "פעולה נכשלה/בוטלה (לא נכללת בחישוב מס)"
+                continue
+
             side = str(t.get("side", "")).upper()
             coin = str(t.get("coin", "")).upper()
             market = str(t.get("market", "")).upper()
@@ -867,7 +1054,12 @@ class TaxHistoryService:
                 t["cost_basis_usd"] = round(matched_cost, 2)
                 t["realized_pnl_usd"] = round(net_pnl, 4)
                 t["realized_pnl_pct"] = round(pnl_pct, 2)
-                t["pnl_note"] = f"תמורה: ${proceeds:.2f} | עלות רכישה: ${matched_cost:.2f}"
+                if needed_qty > 1e-8 and matched_cost == 0.0:
+                    t["pnl_note"] = f"תמורה: ${proceeds:.2f} | לא אותרה עלות רכישה (0.00$) - הזן הפקדה ידנית לעדכון עלות"
+                elif needed_qty > 1e-8:
+                    t["pnl_note"] = f"תמורה: ${proceeds:.2f} | עלות חולצה חלקית מ-FIFO: ${matched_cost:.2f} (חסר {needed_qty:.4f} {coin})"
+                else:
+                    t["pnl_note"] = f"תמורה: ${proceeds:.2f} | עלות רכישה FIFO: ${matched_cost:.2f}"
 
             # 3. FUTURES with existing realized PnL
             elif t.get("realized_pnl_usd", 0.0) != 0.0:
@@ -943,6 +1135,11 @@ class TaxHistoryService:
         per_coin: Dict[str, Dict[str, Any]] = {}
 
         for t in trades:
+            status = str(t.get("status", "SUCCESS")).upper()
+            is_successful = t.get("is_successful", True)
+            if not is_successful or status in ("FAILED", "CANCELLED", "REJECTED", "EXPIRED"):
+                continue
+
             coin = t.get("coin") or "OTHER"
             if coin not in per_coin:
                 per_coin[coin] = {

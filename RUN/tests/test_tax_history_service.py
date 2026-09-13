@@ -245,6 +245,55 @@ class TestTaxHistoryService(unittest.TestCase):
         self.assertEqual(summary["total_withdrawals_count"], 1)
         self.assertEqual(summary["total_withdrawals_usd"], 200.0)
 
+    def test_manual_deposit_lifecycle_and_fifo(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_file = Path(tmp_dir) / "manual_deposits.json"
+            with patch.object(self.service, "_get_manual_deposits_file", return_value=test_file):
+                # 1. Add manual deposit
+                dep = self.service.add_manual_deposit({
+                    "coin": "BTC",
+                    "amount": 0.05,
+                    "price": 20000.0,
+                    "notes": "ארנק חומרה",
+                })
+                self.assertEqual(dep["coin"], "BTC")
+                self.assertEqual(dep["amount"], 0.05)
+                self.assertEqual(dep["cost_basis_usd"], 1000.0)
+
+                # 2. Verify retrieval
+                items = self.service.get_manual_deposits()
+                self.assertEqual(len(items), 1)
+                self.assertEqual(items[0]["id"], dep["id"])
+
+                # 3. Test FIFO matching with this deposit
+                sell_trade = {
+                    "id": "sell_btc",
+                    "timestamp_ms": int(time.time() * 1000) + 10000,
+                    "coin": "BTC",
+                    "symbol": "BTC/USDT",
+                    "side": "SELL",
+                    "market": "SPOT",
+                    "amount": 0.05,
+                    "price": 30000.0,
+                    "total_usd": 1500.0,
+                    "fee_usd": 1.5,
+                }
+                fifo_trades = self.service._apply_fifo_cost_basis([dep, sell_trade])
+                sold = next(t for t in fifo_trades if t["id"] == "sell_btc")
+                # Cost basis should be $1000 from the manual deposit!
+                self.assertEqual(sold["cost_basis_usd"], 1000.0)
+                # Realized gain = 1500 - 1000 - 1.5 = 498.5
+                self.assertAlmostEqual(sold["realized_pnl_usd"], 498.5, places=2)
+
+                # 4. Delete deposit
+                res = self.service.delete_manual_deposit(dep["id"])
+                self.assertTrue(res)
+                self.assertEqual(len(self.service.get_manual_deposits()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

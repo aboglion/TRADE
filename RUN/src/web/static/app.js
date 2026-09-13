@@ -5158,12 +5158,13 @@ function renderTaxTableRows() {
         let sideBadgeClass = "badge-buy";
         let sideHebrew = "קנייה";
 
+        const isManual = (t.source === "MANUAL_ENTRY");
         if (side === "SELL") {
             sideBadgeClass = "badge-sell";
             sideHebrew = "מכירה";
         } else if (side === "DEPOSIT") {
-            sideBadgeClass = "badge-deposit";
-            sideHebrew = "📥 הפקדה";
+            sideBadgeClass = isManual ? "badge-deposit badge-dep-manual" : "badge-deposit";
+            sideHebrew = isManual ? "📥 הפקדה (ידני)" : "📥 הפקדה";
         } else if (side === "WITHDRAW") {
             sideBadgeClass = "badge-withdraw";
             sideHebrew = "📤 משיכה";
@@ -5183,42 +5184,58 @@ function renderTaxTableRows() {
 
         if (side === "SELL" || (pnl !== 0.0 && side !== "BUY" && side !== "DEPOSIT")) {
             const pnlSign = pnl > 0 ? "+" : "";
-            pnlDisplay = `${pnlSign}$${pnl.toFixed(2)}`;
-            pnlPctDisplay = `${pnlSign}${pnlPct.toFixed(1)}%`;
             pnlColor = pnl > 0 ? "color: var(--accent-success, #10b981); font-weight: 700;" : (pnl < 0 ? "color: var(--accent-danger, #f43f5e); font-weight: 700;" : "");
+            pnlDisplay = `<bdi style="${pnlColor}">${pnlSign}$${pnl.toFixed(2)}</bdi>`;
+            pnlPctDisplay = `<bdi style="${pnlColor}">${pnlSign}${pnlPct.toFixed(1)}%</bdi>`;
         } else if (side === "BUY") {
-            pnlDisplay = '<span style="color: var(--text-muted); font-size: 0.72rem;">רכישה (עלות)</span>';
+            pnlDisplay = '<span style="color: #64748b; font-size: 0.72rem;">עלות נצברה</span>';
+            pnlPctDisplay = '-';
         } else if (side === "DEPOSIT") {
-            pnlDisplay = '<span style="color: #38bdf8; font-size: 0.72rem;">הפקדה</span>';
+            pnlDisplay = '<span style="color: #0284c7; font-size: 0.72rem;">קרן נכנסה</span>';
+            pnlPctDisplay = '-';
         } else if (side === "WITHDRAW") {
-            pnlDisplay = '<span style="color: #fb923c; font-size: 0.72rem;">משיכה</span>';
+            pnlDisplay = '<span style="color: #ea580c; font-size: 0.72rem;">משיכת קרן</span>';
+            pnlPctDisplay = '-';
         }
 
-        const costBasis = t.cost_basis_usd ? "$" + t.cost_basis_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-";
+        const costBasisStr = t.cost_basis_usd ? `<bdi>$${t.cost_basis_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</bdi>` : "-";
+        const priceStr = t.price ? `<bdi>$${t.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</bdi>` : "-";
+        const totalUsdStr = t.total_usd ? `<bdi>$${t.total_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</bdi>` : "-";
+        const feeStr = t.fee_usd ? `<bdi>$${t.fee_usd.toFixed(4)}</bdi>` : `<bdi>$0.00</bdi>`;
         const idDisplay = t.trade_id || t.exchange_order_id || t.client_order_id || "-";
         const shortId = idDisplay.length > 16 ? idDisplay.substring(0, 14) + "..." : idDisplay;
 
+        const sourceBadge = isManual
+            ? `<span class="badge-source badge-dep-manual" title="הפקדה שהוזנה ידנית">ידני <button onclick="deleteManualDeposit('${t.id}')" title="מחק הפקדה זו" style="background:none; border:none; color:#f87171; cursor:pointer; padding:0 2px; font-size:0.75rem;">🗑️</button></span>`
+            : `<span class="badge-source">${escapeHtml(t.source || "BINANCE")}</span>`;
+
         html += `
             <tr>
-                <td style="color: var(--text-muted); font-size: 0.72rem;">${idx + 1}</td>
+                <td style="color: var(--text-muted); font-size: 0.72rem; text-align: center;">${idx + 1}</td>
                 <td><span style="font-family: monospace; font-size: 0.76rem;">${t.datetime_local || t.datetime_utc || "-"}</span></td>
                 <td><strong style="color: #f1f5f9;">${escapeHtml(t.symbol || t.coin || "-")}</strong></td>
-                <td><span class="badge-side ${sideBadgeClass}">${escapeHtml(sideHebrew)}</span></td>
+                <td><span class="badge-side ${sideBadgeClass}">${sideHebrew}</span></td>
                 <td><span class="badge-source">${escapeHtml(t.market || "SPOT")}</span></td>
-                <td class="num-cell">${t.amount ? t.amount.toFixed(4) : "-"}</td>
-                <td class="num-cell">${t.price ? "$" + t.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
-                <td class="num-cell" style="font-weight: 600;">${t.total_usd ? "$" + t.total_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
-                <td class="num-cell" style="color: var(--text-muted);">${costBasis}</td>
-                <td class="num-cell" style="color: var(--text-muted);">${t.fee_usd ? "$" + t.fee_usd.toFixed(4) : "$0.00"}</td>
-                <td class="num-cell" style="${pnlColor}">${pnlDisplay}</td>
-                <td class="num-cell" style="${pnlColor}">${pnlPctDisplay}</td>
+                <td class="num-cell"><bdi>${t.amount ? t.amount.toFixed(4) : "-"}</bdi></td>
+                <td class="num-cell">${priceStr}</td>
+                <td class="num-cell" style="font-weight: 600;">${totalUsdStr}</td>
+                <td class="num-cell" style="color: var(--text-muted);">${costBasisStr}</td>
+                <td class="num-cell" style="color: var(--text-muted);">${feeStr}</td>
+                <td class="num-cell">${pnlDisplay}</td>
+                <td class="num-cell">${pnlPctDisplay}</td>
                 <td><span style="font-family: monospace; font-size: 0.72rem; color: var(--text-muted);" title="${escapeHtml(idDisplay)}">${escapeHtml(shortId)}</span></td>
-                <td><span class="badge-source">${escapeHtml(t.source || "BINANCE")}</span></td>
+                <td>${sourceBadge}</td>
             </tr>
         `;
     });
 
     tbody.innerHTML = html;
+
+    // Reset horizontal scroll to beginning so # and Date are immediately visible!
+    const tblContainer = document.querySelector("#tradeHistoryModal .table-container");
+    if (tblContainer) {
+        tblContainer.scrollLeft = 0;
+    }
 }
 
 function downloadTaxCsv() {
@@ -5315,9 +5332,131 @@ async function executeQuickRestart() {
     }
 }
 
+function openManualDepositModal(defaultYear = 2022) {
+    const modal = document.getElementById("manualDepositModal");
+    if (!modal) return;
+    modal.style.display = "flex";
+    modal.classList.add("active");
+
+    const dtInput = document.getElementById("manDepDatetime");
+    if (dtInput) {
+        if (defaultYear === 2022) {
+            dtInput.value = "2022-01-01T12:00";
+        } else if (!dtInput.value) {
+            const now = new Date();
+            dtInput.value = now.toISOString().slice(0, 16);
+        }
+    }
+    const errEl = document.getElementById("manDepErrorMsg");
+    if (errEl) errEl.style.display = "none";
+}
+
+function closeManualDepositModal() {
+    const modal = document.getElementById("manualDepositModal");
+    if (modal) {
+        modal.style.display = "none";
+        modal.classList.remove("active");
+    }
+}
+
+function calcManDepTotal() {
+    const amt = parseFloat(document.getElementById("manDepAmount")?.value || 0);
+    const price = parseFloat(document.getElementById("manDepPrice")?.value || 0);
+    const totalEl = document.getElementById("manDepTotalUsd");
+    if (totalEl) {
+        const tot = amt * price;
+        totalEl.value = "$" + tot.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+}
+
+async function handleManualDepositSubmit(event) {
+    event.preventDefault();
+    const coin = document.getElementById("manDepCoin")?.value || "USDT";
+    const amount = parseFloat(document.getElementById("manDepAmount")?.value || 0);
+    const price = parseFloat(document.getElementById("manDepPrice")?.value || 0);
+    const dtStr = document.getElementById("manDepDatetime")?.value;
+    const notes = document.getElementById("manDepNotes")?.value || "";
+    const errEl = document.getElementById("manDepErrorMsg");
+    const saveBtn = document.getElementById("saveManDepBtn");
+
+    if (!amount || amount <= 0) {
+        if (errEl) {
+            errEl.textContent = "יש להזין כמות גדולה מ-0";
+            errEl.style.display = "block";
+        }
+        return;
+    }
+
+    let timestamp_ms = Date.now();
+    if (dtStr) {
+        timestamp_ms = new Date(dtStr).getTime();
+    }
+
+    try {
+        if (saveBtn) saveBtn.disabled = true;
+        const res = await fetch("/api/history/manual-deposits", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                coin,
+                amount,
+                price,
+                timestamp_ms,
+                notes
+            })
+        });
+        const data = await res.json();
+        if (saveBtn) saveBtn.disabled = false;
+
+        if (data.success) {
+            showToast(`✅ הפקדת ${amount} ${coin} נשמרה בהצלחה! חישוב המס עודכן.`, "success");
+            closeManualDepositModal();
+            document.getElementById("manualDepositForm")?.reset();
+            calcManDepTotal();
+            fetchTradeHistory(true);
+        } else {
+            if (errEl) {
+                errEl.textContent = data.error || "שגיאה בשמירת הפקדה";
+                errEl.style.display = "block";
+            }
+        }
+    } catch (err) {
+        if (saveBtn) saveBtn.disabled = false;
+        if (errEl) {
+            errEl.textContent = `שגיאת רשת: ${err.message}`;
+            errEl.style.display = "block";
+        }
+    }
+}
+
+async function deleteManualDeposit(depositId) {
+    if (!confirm("האם אתה בטוח שברצונך למחוק הפקדה ידנית זו?")) return;
+    try {
+        const res = await fetch("/api/history/manual-deposits/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: depositId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast("🗑️ הפקדה ידנית נמחקה. חישוב המס עודכן.", "info");
+            fetchTradeHistory(true);
+        } else {
+            showToast("שגיאה במחיקת הפקדה: " + (data.error || ""), "error");
+        }
+    } catch (err) {
+        showToast("שגיאת רשת במחיקה: " + err.message, "error");
+    }
+}
+
 // Global window registration for HTML onclick handlers
 window.openTradeHistoryModal = openTradeHistoryModal;
 window.closeTradeHistoryModal = closeTradeHistoryModal;
+window.openManualDepositModal = openManualDepositModal;
+window.closeManualDepositModal = closeManualDepositModal;
+window.calcManDepTotal = calcManDepTotal;
+window.handleManualDepositSubmit = handleManualDepositSubmit;
+window.deleteManualDeposit = deleteManualDeposit;
 window.selectTaxTimeframe = selectTaxTimeframe;
 window.applyCustomTaxDates = applyCustomTaxDates;
 window.filterTaxByCoin = filterTaxByCoin;

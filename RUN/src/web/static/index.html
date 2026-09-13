@@ -1025,6 +1025,9 @@
 
                         <!-- Export & Refresh Action Buttons -->
                         <div class="tax-actions-right">
+                            <button class="btn btn-sm btn-tax-deposit" id="addManualDepositBtn" onclick="openManualDepositModal()" title="הוסף הפקדה ידנית או יתרת פתיחה היסטורית (למשל מ-2022) לחישוב מדויק של עלות הרכישה ומס הכנסה">
+                                <span>➕</span> <span>הוסף הפקדה / יתרת פתיחה (2022)</span>
+                            </button>
                             <button class="btn btn-primary btn-sm" id="downloadTaxCsvBtn" onclick="downloadTaxCsv()" title="הורד קובץ אקסל/CSV עם כותרות בעברית תואם לדיווח רואה חשבון ומס הכנסה">
                                 <span>📥</span> <span>הורד אקסל/CSV למס הכנסה</span>
                             </button>
@@ -1178,8 +1181,73 @@
                 </div>
             </div>
         </div>
+    <!-- Manual Deposit & Initial Cost Basis Modal (הוספת הפקדה ידנית / יתרת פתיחה) -->
+    <div class="modal-backdrop" id="manualDepositModal" style="z-index: 1000001; display: none;">
+        <div class="modal-content glass shadow-2xl" style="max-width: 520px; direction: rtl; text-align: right;">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.5rem;">📥</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 1.15rem; color: #fbbf24;">הוספת הפקדה / יתרת פתיחה ידנית (למשל מ-2022)</h3>
+                        <p style="margin: 2px 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+                            מאפשר להזין יתרת פתיחה מקורית לצורך שיוך מלא ב-FIFO וחישוב מדויק של מס רווח הון
+                        </p>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeManualDepositModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <form id="manualDepositForm" onsubmit="handleManualDepositSubmit(event)">
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px; color: var(--text-main); font-weight: 600;">מטבע / נכס:</label>
+                        <select id="manDepCoin" class="tax-date-input" style="width: 100%; padding: 8px 12px; font-size: 0.95rem; border-radius: 8px; background: rgba(15,23,42,0.8); color: #fff; border: 1px solid rgba(255,255,255,0.15);" required>
+                            <option value="BTC">BTC - Bitcoin</option>
+                            <option value="ETH">ETH - Ethereum</option>
+                            <option value="SOL">SOL - Solana</option>
+                            <option value="USDT">USDT - Tether</option>
+                            <option value="USDC">USDC - USD Coin</option>
+                            <option value="BNB">BNB - Binance Coin</option>
+                        </select>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem;">
+                        <div>
+                            <label style="display: block; font-size: 0.85rem; margin-bottom: 4px; color: var(--text-main); font-weight: 600;">כמות המטבע:</label>
+                            <input type="number" step="any" id="manDepAmount" class="tax-date-input" style="width: 100%; padding: 8px 12px; font-size: 0.95rem; border-radius: 8px; background: rgba(15,23,42,0.8); color: #fff; border: 1px solid rgba(255,255,255,0.15);" placeholder="למשל: 0.05" required oninput="calcManDepTotal()">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.85rem; margin-bottom: 4px; color: var(--text-main); font-weight: 600;">שער רכישה / שווי ליחידה ($):</label>
+                            <input type="number" step="any" id="manDepPrice" class="tax-date-input" style="width: 100%; padding: 8px 12px; font-size: 0.95rem; border-radius: 8px; background: rgba(15,23,42,0.8); color: #fff; border: 1px solid rgba(255,255,255,0.15);" placeholder="למשל: 30000" required oninput="calcManDepTotal()">
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px; color: var(--text-main); font-weight: 600;">סה"כ שווי / עלות בסיס כוללת ($):</label>
+                        <input type="text" id="manDepTotalUsd" readonly class="tax-date-input" style="width: 100%; padding: 8px 12px; font-size: 0.95rem; font-weight: bold; border-radius: 8px; background: rgba(15,23,42,0.4); color: #38bdf8; border: 1px solid rgba(255,255,255,0.1);" value="$0.00">
+                    </div>
+
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px; color: var(--text-main); font-weight: 600;">תאריך ושעת ההפקדה / הרכישה:</label>
+                        <input type="datetime-local" id="manDepDatetime" class="tax-date-input" style="width: 100%; padding: 8px 12px; font-size: 0.95rem; border-radius: 8px; background: rgba(15,23,42,0.8); color: #fff; border: 1px solid rgba(255,255,255,0.15);" required>
+                        <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 3px;">💡 ניתן לבחור תאריך מ-2022 או מוקדם יותר לעדכון יתרת פתיחה היסטורית.</span>
+                    </div>
+
+                    <div style="margin-bottom: 1rem;">
+                        <label style="display: block; font-size: 0.85rem; margin-bottom: 4px; color: var(--text-main); font-weight: 600;">הערה / מקור (אופציונלי):</label>
+                        <input type="text" id="manDepNotes" class="tax-date-input" style="width: 100%; padding: 8px 12px; font-size: 0.95rem; border-radius: 8px; background: rgba(15,23,42,0.8); color: #fff; border: 1px solid rgba(255,255,255,0.15);" placeholder="למשל: הפקדה מארנק קר / יתרת פתיחה שנת 2022">
+                    </div>
+
+                    <div id="manDepErrorMsg" style="color: #f87171; font-size: 0.85rem; margin-bottom: 0.75rem; display: none;"></div>
+
+                    <div class="modal-footer" style="padding: 0; margin-top: 1.25rem; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" class="btn btn-outline" onclick="closeManualDepositModal()">ביטול</button>
+                        <button type="submit" class="btn btn-primary" id="saveManDepBtn">💾 שמור הפקדה וחשב מחדש</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
-    <script src="app.js?v=33"></script>
+    <script src="app.js?v=34"></script>
 </body>
 </html>
