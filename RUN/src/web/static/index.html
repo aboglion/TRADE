@@ -87,6 +87,10 @@
                         <span>⚡</span> <span class="btn-text">Run Bot Cycle</span>
                     </button>
 
+                    <button class="btn btn-outline btn-tax-history" id="tradeHistoryModalBtn" title="שליפת היסטוריית כל הפעולות במטבעות והפקת דוח למס הכנסה (כל הזמנים / שנה אחרונה)" onclick="openTradeHistoryModal()">
+                        <span>📑</span> <span class="btn-text">היסטוריית פעולות ומס</span>
+                    </button>
+
                     <button class="btn btn-outline" id="refreshBtn" title="Force immediate data refresh" onclick="manualRefresh()">
                         <span>🔄</span> <span class="btn-text">Refresh Data</span>
                     </button>
@@ -235,6 +239,7 @@
                         <span class="card-title">RECENT ORDERS & FILLS</span>
                     </div>
                     <div class="card-header-right" style="display:flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <button class="btn btn-sm btn-outline" id="fullTaxReportBtn" title="שליפת היסטוריית פעולות מלאה מבינאנס ודוח למס הכנסה" onclick="openTradeHistoryModal()">📑 דוח פעולות ומס מלא</button>
                         <button class="btn btn-sm btn-outline" id="copyOrdersBtn" title="Copy order history to clipboard">📋 Copy Orders</button>
                         <button class="btn btn-sm btn-outline" id="clearOrdersBtn" title="Clear orders display">🧹 Clear Orders</button>
                         <span class="badge-count" id="orderCount">0 / 100+</span>
@@ -976,15 +981,187 @@
                 </div>
             </div>
 
-            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button class="btn btn-outline" onclick="closeModeSwitchModal()">ביטול / Cancel</button>
-                <button class="btn btn-primary" id="confirmModeSwitchBtn" onclick="executeModeSwitch()">
-                    <span>🔄</span> <span id="confirmModeBtnText">אשר והחלף מצב</span>
-                </button>
+    <!-- Trade & Tax History Modal (היסטוריית פעולות ומס) -->
+    <div class="modal-backdrop" id="tradeHistoryModal">
+        <div class="modal-content glass shadow-2xl modal-extra-large modal-tax-history">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.8rem;">📑</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 1.25rem;">היסטוריית כל הפעולות במטבעות ודוח למס הכנסה</h3>
+                        <p class="modal-subtitle" style="color: var(--text-muted); font-size: 0.85rem; margin: 2px 0 0 0;">
+                            שליפת היסטוריה מלאה מ-Binance וממערכת הבוט | עוקף את מגבלת השנה של בינאנס | תואם דרישות דיווח מס הכנסה
+                        </p>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeTradeHistoryModal()">&times;</button>
+            </div>
+
+            <div class="modal-body" style="padding: 1.25rem 1.5rem;">
+                <!-- Top Controls & Range Selector Bar -->
+                <div class="tax-controls-container">
+                    <!-- Row 1: Timeframe Range Buttons (מאז ומעולם, שנה אחרונה, etc.) -->
+                    <div class="tax-control-row">
+                        <div class="tax-control-group">
+                            <span class="tax-control-label">📅 טווח תאריכים:</span>
+                            <div class="tree-pill-selector" id="taxTimeframeSelector">
+                                <button class="tree-pill-btn active" data-tf="all" onclick="selectTaxTimeframe('all')">👑 מאז ומעולם (All-Time)</button>
+                                <button class="tree-pill-btn" data-tf="1y" onclick="selectTaxTimeframe('1y')">⏳ שנה אחרונה (Past Year)</button>
+                                <button class="tree-pill-btn" data-tf="2026" onclick="selectTaxTimeframe('2026')">2026 (נוכחי)</button>
+                                <button class="tree-pill-btn" data-tf="2025" onclick="selectTaxTimeframe('2025')">2025</button>
+                                <button class="tree-pill-btn" data-tf="2024" onclick="selectTaxTimeframe('2024')">2024</button>
+                                <button class="tree-pill-btn" data-tf="custom" onclick="selectTaxTimeframe('custom')">🛠️ מותאם אישית</button>
+                            </div>
+                        </div>
+
+                        <!-- Export & Refresh Action Buttons -->
+                        <div class="tax-actions-right">
+                            <button class="btn btn-primary btn-sm" id="downloadTaxCsvBtn" onclick="downloadTaxCsv()" title="הורד קובץ אקסל/CSV עם כותרות בעברית תואם לדיווח רואה חשבון ומס הכנסה">
+                                <span>📥</span> <span>הורד אקסל/CSV למס הכנסה</span>
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="refreshTaxHistoryBtn" onclick="fetchTradeHistory(true)" title="שלוף ורענן נתונים ישירות מ-Binance ומהבוט">
+                                <span>🔄</span> <span>רענן מבינאנס</span>
+                            </button>
+                            <button class="btn btn-outline btn-sm" id="copyTaxDataBtn" onclick="copyTaxHistory()" title="העתק טבלה ללוח">
+                                <span>📋</span> <span>העתק נתונים</span>
+                            </button>
+                            <button class="btn btn-outline btn-sm" onclick="window.print()" title="הדפס או שמור כ-PDF">
+                                <span>🖨️</span> <span>הדפס</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Custom Date Range Row (Visible when "custom" is selected) -->
+                    <div class="tax-custom-range-row" id="taxCustomRangeRow" style="display: none;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <label style="font-size: 0.85rem; color: var(--text-muted);">מתאריך:</label>
+                            <input type="date" id="taxStartDate" class="tax-date-input">
+                            <label style="font-size: 0.85rem; color: var(--text-muted);">עד תאריך:</label>
+                            <input type="date" id="taxEndDate" class="tax-date-input">
+                            <button class="btn btn-sm btn-outline" onclick="applyCustomTaxDates()">סנן לפי תאריכים</button>
+                        </div>
+                    </div>
+
+                    <!-- Row 2: Coin & Side Filters + Search -->
+                    <div class="tax-filter-row">
+                        <div class="tax-control-group">
+                            <span class="tax-control-label">🪙 נכס:</span>
+                            <div class="tree-pill-selector" id="taxCoinSelector">
+                                <button class="tree-pill-btn active" data-coin="ALL" onclick="filterTaxByCoin('ALL')">🌐 כל המטבעות</button>
+                                <button class="tree-pill-btn" data-coin="BTC" onclick="filterTaxByCoin('BTC')">₿ BTC</button>
+                                <button class="tree-pill-btn" data-coin="ETH" onclick="filterTaxByCoin('ETH')">⟠ ETH</button>
+                                <button class="tree-pill-btn" data-coin="SOL" onclick="filterTaxByCoin('SOL')">◎ SOL</button>
+                            </div>
+                        </div>
+
+                        <div class="tax-control-group">
+                            <span class="tax-control-label">⚡ סוג פעולה:</span>
+                            <div class="tree-pill-selector" id="taxSideSelector">
+                                <button class="tree-pill-btn active" data-side="ALL" onclick="filterTaxBySide('ALL')">הכל</button>
+                                <button class="tree-pill-btn" data-side="BUY" onclick="filterTaxBySide('BUY')">🟢 קניות</button>
+                                <button class="tree-pill-btn" data-side="SELL" onclick="filterTaxBySide('SELL')">🔴 מכירות</button>
+                                <button class="tree-pill-btn" data-side="REALIZED_PNL" onclick="filterTaxBySide('REALIZED_PNL')">📈 רווח/הפסד ממומש</button>
+                                <button class="tree-pill-btn" data-side="FEES" onclick="filterTaxBySide('FEES')">🏷️ עמלות ומימון</button>
+                            </div>
+                        </div>
+
+                        <div class="tax-search-group">
+                            <input type="text" id="taxSearchInput" placeholder="🔍 חיפוש לפי מטבע, מזהה, תאריך..." oninput="onTaxSearchInput(this.value)">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Binance Connection & Whitelist Notice Banner -->
+                <div class="tax-status-banner" id="taxStatusBanner">
+                    <div class="tax-banner-icon" id="taxBannerIcon">⏳</div>
+                    <div class="tax-banner-content" id="taxBannerContent">
+                        טוען היסטוריית פעולות...
+                    </div>
+                </div>
+
+                <!-- Tax Summary KPI Metrics Grid -->
+                <div class="tax-kpi-grid">
+                    <div class="tax-kpi-card">
+                        <div class="tax-kpi-title">סה"כ פעולות ועסקאות</div>
+                        <div class="tax-kpi-val" id="taxKpiOperations">0</div>
+                        <div class="tax-kpi-sub" id="taxKpiBuySellRatio">0 קניות | 0 מכירות</div>
+                    </div>
+
+                    <div class="tax-kpi-card">
+                        <div class="tax-kpi-title">מחזור מסחר כולל (USD)</div>
+                        <div class="tax-kpi-val" id="taxKpiTotalVolume">$0.00</div>
+                        <div class="tax-kpi-sub">תמורה ועלויות קנייה ומכירה</div>
+                    </div>
+
+                    <div class="tax-kpi-card highlight-pnl">
+                        <div class="tax-kpi-title">רווח / הפסד הון ממומש</div>
+                        <div class="tax-kpi-val" id="taxKpiRealizedPnl">$0.00</div>
+                        <div class="tax-kpi-sub" id="taxKpiPnlStatus">רווח הון חייב במס / הפסד להעברה</div>
+                    </div>
+
+                    <div class="tax-kpi-card">
+                        <div class="tax-kpi-title">עמלות מסחר ששולמו (USD)</div>
+                        <div class="tax-kpi-val" id="taxKpiTotalFees">$0.00</div>
+                        <div class="tax-kpi-sub" style="color: var(--accent-success, #10b981);">הוצאה מוכרת בניכוי למס</div>
+                    </div>
+
+                    <div class="tax-kpi-card">
+                        <div class="tax-kpi-title">דמי מימון פיוצ'רס (Funding)</div>
+                        <div class="tax-kpi-val" id="taxKpiFundingFees">$0.00</div>
+                        <div class="tax-kpi-sub">עלויות מימון / תקבולי פיוצ'רס</div>
+                    </div>
+                </div>
+
+                <!-- Per-Coin Breakdown Mini Cards -->
+                <div class="tax-per-coin-bar" id="taxPerCoinBar">
+                    <!-- Dynamic coin badges will be rendered here -->
+                </div>
+
+                <!-- Detailed Transactions Table -->
+                <div class="tax-table-container">
+                    <div class="tax-table-header-info">
+                        <span id="taxTableCount">מציג 0 עסקאות</span>
+                        <span style="font-size: 0.8rem; color: var(--text-muted);" id="taxTableTimeRangeNotice">מאז ומעולם</span>
+                    </div>
+                    <div class="table-container" style="max-height: 380px; overflow-y: auto;">
+                        <table class="data-table tax-data-table" id="taxDataTable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>תאריך ושעה</th>
+                                    <th>נכס</th>
+                                    <th>פעולה</th>
+                                    <th>שוק</th>
+                                    <th>כמות</th>
+                                    <th>מחיר ביצוע ($)</th>
+                                    <th>שווי כולל ($)</th>
+                                    <th>עמלה ($)</th>
+                                    <th>רווח/הפסד ($)</th>
+                                    <th>מזהה פקודה / עסקה</th>
+                                    <th>מקור</th>
+                                    <th>סטטוס</th>
+                                </tr>
+                            </thead>
+                            <tbody id="taxTableBody">
+                                <tr><td colspan="13" class="empty-cell">טוען נתוני עסקאות...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                    💡 <strong>הערת מס:</strong> הקובץ מופק בקידוד UTF-8 עם BOM ונפתח ישירות ב-Excel בעברית תקנית.
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-outline" onclick="closeTradeHistoryModal()">סגור (Close)</button>
+                    <button class="btn btn-primary" onclick="downloadTaxCsv()">📥 הורד קובץ CSV למס הכנסה</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=28"></script>
+    <script src="app.js?v=30"></script>
 </body>
 </html>

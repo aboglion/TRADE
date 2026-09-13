@@ -1,0 +1,800 @@
+"""
+Tax & Trade History Service — Comprehensive historical trades & tax reporting.
+
+Retrieves and merges trade execution history from:
+1. Binance REST API (Futures USDT-M & Spot) via CCXT / direct pagination (bypassing the 1-year web UI limitation).
+2. Bot state store (completed & executed orders recorded locally).
+
+Supports:
+- "מאז ומעולם" (All-Time / Inception): from account opening to present.
+- "שנה אחרונה" (Past 1 Year / 365 Days): recent 12 months.
+- Calendar tax years (2024, 2025, 2026) and custom date ranges.
+- Comprehensive Israeli Tax Authority compliant reporting (capital gain/loss, total consideration, allowable fees, per-coin breakdown).
+- Excel/CSV export with UTF-8 BOM encoding for seamless Hebrew display.
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+import logging
+import os
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("bot.services.tax_history")
+
+
+def _get_outbound_ip() -> str:
+    """Helper to detect server outbound IP for Binance whitelisting instructions."""
+    import urllib.request
+    try:
+        req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "TradeBot/1.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.read().decode("utf-8").strip()
+    except Exception:
+        try:
+            req = urllib.request.Request("https://ifconfig.me/ip", headers={"User-Agent": "TradeBot/1.0"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.read().decode("utf-8").strip()
+        except Exception:
+            return "89.139.94.94"
+
+
+class TaxHistoryService:
+    """
+    Centralized service for historical trade extraction and tax calculation.
+    Thread-safe with caching to prevent excessive exchange queries.
+    """
+
+    def __init__(self, state_store: Any = None, config: Any = None):
+        self.state_store = state_store
+        self.config = config
+        self._lock = threading.RLock()
+        self._cache: Dict[str, Any] = {}
+        self._cache_ts: float = 0.0
+        self._cache_ttl_seconds: float = 45.0  # Cache for 45s to protect API limits
+
+    def _get_binance_credentials(self) -> Tuple[str, str]:
+        """Load API credentials safely from environment or .env."""
+        try:
+            from src.utils.env_manager import load_dotenv
+            load_dotenv()
+        except Exception:
+            pass
+
+        key = os.environ.get("BINANCE_API_KEY", "").strip().strip("'\"").strip()
+        secret = os.environ.get("BINANCE_API_SECRET", "").strip().strip("'\"").strip()
+        return key, secret
+
+    def _get_tracked_symbols(self) -> List[str]:
+        """Get all standard symbols configured or tracked by the bot."""
+        symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+        if self.config and hasattr(self.config, "strategy") and hasattr(self.config.strategy, "assets"):
+            for asset_name, asset_conf in self.config.strategy.assets.items():
+                pair = getattr(asset_conf, "pair", f"{asset_name}/USDT")
+                if pair not in symbols:
+                    symbols.append(pair)
+        return symbols
+
+    def fetch_all_history(
+        self,
+        timeframe: str = "all",
+        symbol_filter: str = "ALL",
+        side_filter: str = "ALL",
+        custom_start_ts: Optional[int] = None,
+        custom_end_ts: Optional[int] = None,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Fetch full historical trade records, merge with bot state, and compute tax aggregates.
+
+        Args:
+            timeframe: 'all' (מאז ומעולם), '1y' (שנה אחרונה), '2026', '2025', '2024', or 'custom'.
+            symbol_filter: 'ALL' or specific symbol (e.g. 'BTC/USDT', 'ETH', etc.)
+            side_filter: 'ALL', 'BUY', 'SELL', 'REALIZED_PNL', 'FEES'
+            custom_start_ts: Optional start timestamp in ms.
+            custom_end_ts: Optional end timestamp in ms.
+            force_refresh: If True, bypass internal cache.
+        """
+        now_ms = int(time.time() * 1000)
+        since_ms, until_ms = self._resolve_timeframe(timeframe, now_ms, custom_start_ts, custom_end_ts)
+
+        cache_key = f"{timeframe}_{since_ms}_{until_ms}"
+        with self._lock:
+            if not force_refresh and (time.time() - self._cache_ts < self._cache_ttl_seconds) and cache_key in self._cache:
+                raw_trades, binance_status = self._cache[cache_key]
+            else:
+                raw_trades, binance_status = self._collect_trades(since_ms, until_ms)
+                self._cache[cache_key] = (raw_trades, binance_status)
+                self._cache_ts = time.time()
+
+        # Apply client-side filters (symbol & side)
+        filtered_trades = self._filter_trades(raw_trades, symbol_filter, side_filter)
+
+        # Compute tax aggregates and breakdown
+        summary = self.calculate_tax_summary(filtered_trades)
+
+        return {
+            "timeframe": timeframe,
+            "since_ms": since_ms,
+            "until_ms": until_ms,
+            "binance_status": binance_status,
+            "total_count": len(filtered_trades),
+            "summary": summary,
+            "trades": filtered_trades,
+            "server_ip": _get_outbound_ip(),
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        }
+
+    def _resolve_timeframe(
+        self,
+        timeframe: str,
+        now_ms: int,
+        custom_start_ts: Optional[int] = None,
+        custom_end_ts: Optional[int] = None,
+    ) -> Tuple[int, int]:
+        """Convert timeframe selector into (since_ms, until_ms)."""
+        until_ms = custom_end_ts if custom_end_ts else now_ms
+
+        if timeframe == "all":
+            # מאז ומעולם — All time since account inception (epoch 0)
+            since_ms = 0
+        elif timeframe == "1y":
+            # שנה אחרונה — Past 365 days
+            since_ms = now_ms - (365 * 24 * 3600 * 1000)
+        elif timeframe in ("2026", "2025", "2024", "2023"):
+            year = int(timeframe)
+            dt_start = datetime(year, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+            dt_end = datetime(year, 12, 31, 23, 59, 59, 999000, tzinfo=timezone.utc)
+            since_ms = int(dt_start.timestamp() * 1000)
+            until_ms = min(int(dt_end.timestamp() * 1000), now_ms)
+        elif timeframe == "custom" and custom_start_ts is not None:
+            since_ms = custom_start_ts
+        else:
+            # Default to all-time
+            since_ms = 0
+
+        return since_ms, until_ms
+
+    def _collect_trades(self, since_ms: int, until_ms: int) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Collect and deduplicate trades from both Binance Exchange API and Local Bot State."""
+        binance_trades: List[Dict[str, Any]] = []
+        binance_status: Dict[str, Any] = {
+            "connected": False,
+            "error": None,
+            "futures_trades_count": 0,
+            "spot_trades_count": 0,
+            "income_records_count": 0,
+            "bot_orders_count": 0,
+        }
+
+        api_key, api_secret = self._get_binance_credentials()
+
+        # 1. Fetch from Binance API if keys are provided
+        if api_key and api_secret and api_key not in ("your_api_key_here", ""):
+            try:
+                import ccxt
+                # Setup CCXT exchange instance with adjusted time window
+                exchange = ccxt.binance({
+                    "apiKey": api_key,
+                    "secret": api_secret,
+                    "enableRateLimit": True,
+                    "timeout": 15000,
+                    "options": {
+                        "defaultType": "future",
+                        "adjustForTimeDifference": True,
+                        "recvWindow": 10000,
+                    },
+                })
+
+                # Fetch Futures Trades across symbols
+                symbols = self._get_tracked_symbols()
+                f_trades = self._fetch_binance_futures_trades(exchange, symbols, since_ms, until_ms)
+                binance_trades.extend(f_trades)
+                binance_status["futures_trades_count"] = len(f_trades)
+
+                # Fetch Futures Income (Realized PnL, Commission, Funding Fees)
+                income_records = self._fetch_binance_futures_income(exchange, since_ms, until_ms)
+                binance_trades.extend(income_records)
+                binance_status["income_records_count"] = len(income_records)
+
+                # Fetch Spot Trades
+                spot_trades = self._fetch_binance_spot_trades(api_key, api_secret, symbols, since_ms, until_ms)
+                binance_trades.extend(spot_trades)
+                binance_status["spot_trades_count"] = len(spot_trades)
+
+                binance_status["connected"] = True
+                logger.info(
+                    "Binance API trades fetched: %d futures, %d income, %d spot",
+                    len(f_trades),
+                    len(income_records),
+                    len(spot_trades),
+                )
+
+            except Exception as e:
+                err_msg = str(e)
+                binance_status["connected"] = False
+                binance_status["error"] = err_msg
+                is_auth_err = any(x in err_msg for x in ("-2015", "Invalid API-key", "permissions", "IP"))
+                binance_status["is_auth_or_ip_error"] = is_auth_err
+                logger.warning("Binance historical query encountered: %s", err_msg)
+        else:
+            binance_status["error"] = "No Binance API keys configured in .env"
+
+        # 2. Fetch local bot-recorded orders (always included as ground truth of bot activity)
+        bot_trades = self._fetch_bot_state_orders(since_ms, until_ms)
+        binance_status["bot_orders_count"] = len(bot_trades)
+
+        # 3. Merge & Deduplicate
+        merged = self._merge_and_deduplicate(binance_trades, bot_trades)
+
+        # Sort chronologically descending (newest first for UI inspection)
+        merged.sort(key=lambda t: t.get("timestamp_ms", 0), reverse=True)
+
+        return merged, binance_status
+
+    def _fetch_binance_futures_trades(
+        self,
+        exchange: Any,
+        symbols: List[str],
+        since_ms: int,
+        until_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch USDT-M Futures trades using fromId pagination to bypass 7-day limits.
+        """
+        results: List[Dict[str, Any]] = []
+
+        for sym in symbols:
+            clean_sym = sym.replace("/", "").upper()
+            from_id = 0
+            max_loops = 10  # Up to 10,000 trades per symbol to stay within time budget
+
+            for _ in range(max_loops):
+                try:
+                    params: Dict[str, Any] = {"symbol": clean_sym, "limit": 1000}
+                    if from_id > 0:
+                        params["fromId"] = from_id
+
+                    # Call Binance fapiPrivateGetUserTrades
+                    trades = exchange.fapiPrivateGetUserTrades(params)
+                    if not trades:
+                        break
+
+                    for t in trades:
+                        trade_ts = int(t.get("time", 0))
+                        if trade_ts < since_ms:
+                            continue
+                        if trade_ts > until_ms:
+                            continue
+
+                        price = float(t.get("price", 0.0))
+                        qty = float(t.get("qty", 0.0))
+                        realized_pnl = float(t.get("realizedPnl", 0.0))
+                        commission = float(t.get("commission", 0.0))
+                        is_buyer = bool(t.get("buyer", False))
+                        side = "BUY" if is_buyer else "SELL"
+
+                        dt_utc = datetime.fromtimestamp(trade_ts / 1000.0, tz=timezone.utc)
+                        dt_local = datetime.fromtimestamp(trade_ts / 1000.0)
+
+                        coin_base = sym.split("/")[0] if "/" in sym else sym.replace("USDT", "")
+
+                        results.append({
+                            "id": f"binance_f_{clean_sym}_{t.get('id')}",
+                            "timestamp_ms": trade_ts,
+                            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                            "symbol": sym,
+                            "coin": coin_base,
+                            "side": side,
+                            "action_type": side,
+                            "market": "FUTURES_USDT_M",
+                            "amount": qty,
+                            "price": price,
+                            "total_usd": round(price * qty, 2),
+                            "fee_usd": round(commission, 4),
+                            "fee_currency": t.get("commissionAsset", "USDT"),
+                            "realized_pnl_usd": round(realized_pnl, 4),
+                            "client_order_id": "",
+                            "exchange_order_id": str(t.get("orderId", "")),
+                            "trade_id": str(t.get("id", "")),
+                            "status": "FILLED",
+                            "source": "BINANCE_FUTURES",
+                            "notes": f"Maker: {t.get('maker', False)}",
+                        })
+
+                    if len(trades) < 1000:
+                        break
+                    from_id = int(trades[-1]["id"]) + 1
+
+                except Exception as ex:
+                    logger.debug("Error fetching futures trades for %s: %s", clean_sym, ex)
+                    break
+
+        return results
+
+    def _fetch_binance_futures_income(
+        self,
+        exchange: Any,
+        since_ms: int,
+        until_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch Futures Income history (Realized PnL, Commission, Funding Fees).
+        fapiPrivateGetIncome works across all symbols without mandatory symbol argument.
+        """
+        results: List[Dict[str, Any]] = []
+        try:
+            params: Dict[str, Any] = {"limit": 1000}
+            if since_ms > 0:
+                params["startTime"] = since_ms
+            if until_ms > 0:
+                params["endTime"] = until_ms
+
+            incomes = exchange.fapiPrivateGetIncome(params)
+            for inc in incomes:
+                inc_ts = int(inc.get("time", 0))
+                if inc_ts < since_ms or inc_ts > until_ms:
+                    continue
+
+                income_val = float(inc.get("income", 0.0))
+                inc_type = inc.get("incomeType", "OTHER")
+                raw_sym = inc.get("symbol", "")
+                sym = f"{raw_sym[:3]}/{raw_sym[3:]}" if len(raw_sym) >= 6 else (raw_sym or "GLOBAL")
+                coin_base = raw_sym.replace("USDT", "") if raw_sym else "USDT"
+
+                dt_utc = datetime.fromtimestamp(inc_ts / 1000.0, tz=timezone.utc)
+                dt_local = datetime.fromtimestamp(inc_ts / 1000.0)
+
+                fee_usd = 0.0
+                realized_pnl = 0.0
+                action_type = inc_type
+
+                if inc_type == "REALIZED_PNL":
+                    realized_pnl = income_val
+                    side = "PNL"
+                elif inc_type == "COMMISSION":
+                    fee_usd = abs(income_val)
+                    side = "FEE"
+                elif inc_type == "FUNDING_FEE":
+                    realized_pnl = income_val
+                    side = "FUNDING"
+                else:
+                    side = inc_type
+
+                results.append({
+                    "id": f"income_{inc.get('tranId', '')}",
+                    "timestamp_ms": inc_ts,
+                    "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                    "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                    "symbol": sym,
+                    "coin": coin_base,
+                    "side": side,
+                    "action_type": action_type,
+                    "market": "FUTURES_USDT_M",
+                    "amount": 0.0,
+                    "price": 0.0,
+                    "total_usd": round(abs(income_val), 2),
+                    "fee_usd": round(fee_usd, 4),
+                    "fee_currency": inc.get("asset", "USDT"),
+                    "realized_pnl_usd": round(realized_pnl, 4),
+                    "client_order_id": "",
+                    "exchange_order_id": str(inc.get("tradeId", "")),
+                    "trade_id": str(inc.get("tranId", "")),
+                    "status": "SETTLED",
+                    "source": "BINANCE_INCOME",
+                    "notes": f"Income Type: {inc_type}",
+                })
+        except Exception as ex:
+            logger.debug("Error fetching futures income: %s", ex)
+
+        return results
+
+    def _fetch_binance_spot_trades(
+        self,
+        api_key: str,
+        api_secret: str,
+        symbols: List[str],
+        since_ms: int,
+        until_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """Fetch Spot trades using fromId pagination."""
+        results: List[Dict[str, Any]] = []
+        try:
+            import ccxt
+            spot_ex = ccxt.binance({
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+                "timeout": 10000,
+                "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
+            })
+
+            for sym in symbols:
+                clean_sym = sym.replace("/", "").upper()
+                from_id = 0
+                for _ in range(5):
+                    try:
+                        params: Dict[str, Any] = {"symbol": clean_sym, "limit": 1000}
+                        if from_id > 0:
+                            params["fromId"] = from_id
+
+                        trades = spot_ex.privateGetMyTrades(params)
+                        if not trades:
+                            break
+
+                        for t in trades:
+                            trade_ts = int(t.get("time", 0))
+                            if trade_ts < since_ms or trade_ts > until_ms:
+                                continue
+
+                            price = float(t.get("price", 0.0))
+                            qty = float(t.get("qty", 0.0))
+                            is_buyer = bool(t.get("isBuyer", False))
+                            side = "BUY" if is_buyer else "SELL"
+                            commission = float(t.get("commission", 0.0))
+
+                            dt_utc = datetime.fromtimestamp(trade_ts / 1000.0, tz=timezone.utc)
+                            dt_local = datetime.fromtimestamp(trade_ts / 1000.0)
+                            coin_base = sym.split("/")[0] if "/" in sym else sym.replace("USDT", "")
+
+                            results.append({
+                                "id": f"spot_{clean_sym}_{t.get('id')}",
+                                "timestamp_ms": trade_ts,
+                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                                "symbol": sym,
+                                "coin": coin_base,
+                                "side": side,
+                                "action_type": side,
+                                "market": "SPOT",
+                                "amount": qty,
+                                "price": price,
+                                "total_usd": round(price * qty, 2),
+                                "fee_usd": round(commission, 4),
+                                "fee_currency": t.get("commissionAsset", "USDT"),
+                                "realized_pnl_usd": 0.0,
+                                "client_order_id": "",
+                                "exchange_order_id": str(t.get("orderId", "")),
+                                "trade_id": str(t.get("id", "")),
+                                "status": "FILLED",
+                                "source": "BINANCE_SPOT",
+                                "notes": f"Maker: {t.get('isMaker', False)}",
+                            })
+
+                        if len(trades) < 1000:
+                            break
+                        from_id = int(trades[-1]["id"]) + 1
+                    except Exception as ex_sym:
+                        logger.debug("Spot trade fetch error for %s: %s", clean_sym, ex_sym)
+                        break
+        except Exception as ex:
+            logger.debug("Error initializing spot trade fetcher: %s", ex)
+
+        return results
+
+    def _fetch_bot_state_orders(self, since_ms: int, until_ms: int) -> List[Dict[str, Any]]:
+        """
+        Load local bot state orders from memory or bot_state.json files.
+        """
+        results: List[Dict[str, Any]] = []
+        raw_orders: List[Dict[str, Any]] = []
+
+        # 1. From active state store if available
+        if self.state_store:
+            try:
+                st = self.state_store.load_state()
+                if st and hasattr(st, "completed_orders"):
+                    raw_orders.extend(st.completed_orders)
+            except Exception as e:
+                logger.debug("Could not load from state_store: %s", e)
+
+        # 2. Check canonical state file locations
+        candidate_files = [
+            Path("/home/uns/TRADE/RUN/data/bot_state.json"),
+            Path("/home/uns/TRADE/data/bot_state.json"),
+            Path("RUN/data/bot_state.json"),
+            Path("data/bot_state.json"),
+        ]
+
+        for p in candidate_files:
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    completed = data.get("completed_orders", [])
+                    raw_orders.extend(completed)
+                except Exception as e:
+                    logger.debug("Could not load state from %s: %s", p, e)
+
+        # Deduplicate raw orders by client_order_id
+        seen_order_ids = set()
+        for o in raw_orders:
+            cid = o.get("client_order_id") or str(o.get("timestamp", 0))
+            if cid in seen_order_ids:
+                continue
+            seen_order_ids.add(cid)
+
+            ts = int(o.get("timestamp") or o.get("timestamp_ms") or 0)
+            if ts < since_ms or ts > until_ms:
+                continue
+
+            price = float(o.get("average_price") or o.get("price") or o.get("estimated_price") or 0.0)
+            amount = float(o.get("filled_amount") or o.get("amount") or 0.0)
+            fees = float(o.get("fees") or 0.0)
+            fee_curr = o.get("fee_currency", "USDT")
+            side = str(o.get("side", "BUY")).upper()
+            sym = o.get("symbol", "UNKNOWN")
+            coin = sym.split("/")[0] if "/" in sym else sym.replace("USDT", "")
+            status = str(o.get("status", "FILLED")).upper()
+            total_usd = round(price * amount, 2)
+
+            dt_utc = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc) if ts > 0 else datetime.now(timezone.utc)
+            dt_local = datetime.fromtimestamp(ts / 1000.0) if ts > 0 else datetime.now()
+
+            results.append({
+                "id": cid,
+                "timestamp_ms": ts,
+                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": sym,
+                "coin": coin,
+                "side": side,
+                "action_type": side,
+                "market": "BOT_EXECUTION",
+                "amount": amount,
+                "price": price,
+                "total_usd": total_usd,
+                "fee_usd": round(fees, 4),
+                "fee_currency": fee_curr,
+                "realized_pnl_usd": 0.0,  # Will be mapped or computed
+                "client_order_id": cid,
+                "exchange_order_id": str(o.get("exchange_order_id") or ""),
+                "trade_id": str(o.get("exchange_order_id") or cid),
+                "status": status,
+                "source": "BOT_STATE",
+                "notes": o.get("reason", "Automated Strategy Rebalance"),
+            })
+
+        return results
+
+    def _merge_and_deduplicate(
+        self,
+        binance_trades: List[Dict[str, Any]],
+        bot_trades: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Merge exchange trades and bot trades while eliminating duplicates.
+        """
+        merged: List[Dict[str, Any]] = []
+        seen_keys = set()
+
+        # Add all Binance trades first (highest execution fidelity)
+        for t in binance_trades:
+            k = (t.get("symbol"), t.get("timestamp_ms"), round(t.get("amount", 0), 4), t.get("side"))
+            seen_keys.add(k)
+            if t.get("exchange_order_id"):
+                seen_keys.add(t["exchange_order_id"])
+            if t.get("trade_id"):
+                seen_keys.add(t["trade_id"])
+            merged.append(t)
+
+        # Add bot trades that are not already present from Binance
+        for b in bot_trades:
+            ex_id = b.get("exchange_order_id")
+            if ex_id and ex_id in seen_keys:
+                continue
+
+            k = (b.get("symbol"), b.get("timestamp_ms"), round(b.get("amount", 0), 4), b.get("side"))
+            if k in seen_keys:
+                continue
+
+            seen_keys.add(k)
+            if ex_id:
+                seen_keys.add(ex_id)
+            merged.append(b)
+
+        return merged
+
+    def _filter_trades(
+        self,
+        trades: List[Dict[str, Any]],
+        symbol_filter: str,
+        side_filter: str,
+    ) -> List[Dict[str, Any]]:
+        """Apply symbol and side/action filtering."""
+        filtered = []
+        sym_clean = symbol_filter.upper().strip()
+        side_clean = side_filter.upper().strip()
+
+        for t in trades:
+            # 1. Symbol Filter
+            if sym_clean != "ALL":
+                t_sym = t.get("symbol", "").upper()
+                t_coin = t.get("coin", "").upper()
+                if sym_clean not in (t_sym, t_coin, t_sym.replace("/", "")):
+                    continue
+
+            # 2. Side / Action Filter
+            if side_clean != "ALL":
+                t_side = t.get("side", "").upper()
+                t_act = t.get("action_type", "").upper()
+                if side_clean == "BUY" and t_side != "BUY":
+                    continue
+                elif side_clean == "SELL" and t_side != "SELL":
+                    continue
+                elif side_clean == "REALIZED_PNL" and "PNL" not in (t_side, t_act):
+                    continue
+                elif side_clean == "FEES" and not ("FEE" in t_side or "FUNDING" in t_side or "COMMISSION" in t_act):
+                    continue
+
+            filtered.append(t)
+
+        return filtered
+
+    def calculate_tax_summary(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Calculate comprehensive Israeli Tax Authority metrics for capital gains & operations.
+        """
+        total_operations = len(trades)
+        total_volume_usd = 0.0
+        total_buy_volume_usd = 0.0
+        total_sell_volume_usd = 0.0
+        total_fees_usd = 0.0
+        total_realized_pnl_usd = 0.0
+        total_funding_fees_usd = 0.0
+        total_buy_orders = 0
+        total_sell_orders = 0
+
+        per_coin: Dict[str, Dict[str, Any]] = {}
+
+        for t in trades:
+            coin = t.get("coin") or "OTHER"
+            if coin not in per_coin:
+                per_coin[coin] = {
+                    "coin": coin,
+                    "operations": 0,
+                    "buy_count": 0,
+                    "sell_count": 0,
+                    "buy_volume_usd": 0.0,
+                    "sell_volume_usd": 0.0,
+                    "total_volume_usd": 0.0,
+                    "fees_usd": 0.0,
+                    "realized_pnl_usd": 0.0,
+                }
+
+            c_data = per_coin[coin]
+            c_data["operations"] += 1
+
+            side = t.get("side", "").upper()
+            vol = float(t.get("total_usd", 0.0))
+            fee = float(t.get("fee_usd", 0.0))
+            pnl = float(t.get("realized_pnl_usd", 0.0))
+
+            total_volume_usd += vol
+            total_fees_usd += fee
+            total_realized_pnl_usd += pnl
+            c_data["total_volume_usd"] += vol
+            c_data["fees_usd"] += fee
+            c_data["realized_pnl_usd"] += pnl
+
+            if side == "BUY":
+                total_buy_volume_usd += vol
+                total_buy_orders += 1
+                c_data["buy_volume_usd"] += vol
+                c_data["buy_count"] += 1
+            elif side == "SELL":
+                total_sell_volume_usd += vol
+                total_sell_orders += 1
+                c_data["sell_volume_usd"] += vol
+                c_data["sell_count"] += 1
+            elif "FUNDING" in side:
+                total_funding_fees_usd += pnl
+
+        # Round per-coin aggregates
+        for k, v in per_coin.items():
+            v["buy_volume_usd"] = round(v["buy_volume_usd"], 2)
+            v["sell_volume_usd"] = round(v["sell_volume_usd"], 2)
+            v["total_volume_usd"] = round(v["total_volume_usd"], 2)
+            v["fees_usd"] = round(v["fees_usd"], 4)
+            v["realized_pnl_usd"] = round(v["realized_pnl_usd"], 4)
+
+        return {
+            "total_operations": total_operations,
+            "total_buy_orders": total_buy_orders,
+            "total_sell_orders": total_sell_orders,
+            "total_volume_usd": round(total_volume_usd, 2),
+            "total_buy_volume_usd": round(total_buy_volume_usd, 2),
+            "total_sell_volume_usd": round(total_sell_volume_usd, 2),
+            "total_fees_usd": round(total_fees_usd, 4),
+            "total_funding_fees_usd": round(total_funding_fees_usd, 4),
+            "total_realized_pnl_usd": round(total_realized_pnl_usd, 4),
+            "per_coin_summary": per_coin,
+        }
+
+    def generate_tax_csv(self, timeframe: str, trades: List[Dict[str, Any]], summary: Dict[str, Any]) -> str:
+        """
+        Generate Israeli Tax Authority compliant CSV with UTF-8 BOM encoding for Excel.
+        """
+        output = io.StringIO()
+
+        # Excel UTF-8 BOM is added by the HTTP handler when serving bytes
+        writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+
+        # Header Comments / Summary Block
+        writer.writerow(["# =========================================================================================="])
+        writer.writerow(["# דוח פעולות מסחר ורווחי הון להגשה למס הכנסה — Trading & Capital Gains Tax Report"])
+        writer.writerow([f"# תאריך הפקת הדוח (Generated At): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"])
+        writer.writerow([f"# טווח תאריכים נבחר (Timeframe): {timeframe}"])
+        writer.writerow([f"# סה\"כ פעולות (Total Transactions): {summary.get('total_operations', 0)}"])
+        writer.writerow([f"# מחזור עסקאות כולל (Total Consideration USD): ${summary.get('total_volume_usd', 0.0):,.2f}"])
+        writer.writerow([f"# סה\"כ עמלות מסחר מותרות בניכוי (Allowable Trading Fees USD): ${summary.get('total_fees_usd', 0.0):,.2f}"])
+        writer.writerow([f"# רווח/הפסד הון ממומש נטו (Net Realized Capital PnL USD): ${summary.get('total_realized_pnl_usd', 0.0):,.2f}"])
+        writer.writerow(["# =========================================================================================="])
+        writer.writerow([])
+
+        # Table Column Headers (Bilingual Hebrew & English for Accountants)
+        headers = [
+            "#",
+            "תאריך ושעה UTC (Date UTC)",
+            "תאריך ושעה מקומי (Local Date)",
+            "מטבע בסיס (Asset / Coin)",
+            "צמד מסחר (Symbol)",
+            "סוג פעולה (Action / Side)",
+            "שוק (Market)",
+            "כמות (Quantity)",
+            "מחיר ביצוע ב-$ (Exec Price USD)",
+            "תמורה / שווי כולל ב-$ (Total Value USD)",
+            "עמלות מסחר ב-$ (Fee USD)",
+            "רווח / הפסד ממומש ב-$ (Realized PnL USD)",
+            "מזהה פקודה / עסקה (Order / Trade ID)",
+            "מקור הנתון (Data Source)",
+            "סטטוס (Status)",
+            "הערות / סיבת פקודה (Notes)",
+        ]
+        writer.writerow(headers)
+
+        # Write each trade row
+        for idx, t in enumerate(trades, 1):
+            writer.writerow([
+                idx,
+                t.get("datetime_utc", ""),
+                t.get("datetime_local", ""),
+                t.get("coin", ""),
+                t.get("symbol", ""),
+                t.get("side", ""),
+                t.get("market", ""),
+                f"{t.get('amount', 0.0):.8f}",
+                f"{t.get('price', 0.0):.4f}",
+                f"{t.get('total_usd', 0.0):.2f}",
+                f"{t.get('fee_usd', 0.0):.4f}",
+                f"{t.get('realized_pnl_usd', 0.0):.4f}",
+                t.get("trade_id") or t.get("exchange_order_id") or t.get("id", ""),
+                t.get("source", ""),
+                t.get("status", ""),
+                t.get("notes", ""),
+            ])
+
+        return output.getvalue()
+
+
+# Module-level singleton instance for server integration
+_tax_history_service: Optional[TaxHistoryService] = None
+
+
+def get_tax_history_service(state_store: Any = None, config: Any = None) -> TaxHistoryService:
+    global _tax_history_service
+    if _tax_history_service is None:
+        _tax_history_service = TaxHistoryService(state_store=state_store, config=config)
+    else:
+        if state_store and not _tax_history_service.state_store:
+            _tax_history_service.state_store = state_store
+        if config and not _tax_history_service.config:
+            _tax_history_service.config = config
+    return _tax_history_service

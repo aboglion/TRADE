@@ -3608,5 +3608,375 @@ body {
     margin: 0;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Trade & Tax History Modal (דוח מס והיסטוריית פעולות)
+   ══════════════════════════════════════════════════════════════ */
+.btn-tax-history {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%) !important;
+    border: 1px solid rgba(168, 85, 247, 0.4) !important;
+    color: #c084fc !important;
+    font-weight: 600;
+    transition: all 0.25s ease;
+}
 
+.btn-tax-history:hover {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(168, 85, 247, 0.3) 100%) !important;
+    border-color: #c084fc !important;
+    box-shadow: 0 0 16px rgba(192, 132, 252, 0.35);
+    transform: translateY(-1px);
+}
 
+.modal-tax-history {
+    max-width: 1260px !important;
+    width: 95vw !important;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.tax-controls-container {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.tax-control-row,
+.tax-filter-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.tax-control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.tax-control-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.tax-actions-right {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.tax-custom-range-row {
+    padding: 0.5rem 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+}
+
+.tax-date-input {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-primary);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    outline: none;
+}
+
+.tax-date-input:focus {
+    border-color: var(--accent-primary, #6366f1);
+}
+
+.tax-search-group input {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--text-primary);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.82rem;
+    width: 240px;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.tax-search-group input:focus {
+    width: 280px;
+    border-color: #a855f7;
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
+}
+
+.tax-status-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1rem;
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    font-size: 0.82rem;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    color: #bae6fd;
+}
+
+.tax-status-banner.warning {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fde68a;
+}
+
+.tax-status-banner.success {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #a7f3d0;
+}
+
+.ip-copy-badge {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: monospace;
+    color: #fff;
+    cursor: pointer;
+    margin: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ip-copy-badge:hover {
+    background: rgba(99, 102, 241, 0.4);
+    border-color: #6366f1;
+}
+
+/* Tax KPI Grid */
+.tax-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.tax-kpi-card {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.tax-kpi-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.tax-kpi-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tax-kpi-val {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    font-family: monospace;
+}
+
+.tax-kpi-sub {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.tax-kpi-card.highlight-pnl .tax-kpi-val {
+    color: #38bdf8;
+}
+
+.tax-kpi-card.highlight-pnl.positive .tax-kpi-val {
+    color: var(--accent-success, #10b981);
+}
+
+.tax-kpi-card.highlight-pnl.negative .tax-kpi-val {
+    color: var(--accent-danger, #f43f5e);
+}
+
+/* Per-coin mini summary bar */
+.tax-per-coin-bar {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.coin-chip {
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.coin-chip-sym {
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+.coin-chip-stat {
+    color: var(--text-muted);
+}
+
+.coin-chip-stat strong {
+    color: #e2e8f0;
+}
+
+/* Data Table Styling */
+.tax-table-container {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 0.75rem;
+}
+
+.tax-table-header-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    padding: 0 4px;
+}
+
+.tax-data-table {
+    width: 100%;
+    font-size: 0.78rem;
+}
+
+.tax-data-table th {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 8px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    white-space: nowrap;
+}
+
+.tax-data-table td {
+    padding: 7px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    white-space: nowrap;
+}
+
+.tax-data-table tr:hover td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.badge-side {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.badge-side.badge-buy {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.badge-side.badge-sell {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.badge-side.badge-pnl {
+    background: rgba(56, 189, 248, 0.2);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.badge-side.badge-funding,
+.badge-side.badge-fee {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.badge-source {
+    font-size: 0.7rem;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+}
+
+/* Print Styles for Tax Authority Submission */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    #tradeHistoryModal,
+    #tradeHistoryModal .modal-content,
+    #tradeHistoryModal .modal-body,
+    #tradeHistoryModal * {
+        visibility: visible;
+    }
+    #tradeHistoryModal {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        background: #fff !important;
+        color: #000 !important;
+    }
+    .modal-backdrop {
+        background: none !important;
+    }
+    .modal-content {
+        box-shadow: none !important;
+        border: none !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        color: #000 !important;
+    }
+    .tax-controls-container,
+    .modal-footer,
+    .modal-close,
+    .tax-status-banner {
+        display: none !important;
+    }
+    .tax-kpi-card {
+        background: #f8fafc !important;
+        border: 1px solid #cbd5e1 !important;
+        color: #000 !important;
+    }
+    .tax-data-table {
+        color: #000 !important;
+    }
+    .tax-data-table th,
+    .tax-data-table td {
+        border-color: #cbd5e1 !important;
+        color: #000 !important;
+    }
+}

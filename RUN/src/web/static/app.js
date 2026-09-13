@@ -580,6 +580,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     safeAddListener("conditionsModalBtn", "click", openConditionsModal);
     safeAddListener("closeConditionsModal", "click", closeConditionsModal);
     safeAddListener("closeConditionsModalFooter", "click", closeConditionsModal);
+    // Trade & Tax History modal event listeners
+    safeAddListener("tradeHistoryModalBtn", "click", openTradeHistoryModal);
+    safeAddListener("fullTaxReportBtn", "click", openTradeHistoryModal);
+    safeAddListener("tradeHistoryModal", "click", (e) => {
+        if (e.target.id === "tradeHistoryModal") closeTradeHistoryModal();
+    });
+
     // Mode Switch modal event listeners
     safeAddListener("modeBadge", "click", openSwitchModeModal);
     safeAddListener("modeSwitchModal", "click", (e) => {
@@ -4744,3 +4751,444 @@ window.selectModeTarget = selectModeTarget;
 window.executeModeSwitch = executeModeSwitch;
 
 
+// ══════════════════════════════════════════════════════════════
+// Trade & Tax History System (היסטוריית פעולות ומס)
+// ══════════════════════════════════════════════════════════════
+let currentTaxTimeframe = "all";
+let currentTaxCoin = "ALL";
+let currentTaxSide = "ALL";
+let currentTaxSearchQuery = "";
+let taxTradesList = [];
+let taxSummaryData = {};
+let isTaxLoading = false;
+let taxCustomStartTs = null;
+let taxCustomEndTs = null;
+
+function openTradeHistoryModal() {
+    const modal = document.getElementById("tradeHistoryModal");
+    if (!modal) return;
+    modal.classList.add("active");
+    modal.style.display = "flex";
+
+    // Fetch initial history if empty
+    if (taxTradesList.length === 0) {
+        fetchTradeHistory(false);
+    }
+}
+
+function closeTradeHistoryModal() {
+    const modal = document.getElementById("tradeHistoryModal");
+    if (!modal) return;
+    modal.classList.remove("active");
+    modal.style.display = "none";
+}
+
+function selectTaxTimeframe(tf) {
+    currentTaxTimeframe = tf;
+
+    // Update timeframe pill button states
+    const selector = document.getElementById("taxTimeframeSelector");
+    if (selector) {
+        selector.querySelectorAll(".tree-pill-btn").forEach(btn => {
+            btn.classList.toggle("active", btn.getAttribute("data-tf") === tf);
+        });
+    }
+
+    // Toggle custom date range inputs row
+    const customRow = document.getElementById("taxCustomRangeRow");
+    if (customRow) {
+        customRow.style.display = (tf === "custom") ? "block" : "none";
+    }
+
+    if (tf !== "custom") {
+        taxCustomStartTs = null;
+        taxCustomEndTs = null;
+        fetchTradeHistory(false);
+    }
+}
+
+function applyCustomTaxDates() {
+    const startInput = document.getElementById("taxStartDate");
+    const endInput = document.getElementById("taxEndDate");
+    if (!startInput || !endInput) return;
+
+    if (!startInput.value || !endInput.value) {
+        showToast("⚠️ אנא בחר תאריך התחלה ותאריך סיום", "warning");
+        return;
+    }
+
+    const sDate = new Date(startInput.value + "T00:00:00Z");
+    const eDate = new Date(endInput.value + "T23:59:59Z");
+
+    if (sDate > eDate) {
+        showToast("⚠️ תאריך התחלה אינו יכול להיות מאוחר מתאריך סיום", "warning");
+        return;
+    }
+
+    taxCustomStartTs = sDate.getTime();
+    taxCustomEndTs = eDate.getTime();
+    fetchTradeHistory(false);
+}
+
+function filterTaxByCoin(coin) {
+    currentTaxCoin = coin;
+    const selector = document.getElementById("taxCoinSelector");
+    if (selector) {
+        selector.querySelectorAll(".tree-pill-btn").forEach(btn => {
+            btn.classList.toggle("active", btn.getAttribute("data-coin") === coin);
+        });
+    }
+    fetchTradeHistory(false);
+}
+
+function filterTaxBySide(side) {
+    currentTaxSide = side;
+    const selector = document.getElementById("taxSideSelector");
+    if (selector) {
+        selector.querySelectorAll(".tree-pill-btn").forEach(btn => {
+            btn.classList.toggle("active", btn.getAttribute("data-side") === side);
+        });
+    }
+    fetchTradeHistory(false);
+}
+
+function onTaxSearchInput(val) {
+    currentTaxSearchQuery = (val || "").trim().toLowerCase();
+    renderTaxTableRows();
+}
+
+async function fetchTradeHistory(forceRefresh = false) {
+    if (isTaxLoading) return;
+    isTaxLoading = true;
+
+    const banner = document.getElementById("taxStatusBanner");
+    const bannerContent = document.getElementById("taxBannerContent");
+    const bannerIcon = document.getElementById("taxBannerIcon");
+    const tbody = document.getElementById("taxTableBody");
+
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="13" class="empty-cell" style="padding: 2rem; text-align: center;">🔄 שולף פעולות מ-Binance וממערכת הבוט...</td></tr>';
+    }
+
+    if (banner) {
+        banner.className = "tax-status-banner";
+        if (bannerIcon) bannerIcon.textContent = "⏳";
+        if (bannerContent) bannerContent.textContent = "מתחבר ל-Binance ושולף היסטוריית פעולות...";
+    }
+
+    let url = `/api/history/trades?timeframe=${encodeURIComponent(currentTaxTimeframe)}&symbol=${encodeURIComponent(currentTaxCoin)}&side=${encodeURIComponent(currentTaxSide)}`;
+    if (forceRefresh) {
+        url += "&refresh=1";
+    }
+    if (taxCustomStartTs) {
+        url += `&start_ts=${taxCustomStartTs}`;
+    }
+    if (taxCustomEndTs) {
+        url += `&end_ts=${taxCustomEndTs}`;
+    }
+
+    try {
+        const res = await apiFetch(url);
+        if (!res.ok) {
+            throw new Error(`Server returned HTTP ${res.status}`);
+        }
+        const data = await res.json();
+
+        taxTradesList = data.trades || [];
+        taxSummaryData = data.summary || {};
+
+        // 1. Update Connection Status Banner
+        const bStatus = data.binance_status || {};
+        const sIp = data.server_ip || "89.139.94.94";
+
+        if (bStatus.connected) {
+            if (banner) banner.className = "tax-status-banner success";
+            if (bannerIcon) bannerIcon.textContent = "🟢";
+            if (bannerContent) {
+                bannerContent.innerHTML = `<strong>מחובר ל-Binance בהצלחה!</strong> נשלפו ${bStatus.futures_trades_count || 0} עסקאות פיוצ'רס, ${bStatus.income_records_count || 0} תנועות רווח/הפסד ועמלות, ו-${bStatus.spot_trades_count || 0} עסקאות ספוט, לצד ${bStatus.bot_orders_count || 0} פקודות בוט מקומיות.`;
+            }
+        } else if (bStatus.is_auth_or_ip_error) {
+            if (banner) banner.className = "tax-status-banner warning";
+            if (bannerIcon) bannerIcon.textContent = "⚠️";
+            if (bannerContent) {
+                bannerContent.innerHTML = `
+                    <div>
+                        <strong>בינאנס דורשת אישור IP או הרשאות פיוצ'רס (שגיאה -2015):</strong><br>
+                        מוצגות <strong>${taxTradesList.length}</strong> פקודות שנרשמו מקומית במערכת הבוט. 
+                        כדי למשוך בנוסף עסקאות עבר ישירות מחשבון ה-Exchange: היכנס ל-API Management בבינאנס, סמן <strong>Enable Futures</strong> והוסף את ה-IP של השרת:
+                        <span class="ip-copy-badge" onclick="copyIpAddress('${sIp}')" title="לחץ להעתקת כתובת ה-IP">📋 ${sIp}</span>
+                    </div>
+                `;
+            }
+        } else {
+            if (banner) banner.className = "tax-status-banner";
+            if (bannerIcon) bannerIcon.textContent = "ℹ️";
+            if (bannerContent) {
+                bannerContent.innerHTML = `נטענו <strong>${taxTradesList.length}</strong> פקודות ועסקאות ממערכת הבוט (מצב: ${bStatus.error || "נתונים מקומיים"}).`;
+            }
+        }
+
+        // 2. Render KPI Summary Cards
+        renderTaxKpis(taxSummaryData);
+
+        // 3. Render Per-Coin Summary Bar
+        renderTaxPerCoinBar(taxSummaryData.per_coin_summary || {});
+
+        // 4. Render Table
+        renderTaxTableRows();
+
+        // 5. Update Notice
+        const noticeEl = document.getElementById("taxTableTimeRangeNotice");
+        if (noticeEl) {
+            const tfNames = {
+                "all": "טווח: מאז ומעולם (All-Time)",
+                "1y": "טווח: שנה אחרונה (365 ימים)",
+                "2026": "טווח: שנת מס 2026",
+                "2025": "טווח: שנת מס 2025",
+                "2024": "טווח: שנת מס 2024",
+                "custom": "טווח מותאם אישית"
+            };
+            noticeEl.textContent = tfNames[currentTaxTimeframe] || currentTaxTimeframe;
+        }
+
+    } catch (err) {
+        if (typeof logger !== "undefined" && logger.error) logger.error("Failed to fetch tax trade history:", err);
+        showToast("❌ שגיאה בשליפת היסטוריית פעולות: " + err.message, "error");
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="13" class="empty-cell" style="color: var(--accent-danger, #f43f5e); padding: 2rem;">❌ שגיאה בטעינת נתונים: ${escapeHtml(err.message)}</td></tr>`;
+        }
+    } finally {
+        isTaxLoading = false;
+    }
+}
+
+function renderTaxKpis(summary) {
+    const elOps = document.getElementById("taxKpiOperations");
+    const elRatio = document.getElementById("taxKpiBuySellRatio");
+    const elVol = document.getElementById("taxKpiTotalVolume");
+    const elPnl = document.getElementById("taxKpiRealizedPnl");
+    const elPnlStatus = document.getElementById("taxKpiPnlStatus");
+    const elFees = document.getElementById("taxKpiTotalFees");
+    const elFunding = document.getElementById("taxKpiFundingFees");
+
+    const totalOps = summary.total_operations || 0;
+    const buyOps = summary.total_buy_orders || 0;
+    const sellOps = summary.total_sell_orders || 0;
+    const totalVol = summary.total_volume_usd || 0.0;
+    const totalPnl = summary.total_realized_pnl_usd || 0.0;
+    const totalFees = summary.total_fees_usd || 0.0;
+    const totalFunding = summary.total_funding_fees_usd || 0.0;
+
+    if (elOps) elOps.textContent = totalOps.toLocaleString();
+    if (elRatio) elRatio.textContent = `${buyOps.toLocaleString()} קניות | ${sellOps.toLocaleString()} מכירות`;
+    if (elVol) elVol.textContent = "$" + totalVol.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    
+    if (elPnl) {
+        const sign = totalPnl > 0 ? "+" : "";
+        elPnl.textContent = `${sign}$${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const pnlCard = elPnl.closest(".tax-kpi-card");
+        if (pnlCard) {
+            pnlCard.classList.remove("positive", "negative");
+            if (totalPnl > 0.01) pnlCard.classList.add("positive");
+            else if (totalPnl < -0.01) pnlCard.classList.add("negative");
+        }
+    }
+    if (elPnlStatus) {
+        if (totalPnl > 0.01) {
+            elPnlStatus.textContent = "רווח הון ריאלי חייב במס";
+            elPnlStatus.style.color = "var(--accent-success, #10b981)";
+        } else if (totalPnl < -0.01) {
+            elPnlStatus.textContent = "מגן מס / הפסד להעברה לשנים הבאות";
+            elPnlStatus.style.color = "var(--accent-danger, #f43f5e)";
+        } else {
+            elPnlStatus.textContent = "מאוזן / ללא רווח ממומש";
+            elPnlStatus.style.color = "var(--text-secondary)";
+        }
+    }
+
+    if (elFees) elFees.textContent = "$" + totalFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    if (elFunding) {
+        const fSign = totalFunding > 0 ? "+" : "";
+        elFunding.textContent = `${fSign}$${totalFunding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+    }
+}
+
+function renderTaxPerCoinBar(perCoinSummary) {
+    const bar = document.getElementById("taxPerCoinBar");
+    if (!bar) return;
+
+    const coins = Object.keys(perCoinSummary);
+    if (coins.length === 0) {
+        bar.innerHTML = "";
+        return;
+    }
+
+    let html = "";
+    coins.forEach(coin => {
+        const data = perCoinSummary[coin] || {};
+        const pnl = data.realized_pnl_usd || 0.0;
+        const pnlColor = pnl > 0 ? "var(--accent-success, #10b981)" : (pnl < 0 ? "var(--accent-danger, #f43f5e)" : "var(--text-secondary)");
+        const pnlSign = pnl > 0 ? "+" : "";
+
+        html += `
+            <div class="coin-chip">
+                <span class="coin-chip-sym">${escapeHtml(coin)}</span>
+                <span class="coin-chip-stat">פעולות: <strong>${data.operations || 0}</strong></span>
+                <span class="coin-chip-stat">מחזור: <strong>$${(data.total_volume_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</strong></span>
+                <span class="coin-chip-stat">עמלות: <strong>$${(data.fees_usd || 0).toFixed(2)}</strong></span>
+                <span class="coin-chip-stat" style="color: ${pnlColor};">רווח: <strong>${pnlSign}$${pnl.toFixed(2)}</strong></span>
+            </div>
+        `;
+    });
+
+    bar.innerHTML = html;
+}
+
+function renderTaxTableRows() {
+    const tbody = document.getElementById("taxTableBody");
+    const countEl = document.getElementById("taxTableCount");
+    if (!tbody) return;
+
+    let rows = taxTradesList;
+
+    // Apply Live Search Query
+    if (currentTaxSearchQuery) {
+        rows = rows.filter(t => {
+            const sym = (t.symbol || "").toLowerCase();
+            const coin = (t.coin || "").toLowerCase();
+            const oid = (t.trade_id || t.exchange_order_id || t.client_order_id || "").toLowerCase();
+            const dt = (t.datetime_local || t.datetime_utc || "").toLowerCase();
+            const side = (t.side || "").toLowerCase();
+            return sym.includes(currentTaxSearchQuery) ||
+                   coin.includes(currentTaxSearchQuery) ||
+                   oid.includes(currentTaxSearchQuery) ||
+                   dt.includes(currentTaxSearchQuery) ||
+                   side.includes(currentTaxSearchQuery);
+        });
+    }
+
+    if (countEl) {
+        countEl.textContent = `מציג ${rows.length.toLocaleString()} מתוך ${taxTradesList.length.toLocaleString()} עסקאות`;
+    }
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="13" class="empty-cell" style="padding: 2rem; text-align: center;">לא נמצאו עסקאות התואמות את הסינון הנבחר</td></tr>';
+        return;
+    }
+
+    // Limit visible rows to 500 for rendering performance
+    const displayRows = rows.slice(0, 500);
+
+    let html = "";
+    displayRows.forEach((t, idx) => {
+        const side = (t.side || "BUY").toUpperCase();
+        let sideBadgeClass = "badge-buy";
+        if (side === "SELL") sideBadgeClass = "badge-sell";
+        else if (side.includes("PNL")) sideBadgeClass = "badge-pnl";
+        else if (side.includes("FEE") || side.includes("FUNDING")) sideBadgeClass = "badge-funding";
+
+        const pnl = t.realized_pnl_usd || 0.0;
+        const pnlSign = pnl > 0 ? "+" : "";
+        const pnlColor = pnl > 0 ? "color: var(--accent-success, #10b981);" : (pnl < 0 ? "color: var(--accent-danger, #f43f5e);" : "");
+
+        const idDisplay = t.trade_id || t.exchange_order_id || t.client_order_id || "-";
+        const shortId = idDisplay.length > 18 ? idDisplay.substring(0, 16) + "..." : idDisplay;
+
+        html += `
+            <tr>
+                <td style="color: var(--text-muted); font-size: 0.72rem;">${idx + 1}</td>
+                <td><span style="font-family: monospace; font-size: 0.76rem;">${t.datetime_local || t.datetime_utc || "-"}</span></td>
+                <td><strong style="color: #f1f5f9;">${escapeHtml(t.symbol || t.coin || "-")}</strong></td>
+                <td><span class="badge-side ${sideBadgeClass}">${escapeHtml(side)}</span></td>
+                <td><span class="badge-source">${escapeHtml(t.market || "BOT")}</span></td>
+                <td style="font-family: monospace;">${t.amount ? t.amount.toFixed(4) : "-"}</td>
+                <td style="font-family: monospace;">${t.price ? "$" + t.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
+                <td style="font-family: monospace; font-weight: 600;">${t.total_usd ? "$" + t.total_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
+                <td style="font-family: monospace; color: var(--text-muted);">${t.fee_usd ? "$" + t.fee_usd.toFixed(4) : "$0.00"}</td>
+                <td style="font-family: monospace; font-weight: 700; ${pnlColor}">${pnl !== 0 ? pnlSign + "$" + pnl.toFixed(2) : "-"}</td>
+                <td><span style="font-family: monospace; font-size: 0.72rem; color: var(--text-muted);" title="${escapeHtml(idDisplay)}">${escapeHtml(shortId)}</span></td>
+                <td><span class="badge-source">${escapeHtml(t.source || "BOT")}</span></td>
+                <td><span style="font-size: 0.72rem; color: #a7f3d0;">${escapeHtml(t.status || "FILLED")}</span></td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = html;
+}
+
+function downloadTaxCsv() {
+    let url = `/api/history/download?timeframe=${encodeURIComponent(currentTaxTimeframe)}&symbol=${encodeURIComponent(currentTaxCoin)}&side=${encodeURIComponent(currentTaxSide)}`;
+    if (taxCustomStartTs) url += `&start_ts=${taxCustomStartTs}`;
+    if (taxCustomEndTs) url += `&end_ts=${taxCustomEndTs}`;
+
+    showToast("📥 מפיק קובץ Excel / CSV למס הכנסה...", "info");
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `binance_tax_report_${currentTaxTimeframe}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function copyTaxHistory() {
+    if (taxTradesList.length === 0) {
+        showToast("⚠️ אין נתונים להעתקה", "warning");
+        return;
+    }
+
+    const headers = ["תאריך ושעה", "מטבע", "פעולה", "שוק", "כמות", "מחיר ביצוע", "שווי כולל", "עמלה", "רווח/הפסד", "מזהה", "מקור"];
+    const rows = taxTradesList.map(t => [
+        t.datetime_local || t.datetime_utc || "",
+        t.symbol || t.coin || "",
+        t.side || "",
+        t.market || "",
+        t.amount || 0,
+        t.price || 0,
+        t.total_usd || 0,
+        t.fee_usd || 0,
+        t.realized_pnl_usd || 0,
+        t.trade_id || t.exchange_order_id || t.id || "",
+        t.source || ""
+    ]);
+
+    const tsv = [headers.join("\t"), ...rows.map(r => r.join("\t"))].join("\n");
+    navigator.clipboard.writeText(tsv).then(() => {
+        showToast(`📋 הועתקו ${taxTradesList.length} עסקאות ללוח (מותאם להדבקה באקסל וב-Sheets)!`, "success");
+    }).catch(err => {
+        showToast("❌ שגיאה בהעתקה ללוח: " + err, "error");
+    });
+}
+
+function copyIpAddress(ip) {
+    if (!ip) return;
+    navigator.clipboard.writeText(ip).then(() => {
+        showToast(`📋 כתובת IP ${ip} הועתקה ללוח!`, "success");
+    }).catch(() => {
+        showToast(`IP: ${ip}`, "info");
+    });
+}
+
+// Global window registration for HTML onclick handlers
+window.openTradeHistoryModal = openTradeHistoryModal;
+window.closeTradeHistoryModal = closeTradeHistoryModal;
+window.selectTaxTimeframe = selectTaxTimeframe;
+window.applyCustomTaxDates = applyCustomTaxDates;
+window.filterTaxByCoin = filterTaxByCoin;
+window.filterTaxBySide = filterTaxBySide;
+window.onTaxSearchInput = onTaxSearchInput;
+window.fetchTradeHistory = fetchTradeHistory;
+window.downloadTaxCsv = downloadTaxCsv;
+window.copyTaxHistory = copyTaxHistory;
+window.copyIpAddress = copyIpAddress;
+
+// Add backdrop and Esc key click handler
+document.addEventListener("DOMContentLoaded", () => {
+    const modal = document.getElementById("tradeHistoryModal");
+    if (modal) {
+        modal.addEventListener("click", (e) => {
+            if (e.target === modal) {
+                closeTradeHistoryModal();
+            }
+        });
+    }
+});

@@ -356,6 +356,10 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_test_binance()
         elif clean_api_path in ("/api/keys", "/api/api_keys"):
             self._handle_get_keys()
+        elif clean_api_path in ("/api/history/trades", "/api/trades/history", "/api/tax_report"):
+            self._handle_tax_history()
+        elif clean_api_path in ("/api/history/download", "/api/tax_report/download"):
+            self._handle_download_tax_report()
         elif clean_path.startswith("/api/"):
             self._send_json({"error": f"API endpoint '{clean_path}' not found"}, status=404)
         else:
@@ -844,6 +848,98 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             "completed": state.completed_orders[-1000:],  # Return up to 1000 completed orders
         }
         self._send_json(data)
+
+    def _handle_tax_history(self) -> None:
+        try:
+            import urllib.parse
+            from src.services.tax_history_service import get_tax_history_service
+
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+
+            timeframe = params.get("timeframe", ["all"])[0]
+            symbol_filter = params.get("symbol", ["ALL"])[0]
+            side_filter = params.get("side", ["ALL"])[0]
+            force_refresh = params.get("refresh", ["0"])[0] in ("1", "true", "yes")
+
+            custom_start_ts = None
+            custom_end_ts = None
+            if "start_ts" in params:
+                try:
+                    custom_start_ts = int(params["start_ts"][0])
+                except (ValueError, TypeError):
+                    pass
+            if "end_ts" in params:
+                try:
+                    custom_end_ts = int(params["end_ts"][0])
+                except (ValueError, TypeError):
+                    pass
+
+            svc = get_tax_history_service(self.state_store, self.config)
+            data = svc.fetch_all_history(
+                timeframe=timeframe,
+                symbol_filter=symbol_filter,
+                side_filter=side_filter,
+                custom_start_ts=custom_start_ts,
+                custom_end_ts=custom_end_ts,
+                force_refresh=force_refresh,
+            )
+            self._send_json(data)
+        except Exception as e:
+            logger.error("Failed to fetch tax trade history: %s", e)
+            self._send_json({"error": f"Failed to fetch trade history: {e}"}, status=500)
+
+    def _handle_download_tax_report(self) -> None:
+        try:
+            import urllib.parse
+            from src.services.tax_history_service import get_tax_history_service
+
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+
+            timeframe = params.get("timeframe", ["all"])[0]
+            symbol_filter = params.get("symbol", ["ALL"])[0]
+            side_filter = params.get("side", ["ALL"])[0]
+
+            custom_start_ts = None
+            custom_end_ts = None
+            if "start_ts" in params:
+                try:
+                    custom_start_ts = int(params["start_ts"][0])
+                except (ValueError, TypeError):
+                    pass
+            if "end_ts" in params:
+                try:
+                    custom_end_ts = int(params["end_ts"][0])
+                except (ValueError, TypeError):
+                    pass
+
+            svc = get_tax_history_service(self.state_store, self.config)
+            data = svc.fetch_all_history(
+                timeframe=timeframe,
+                symbol_filter=symbol_filter,
+                side_filter=side_filter,
+                custom_start_ts=custom_start_ts,
+                custom_end_ts=custom_end_ts,
+                force_refresh=False,
+            )
+
+            csv_text = svc.generate_tax_csv(timeframe, data.get("trades", []), data.get("summary", {}))
+            
+            # UTF-8 BOM for Excel compatibility
+            content = b"\xef\xbb\xbf" + csv_text.encode("utf-8")
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"binance_tax_report_{timeframe}_{now_str}.csv"
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            logger.error("Failed to download tax report: %s", e)
+            self._send_json({"error": f"Failed to download tax report: {e}"}, status=500)
 
     def _get_active_log_path(self) -> Path:
         candidate_paths = []
