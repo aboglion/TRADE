@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=32">
+    <link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
     <div class="ambient-glow bg-glow-1"></div>
@@ -1069,6 +1069,8 @@
                                 <button class="tree-pill-btn active" data-side="ALL" onclick="filterTaxBySide('ALL')">הכל</button>
                                 <button class="tree-pill-btn" data-side="BUY" onclick="filterTaxBySide('BUY')">🟢 קניות</button>
                                 <button class="tree-pill-btn" data-side="SELL" onclick="filterTaxBySide('SELL')">🔴 מכירות</button>
+                                <button class="tree-pill-btn" data-side="DEPOSIT" onclick="filterTaxBySide('DEPOSIT')">📥 הפקדות</button>
+                                <button class="tree-pill-btn" data-side="WITHDRAW" onclick="filterTaxBySide('WITHDRAW')">📤 משיכות</button>
                                 <button class="tree-pill-btn" data-side="REALIZED_PNL" onclick="filterTaxBySide('REALIZED_PNL')">📈 רווח/הפסד ממומש</button>
                                 <button class="tree-pill-btn" data-side="FEES" onclick="filterTaxBySide('FEES')">🏷️ עמלות ומימון</button>
                             </div>
@@ -1097,9 +1099,9 @@
                     </div>
 
                     <div class="tax-kpi-card">
-                        <div class="tax-kpi-title">מחזור מסחר כולל (USD)</div>
+                        <div class="tax-kpi-title">מחזור מכירות / תמורה ($)</div>
                         <div class="tax-kpi-val" id="taxKpiTotalVolume">$0.00</div>
-                        <div class="tax-kpi-sub">תמורה ועלויות קנייה ומכירה</div>
+                        <div class="tax-kpi-sub">תמורה ברוטו ממומשת לצורכי מס</div>
                     </div>
 
                     <div class="tax-kpi-card highlight-pnl">
@@ -1109,15 +1111,21 @@
                     </div>
 
                     <div class="tax-kpi-card">
-                        <div class="tax-kpi-title">עמלות מסחר ששולמו (USD)</div>
+                        <div class="tax-kpi-title">אומדן מס 25% / מגן מס</div>
+                        <div class="tax-kpi-val" id="taxKpiEstimatedTax">$0.00</div>
+                        <div class="tax-kpi-sub" id="taxKpiEstimatedTaxSub">לפי סעיף 91 לפקודת מס הכנסה</div>
+                    </div>
+
+                    <div class="tax-kpi-card">
+                        <div class="tax-kpi-title">עמלות מסחר מותרות בניכוי</div>
                         <div class="tax-kpi-val" id="taxKpiTotalFees">$0.00</div>
                         <div class="tax-kpi-sub" style="color: var(--accent-success, #10b981);">הוצאה מוכרת בניכוי למס</div>
                     </div>
 
                     <div class="tax-kpi-card">
-                        <div class="tax-kpi-title">דמי מימון פיוצ'רס (Funding)</div>
-                        <div class="tax-kpi-val" id="taxKpiFundingFees">$0.00</div>
-                        <div class="tax-kpi-sub">עלויות מימון / תקבולי פיוצ'רס</div>
+                        <div class="tax-kpi-title">הפקדות ומשיכות (Net Flow)</div>
+                        <div class="tax-kpi-val" id="taxKpiDepositsWithdrawals">$0.00</div>
+                        <div class="tax-kpi-sub" id="taxKpiDepWithRatio">0 הפקדות | 0 משיכות</div>
                     </div>
                 </div>
 
@@ -1132,7 +1140,7 @@
                         <span id="taxTableCount">מציג 0 עסקאות</span>
                         <span style="font-size: 0.8rem; color: var(--text-muted);" id="taxTableTimeRangeNotice">מאז ומעולם</span>
                     </div>
-                    <div class="table-container" style="max-height: 380px; overflow-y: auto;">
+                    <div class="table-container" style="max-height: 420px; overflow-y: auto; position: relative;">
                         <table class="data-table tax-data-table" id="taxDataTable">
                             <thead>
                                 <tr>
@@ -1142,17 +1150,18 @@
                                     <th>פעולה</th>
                                     <th>שוק</th>
                                     <th>כמות</th>
-                                    <th>מחיר ביצוע ($)</th>
-                                    <th>שווי כולל ($)</th>
+                                    <th>מחיר ($)</th>
+                                    <th>תמורה / שווי ($)</th>
+                                    <th>עלות רכישה ($)</th>
                                     <th>עמלה ($)</th>
-                                    <th>רווח/הפסד ($)</th>
-                                    <th>מזהה פקודה / עסקה</th>
-                                    <th>מקור</th>
-                                    <th>סטטוס</th>
+                                    <th>רווח/הפסד נטו ($)</th>
+                                    <th>תשואה (%)</th>
+                                    <th>מזהה / TxID</th>
+                                    <th>מקור וסטטוס</th>
                                 </tr>
                             </thead>
                             <tbody id="taxTableBody">
-                                <tr><td colspan="13" class="empty-cell">טוען נתוני עסקאות...</td></tr>
+                                <tr><td colspan="14" class="empty-cell">טוען נתוני עסקאות...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1161,7 +1170,7 @@
 
             <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                 <div style="font-size: 0.8rem; color: var(--text-muted);">
-                    💡 <strong>הערת מס:</strong> הקובץ מופק בקידוד UTF-8 עם BOM ונפתח ישירות ב-Excel בעברית תקנית.
+                    💡 <strong>הערת מס:</strong> חישוב רווח הון מבוצע לפי שיטת FIFO (First-In First-Out) בהתאם לסעיפים 88-91 לפקודת מס הכנסה.
                 </div>
                 <div style="display: flex; gap: 10px;">
                     <button class="btn btn-outline" onclick="closeTradeHistoryModal()">סגור (Close)</button>
@@ -1171,6 +1180,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=32"></script>
+    <script src="app.js?v=33"></script>
 </body>
 </html>

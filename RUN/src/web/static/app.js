@@ -5003,16 +5003,26 @@ function renderTaxKpis(summary) {
     const elVol = document.getElementById("taxKpiTotalVolume");
     const elPnl = document.getElementById("taxKpiRealizedPnl");
     const elPnlStatus = document.getElementById("taxKpiPnlStatus");
+    const elEstTax = document.getElementById("taxKpiEstimatedTax");
+    const elEstTaxSub = document.getElementById("taxKpiEstimatedTaxSub");
     const elFees = document.getElementById("taxKpiTotalFees");
-    const elFunding = document.getElementById("taxKpiFundingFees");
+    const elDepWith = document.getElementById("taxKpiDepositsWithdrawals");
+    const elDepWithRatio = document.getElementById("taxKpiDepWithRatio");
 
     const totalOps = summary.total_operations || 0;
     const buyOps = summary.total_buy_orders || 0;
     const sellOps = summary.total_sell_orders || 0;
-    const totalVol = summary.total_volume_usd || 0.0;
+    const sellVol = summary.total_sell_volume_usd || 0.0;
+    const totalVol = sellVol > 0 ? sellVol : (summary.total_volume_usd || 0.0);
     const totalPnl = summary.total_realized_pnl_usd || 0.0;
+    const estTax = summary.estimated_tax_usd || 0.0;
+    const lossCarry = summary.tax_loss_carryforward_usd || 0.0;
     const totalFees = summary.total_fees_usd || 0.0;
-    const totalFunding = summary.total_funding_fees_usd || 0.0;
+    const depUsd = summary.total_deposits_usd || 0.0;
+    const withUsd = summary.total_withdrawals_usd || 0.0;
+    const depCount = summary.total_deposits_count || 0;
+    const withCount = summary.total_withdrawals_count || 0;
+    const netFlow = depUsd - withUsd;
 
     if (elOps) elOps.textContent = totalOps.toLocaleString();
     if (elRatio) elRatio.textContent = `${buyOps.toLocaleString()} קניות | ${sellOps.toLocaleString()} מכירות`;
@@ -5030,10 +5040,10 @@ function renderTaxKpis(summary) {
     }
     if (elPnlStatus) {
         if (totalPnl > 0.01) {
-            elPnlStatus.textContent = "רווח הון ריאלי חייב במס";
+            elPnlStatus.textContent = "רווח הון ריאלי נטו (חייב במס)";
             elPnlStatus.style.color = "var(--accent-success, #10b981)";
         } else if (totalPnl < -0.01) {
-            elPnlStatus.textContent = "מגן מס / הפסד להעברה לשנים הבאות";
+            elPnlStatus.textContent = "מגן מס / הפסד הון להעברה לשנים הבאות";
             elPnlStatus.style.color = "var(--accent-danger, #f43f5e)";
         } else {
             elPnlStatus.textContent = "מאוזן / ללא רווח ממומש";
@@ -5041,10 +5051,36 @@ function renderTaxKpis(summary) {
         }
     }
 
+    if (elEstTax) {
+        if (estTax > 0.01) {
+            elEstTax.textContent = "$" + estTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            elEstTax.style.color = "#fbbf24";
+        } else if (lossCarry > 0.01) {
+            elEstTax.textContent = `-$${lossCarry.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            elEstTax.style.color = "var(--accent-success, #10b981)";
+        } else {
+            elEstTax.textContent = "$0.00";
+            elEstTax.style.color = "var(--text-primary)";
+        }
+    }
+    if (elEstTaxSub) {
+        if (estTax > 0.01) {
+            elEstTaxSub.textContent = "חבות מס רווחי הון מוערכת (25%)";
+        } else if (lossCarry > 0.01) {
+            elEstTaxSub.textContent = "צבירת מגן מס מוכר בניכוי";
+        } else {
+            elEstTaxSub.textContent = "לפי סעיף 91 לפקודת מס הכנסה";
+        }
+    }
+
     if (elFees) elFees.textContent = "$" + totalFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-    if (elFunding) {
-        const fSign = totalFunding > 0 ? "+" : "";
-        elFunding.textContent = `${fSign}$${totalFunding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+    
+    if (elDepWith) {
+        const flowSign = netFlow > 0 ? "+" : "";
+        elDepWith.textContent = `${flowSign}$${netFlow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    if (elDepWithRatio) {
+        elDepWithRatio.textContent = `הופקדו $${depUsd.toFixed(0)} (${depCount}) | נמשכו $${withUsd.toFixed(0)} (${withCount})`;
     }
 }
 
@@ -5069,9 +5105,9 @@ function renderTaxPerCoinBar(perCoinSummary) {
             <div class="coin-chip">
                 <span class="coin-chip-sym">${escapeHtml(coin)}</span>
                 <span class="coin-chip-stat">פעולות: <strong>${data.operations || 0}</strong></span>
-                <span class="coin-chip-stat">מחזור: <strong>$${(data.total_volume_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</strong></span>
+                <span class="coin-chip-stat">מחזור מכירות: <strong>$${(data.sell_volume_usd || data.total_volume_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</strong></span>
                 <span class="coin-chip-stat">עמלות: <strong>$${(data.fees_usd || 0).toFixed(2)}</strong></span>
-                <span class="coin-chip-stat" style="color: ${pnlColor};">רווח: <strong>${pnlSign}$${pnl.toFixed(2)}</strong></span>
+                <span class="coin-chip-stat" style="color: ${pnlColor}; font-weight: 700;">רווח/הפסד: <strong>${pnlSign}$${pnl.toFixed(2)}</strong></span>
             </div>
         `;
     });
@@ -5094,11 +5130,13 @@ function renderTaxTableRows() {
             const oid = (t.trade_id || t.exchange_order_id || t.client_order_id || "").toLowerCase();
             const dt = (t.datetime_local || t.datetime_utc || "").toLowerCase();
             const side = (t.side || "").toLowerCase();
+            const notes = (t.notes || "").toLowerCase();
             return sym.includes(currentTaxSearchQuery) ||
                    coin.includes(currentTaxSearchQuery) ||
                    oid.includes(currentTaxSearchQuery) ||
                    dt.includes(currentTaxSearchQuery) ||
-                   side.includes(currentTaxSearchQuery);
+                   side.includes(currentTaxSearchQuery) ||
+                   notes.includes(currentTaxSearchQuery);
         });
     }
 
@@ -5107,7 +5145,7 @@ function renderTaxTableRows() {
     }
 
     if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" class="empty-cell" style="padding: 2rem; text-align: center;">לא נמצאו עסקאות התואמות את הסינון הנבחר</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="14" class="empty-cell" style="padding: 2rem; text-align: center;">לא נמצאו עסקאות התואמות את הסינון הנבחר</td></tr>';
         return;
     }
 
@@ -5118,32 +5156,64 @@ function renderTaxTableRows() {
     displayRows.forEach((t, idx) => {
         const side = (t.side || "BUY").toUpperCase();
         let sideBadgeClass = "badge-buy";
-        if (side === "SELL") sideBadgeClass = "badge-sell";
-        else if (side.includes("PNL")) sideBadgeClass = "badge-pnl";
-        else if (side.includes("FEE") || side.includes("FUNDING")) sideBadgeClass = "badge-funding";
+        let sideHebrew = "קנייה";
+
+        if (side === "SELL") {
+            sideBadgeClass = "badge-sell";
+            sideHebrew = "מכירה";
+        } else if (side === "DEPOSIT") {
+            sideBadgeClass = "badge-deposit";
+            sideHebrew = "📥 הפקדה";
+        } else if (side === "WITHDRAW") {
+            sideBadgeClass = "badge-withdraw";
+            sideHebrew = "📤 משיכה";
+        } else if (side.includes("PNL")) {
+            sideBadgeClass = "badge-pnl";
+            sideHebrew = "רווח הון";
+        } else if (side.includes("FEE") || side.includes("FUNDING")) {
+            sideBadgeClass = "badge-funding";
+            sideHebrew = "עמלה/מימון";
+        }
 
         const pnl = t.realized_pnl_usd || 0.0;
-        const pnlSign = pnl > 0 ? "+" : "";
-        const pnlColor = pnl > 0 ? "color: var(--accent-success, #10b981);" : (pnl < 0 ? "color: var(--accent-danger, #f43f5e);" : "");
+        const pnlPct = t.realized_pnl_pct || 0.0;
+        let pnlDisplay = "-";
+        let pnlPctDisplay = "-";
+        let pnlColor = "color: var(--text-muted);";
 
+        if (side === "SELL" || (pnl !== 0.0 && side !== "BUY" && side !== "DEPOSIT")) {
+            const pnlSign = pnl > 0 ? "+" : "";
+            pnlDisplay = `${pnlSign}$${pnl.toFixed(2)}`;
+            pnlPctDisplay = `${pnlSign}${pnlPct.toFixed(1)}%`;
+            pnlColor = pnl > 0 ? "color: var(--accent-success, #10b981); font-weight: 700;" : (pnl < 0 ? "color: var(--accent-danger, #f43f5e); font-weight: 700;" : "");
+        } else if (side === "BUY") {
+            pnlDisplay = '<span style="color: var(--text-muted); font-size: 0.72rem;">רכישה (עלות)</span>';
+        } else if (side === "DEPOSIT") {
+            pnlDisplay = '<span style="color: #38bdf8; font-size: 0.72rem;">הפקדה</span>';
+        } else if (side === "WITHDRAW") {
+            pnlDisplay = '<span style="color: #fb923c; font-size: 0.72rem;">משיכה</span>';
+        }
+
+        const costBasis = t.cost_basis_usd ? "$" + t.cost_basis_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-";
         const idDisplay = t.trade_id || t.exchange_order_id || t.client_order_id || "-";
-        const shortId = idDisplay.length > 18 ? idDisplay.substring(0, 16) + "..." : idDisplay;
+        const shortId = idDisplay.length > 16 ? idDisplay.substring(0, 14) + "..." : idDisplay;
 
         html += `
             <tr>
                 <td style="color: var(--text-muted); font-size: 0.72rem;">${idx + 1}</td>
                 <td><span style="font-family: monospace; font-size: 0.76rem;">${t.datetime_local || t.datetime_utc || "-"}</span></td>
                 <td><strong style="color: #f1f5f9;">${escapeHtml(t.symbol || t.coin || "-")}</strong></td>
-                <td><span class="badge-side ${sideBadgeClass}">${escapeHtml(side)}</span></td>
-                <td><span class="badge-source">${escapeHtml(t.market || "BOT")}</span></td>
-                <td style="font-family: monospace;">${t.amount ? t.amount.toFixed(4) : "-"}</td>
-                <td style="font-family: monospace;">${t.price ? "$" + t.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
-                <td style="font-family: monospace; font-weight: 600;">${t.total_usd ? "$" + t.total_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
-                <td style="font-family: monospace; color: var(--text-muted);">${t.fee_usd ? "$" + t.fee_usd.toFixed(4) : "$0.00"}</td>
-                <td style="font-family: monospace; font-weight: 700; ${pnlColor}">${pnl !== 0 ? pnlSign + "$" + pnl.toFixed(2) : "-"}</td>
+                <td><span class="badge-side ${sideBadgeClass}">${escapeHtml(sideHebrew)}</span></td>
+                <td><span class="badge-source">${escapeHtml(t.market || "SPOT")}</span></td>
+                <td class="num-cell">${t.amount ? t.amount.toFixed(4) : "-"}</td>
+                <td class="num-cell">${t.price ? "$" + t.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
+                <td class="num-cell" style="font-weight: 600;">${t.total_usd ? "$" + t.total_usd.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-"}</td>
+                <td class="num-cell" style="color: var(--text-muted);">${costBasis}</td>
+                <td class="num-cell" style="color: var(--text-muted);">${t.fee_usd ? "$" + t.fee_usd.toFixed(4) : "$0.00"}</td>
+                <td class="num-cell" style="${pnlColor}">${pnlDisplay}</td>
+                <td class="num-cell" style="${pnlColor}">${pnlPctDisplay}</td>
                 <td><span style="font-family: monospace; font-size: 0.72rem; color: var(--text-muted);" title="${escapeHtml(idDisplay)}">${escapeHtml(shortId)}</span></td>
-                <td><span class="badge-source">${escapeHtml(t.source || "BOT")}</span></td>
-                <td><span style="font-size: 0.72rem; color: #a7f3d0;">${escapeHtml(t.status || "FILLED")}</span></td>
+                <td><span class="badge-source">${escapeHtml(t.source || "BINANCE")}</span></td>
             </tr>
         `;
     });
@@ -5171,19 +5241,39 @@ function copyTaxHistory() {
         return;
     }
 
-    const headers = ["תאריך ושעה", "מטבע", "פעולה", "שוק", "כמות", "מחיר ביצוע", "שווי כולל", "עמלה", "רווח/הפסד", "מזהה", "מקור"];
+    const headers = [
+        "תאריך ושעה",
+        "נכס",
+        "צמד",
+        "פעולה",
+        "שוק",
+        "כמות",
+        "מחיר ביצוע ($)",
+        "תמורה / שווי ($)",
+        "עלות רכישה ($)",
+        "עמלה ($)",
+        "רווח/הפסד נטו ($)",
+        "תשואה (%)",
+        "מזהה / TxID",
+        "מקור הנתון",
+        "סטטוס"
+    ];
     const rows = taxTradesList.map(t => [
         t.datetime_local || t.datetime_utc || "",
-        t.symbol || t.coin || "",
+        t.coin || "",
+        t.symbol || "",
         t.side || "",
         t.market || "",
         t.amount || 0,
         t.price || 0,
         t.total_usd || 0,
+        t.cost_basis_usd || 0,
         t.fee_usd || 0,
         t.realized_pnl_usd || 0,
+        t.realized_pnl_pct ? `${t.realized_pnl_pct}%` : "-",
         t.trade_id || t.exchange_order_id || t.id || "",
-        t.source || ""
+        t.source || "",
+        t.status || ""
     ]);
 
     const tsv = [headers.join("\t"), ...rows.map(r => r.join("\t"))].join("\n");

@@ -208,12 +208,19 @@ class TaxHistoryService:
                 binance_trades.extend(spot_trades)
                 binance_status["spot_trades_count"] = len(spot_trades)
 
+                # Fetch Deposits & Withdrawals (Crypto & Fiat)
+                dep_withdraw = self._fetch_binance_deposits_and_withdrawals(api_key, api_secret, since_ms, until_ms)
+                binance_trades.extend(dep_withdraw)
+                binance_status["deposits_count"] = sum(1 for x in dep_withdraw if x.get("side") == "DEPOSIT")
+                binance_status["withdrawals_count"] = sum(1 for x in dep_withdraw if x.get("side") == "WITHDRAW")
+
                 binance_status["connected"] = True
                 logger.info(
-                    "Binance API trades fetched: %d futures, %d income, %d spot",
+                    "Binance API trades fetched: %d futures, %d income, %d spot, %d deposits/withdrawals",
                     len(f_trades),
                     len(income_records),
                     len(spot_trades),
+                    len(dep_withdraw),
                 )
 
             except Exception as e:
@@ -232,6 +239,9 @@ class TaxHistoryService:
 
         # 3. Merge & Deduplicate
         merged = self._merge_and_deduplicate(binance_trades, bot_trades)
+
+        # 4. Apply FIFO Cost Basis & Realized Capital Gain/Loss Engine (Israeli Tax Authority Standards)
+        merged = self._apply_fifo_cost_basis(merged)
 
         # Sort chronologically descending (newest first for UI inspection)
         merged.sort(key=lambda t: t.get("timestamp_ms", 0), reverse=True)
@@ -479,6 +489,184 @@ class TaxHistoryService:
 
         return results
 
+    def _fetch_binance_deposits_and_withdrawals(
+        self,
+        api_key: str,
+        api_secret: str,
+        since_ms: int,
+        until_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch Crypto Deposits, Crypto Withdrawals, and Fiat Orders from Binance SAPI.
+        Bypasses web UI 1-year limits and logs all movements for tax reconciliation.
+        """
+        results: List[Dict[str, Any]] = []
+        if not api_key or not api_secret:
+            return results
+
+        try:
+            import ccxt
+            ex = ccxt.binance({
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+                "timeout": 10000,
+                "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
+            })
+
+            # 1. Crypto Deposits (sapiGetCapitalDepositHisrec)
+            try:
+                dep_params: Dict[str, Any] = {"limit": 1000}
+                if since_ms > 0:
+                    dep_params["startTime"] = since_ms
+                if until_ms > 0:
+                    dep_params["endTime"] = until_ms
+
+                deposits = ex.sapiGetCapitalDepositHisrec(dep_params)
+                if isinstance(deposits, list):
+                    for d in deposits:
+                        insert_ts = int(d.get("insertTime", 0))
+                        if insert_ts < since_ms or insert_ts > until_ms:
+                            continue
+
+                        coin = str(d.get("coin", "USDT")).upper()
+                        amount = float(d.get("amount", 0.0))
+                        dt_utc = datetime.fromtimestamp(insert_ts / 1000.0, tz=timezone.utc)
+                        dt_local = datetime.fromtimestamp(insert_ts / 1000.0)
+                        status_code = d.get("status")
+                        status_str = "SUCCESS" if status_code == 1 else f"STATUS_{status_code}"
+
+                        results.append({
+                            "id": f"dep_{d.get('txId', '') or insert_ts}",
+                            "timestamp_ms": insert_ts,
+                            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                            "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
+                            "coin": coin,
+                            "side": "DEPOSIT",
+                            "action_type": "DEPOSIT",
+                            "market": "TRANSFER",
+                            "amount": amount,
+                            "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                            "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                            "cost_basis_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                            "fee_usd": 0.0,
+                            "fee_currency": coin,
+                            "realized_pnl_usd": 0.0,
+                            "realized_pnl_pct": 0.0,
+                            "client_order_id": "",
+                            "exchange_order_id": str(d.get("txId", "")),
+                            "trade_id": str(d.get("id", "") or d.get("txId", "")),
+                            "status": status_str,
+                            "source": "BINANCE_DEPOSIT",
+                            "notes": f"הפקדת קריפטו לרשת {d.get('network', '')} | TxID: {str(d.get('txId', ''))[:16]}...",
+                        })
+            except Exception as e_dep:
+                logger.debug("Could not fetch crypto deposits: %s", e_dep)
+
+            # 2. Crypto Withdrawals (sapiGetCapitalWithdrawHistory)
+            try:
+                wd_params: Dict[str, Any] = {"limit": 1000}
+                if since_ms > 0:
+                    wd_params["startTime"] = since_ms
+                if until_ms > 0:
+                    wd_params["endTime"] = until_ms
+
+                withdrawals = ex.sapiGetCapitalWithdrawHistory(wd_params)
+                if isinstance(withdrawals, list):
+                    for w in withdrawals:
+                        apply_time_str = str(w.get("applyTime", ""))
+                        try:
+                            dt_apply = datetime.strptime(apply_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                            w_ts = int(dt_apply.timestamp() * 1000)
+                        except Exception:
+                            w_ts = since_ms
+
+                        if w_ts < since_ms or w_ts > until_ms:
+                            continue
+
+                        coin = str(w.get("coin", "USDT")).upper()
+                        amount = float(w.get("amount", 0.0))
+                        tx_fee = float(w.get("transactionFee", 0.0))
+                        dt_utc = datetime.fromtimestamp(w_ts / 1000.0, tz=timezone.utc)
+                        dt_local = datetime.fromtimestamp(w_ts / 1000.0)
+                        status_code = w.get("status")
+                        status_str = "SUCCESS" if status_code == 6 else f"STATUS_{status_code}"
+
+                        results.append({
+                            "id": f"wd_{w.get('txId', '') or w_ts}",
+                            "timestamp_ms": w_ts,
+                            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                            "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
+                            "coin": coin,
+                            "side": "WITHDRAW",
+                            "action_type": "WITHDRAW",
+                            "market": "TRANSFER",
+                            "amount": amount,
+                            "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                            "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                            "cost_basis_usd": 0.0,
+                            "fee_usd": round(tx_fee, 4),
+                            "fee_currency": coin,
+                            "realized_pnl_usd": 0.0,
+                            "realized_pnl_pct": 0.0,
+                            "client_order_id": "",
+                            "exchange_order_id": str(w.get("txId", "")),
+                            "trade_id": str(w.get("id", "") or w.get("txId", "")),
+                            "status": status_str,
+                            "source": "BINANCE_WITHDRAWAL",
+                            "notes": f"משיכת קריפטו לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
+                        })
+            except Exception as e_wd:
+                logger.debug("Could not fetch crypto withdrawals: %s", e_wd)
+
+            # 3. Fiat Orders (Deposits & Withdrawals)
+            try:
+                fiat_res = ex.sapiGetFiatOrders({"transactionType": "0", "limit": 500})
+                fiat_list = fiat_res.get("data", []) if isinstance(fiat_res, dict) else []
+                for f_ord in fiat_list:
+                    f_ts = int(f_ord.get("createTime", 0))
+                    if f_ts < since_ms or f_ts > until_ms:
+                        continue
+                    fiat_curr = str(f_ord.get("fiatCurrency", "USD")).upper()
+                    fiat_amt = float(f_ord.get("amount", 0.0))
+                    dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
+                    dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+
+                    results.append({
+                        "id": f"fiat_dep_{f_ord.get('orderNo', '')}",
+                        "timestamp_ms": f_ts,
+                        "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                        "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                        "symbol": f"{fiat_curr}/USDT",
+                        "coin": fiat_curr,
+                        "side": "DEPOSIT",
+                        "action_type": "FIAT_DEPOSIT",
+                        "market": "FIAT",
+                        "amount": fiat_amt,
+                        "price": 1.0,
+                        "total_usd": round(fiat_amt, 2),
+                        "cost_basis_usd": round(fiat_amt, 2),
+                        "fee_usd": float(f_ord.get("totalFee", 0.0)),
+                        "fee_currency": fiat_curr,
+                        "realized_pnl_usd": 0.0,
+                        "realized_pnl_pct": 0.0,
+                        "client_order_id": "",
+                        "exchange_order_id": str(f_ord.get("orderNo", "")),
+                        "trade_id": str(f_ord.get("orderNo", "")),
+                        "status": f_ord.get("status", "SUCCESS"),
+                        "source": "BINANCE_FIAT",
+                        "notes": f"הפקדת פיאט: {fiat_amt} {fiat_curr} באמצעות {f_ord.get('method', 'Bank/Card')}",
+                    })
+            except Exception as e_fiat:
+                logger.debug("Could not fetch fiat orders: %s", e_fiat)
+
+        except Exception as ex:
+            logger.debug("Error in deposit/withdrawal master fetcher: %s", ex)
+
+        return results
+
     def _fetch_bot_state_orders(self, since_ms: int, until_ms: int) -> List[Dict[str, Any]]:
         """
         Load local bot state orders from memory or bot_state.json files.
@@ -602,6 +790,97 @@ class TaxHistoryService:
 
         return merged
 
+    def _apply_fifo_cost_basis(self, trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Compute Realized Capital Gain / Loss (רווח או הפסד הון ממומש)
+        for every Spot disposal/sell using FIFO (First-In, First-Out) matching,
+        conforming to Israeli Tax Authority standards (סעיף 88-91 לפקודת מס הכנסה).
+        """
+        # Sort chronologically ascending to match lots in FIFO order
+        sorted_trades = sorted(trades, key=lambda t: t.get("timestamp_ms", 0))
+
+        # inventory per coin: list of lot dicts
+        # lot = {"qty": float, "price": float, "fee_unit": float, "ts": int}
+        inventory: Dict[str, List[Dict[str, Any]]] = {}
+
+        for t in sorted_trades:
+            side = str(t.get("side", "")).upper()
+            coin = str(t.get("coin", "")).upper()
+            market = str(t.get("market", "")).upper()
+            qty = float(t.get("amount", 0.0))
+            price = float(t.get("price", 0.0))
+            fee = float(t.get("fee_usd", 0.0))
+
+            if coin not in inventory:
+                inventory[coin] = []
+
+            # Ensure baseline fields exist
+            if "cost_basis_usd" not in t:
+                t["cost_basis_usd"] = 0.0
+            if "realized_pnl_usd" not in t:
+                t["realized_pnl_usd"] = 0.0
+            if "realized_pnl_pct" not in t:
+                t["realized_pnl_pct"] = 0.0
+
+            # 1. BUYS or INCOMING DEPOSITS -> Add to inventory
+            if side in ("BUY", "DEPOSIT") and qty > 0:
+                fee_unit = (fee / qty) if qty > 0 else 0.0
+                effective_price = price if price > 0 else (t.get("total_usd", 0.0) / qty if qty > 0 else 0.0)
+                inventory[coin].append({
+                    "qty": qty,
+                    "price": effective_price,
+                    "fee_unit": fee_unit,
+                    "ts": t.get("timestamp_ms", 0)
+                })
+                t["cost_basis_usd"] = round(qty * effective_price, 2)
+                t["realized_pnl_usd"] = 0.0
+                t["realized_pnl_pct"] = 0.0
+                t["pnl_note"] = "רכישה (עלות בסיס נצברה למלאי)" if side == "BUY" else "הפקדה נכנסה למלאי"
+
+            # 2. SELLS on SPOT -> Match against inventory using FIFO
+            elif side == "SELL" and market in ("SPOT", "BOT_EXECUTION", "TRANSFER") and qty > 0:
+                proceeds = round(qty * price, 2) if price > 0 else float(t.get("total_usd", 0.0))
+                t["total_usd"] = proceeds
+
+                matched_cost = 0.0
+                matched_buy_fee = 0.0
+                needed_qty = qty
+
+                coin_lots = inventory[coin]
+                while needed_qty > 1e-8 and coin_lots:
+                    first_lot = coin_lots[0]
+                    avail_qty = first_lot["qty"]
+                    take_qty = min(needed_qty, avail_qty)
+
+                    matched_cost += take_qty * first_lot["price"]
+                    matched_buy_fee += take_qty * first_lot["fee_unit"]
+                    first_lot["qty"] -= take_qty
+                    needed_qty -= take_qty
+
+                    if first_lot["qty"] <= 1e-8:
+                        coin_lots.pop(0)
+
+                # Net Capital Gain = Proceeds - Cost Basis - Sell Fee - Matched Buy Fee
+                net_pnl = proceeds - matched_cost - fee - matched_buy_fee
+                pnl_pct = (net_pnl / matched_cost * 100.0) if matched_cost > 0 else 0.0
+
+                t["cost_basis_usd"] = round(matched_cost, 2)
+                t["realized_pnl_usd"] = round(net_pnl, 4)
+                t["realized_pnl_pct"] = round(pnl_pct, 2)
+                t["pnl_note"] = f"תמורה: ${proceeds:.2f} | עלות רכישה: ${matched_cost:.2f}"
+
+            # 3. FUTURES with existing realized PnL
+            elif t.get("realized_pnl_usd", 0.0) != 0.0:
+                pnl_val = float(t["realized_pnl_usd"])
+                tot_val = float(t.get("total_usd", 0.0))
+                pct = (pnl_val / tot_val * 100.0) if tot_val > 0 else 0.0
+                t["realized_pnl_pct"] = round(pct, 2)
+                t["pnl_note"] = "רווח/הפסד ממומש בפיוצ'רס"
+
+        # Re-sort descending (newest first for UI table display)
+        sorted_trades.sort(key=lambda t: t.get("timestamp_ms", 0), reverse=True)
+        return sorted_trades
+
     def _filter_trades(
         self,
         trades: List[Dict[str, Any]],
@@ -629,7 +908,11 @@ class TaxHistoryService:
                     continue
                 elif side_clean == "SELL" and t_side != "SELL":
                     continue
-                elif side_clean == "REALIZED_PNL" and "PNL" not in (t_side, t_act):
+                elif side_clean == "DEPOSIT" and t_side != "DEPOSIT" and t_act != "DEPOSIT":
+                    continue
+                elif side_clean == "WITHDRAW" and t_side != "WITHDRAW" and t_act != "WITHDRAW":
+                    continue
+                elif side_clean == "REALIZED_PNL" and "PNL" not in (t_side, t_act) and t.get("realized_pnl_usd", 0.0) == 0.0:
                     continue
                 elif side_clean == "FEES" and not ("FEE" in t_side or "FUNDING" in t_side or "COMMISSION" in t_act):
                     continue
@@ -640,17 +923,22 @@ class TaxHistoryService:
 
     def calculate_tax_summary(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Calculate comprehensive Israeli Tax Authority metrics for capital gains & operations.
+        Calculate comprehensive Israeli Tax Authority metrics for capital gains, turnover & operations.
         """
         total_operations = len(trades)
         total_volume_usd = 0.0
         total_buy_volume_usd = 0.0
         total_sell_volume_usd = 0.0
+        total_cost_basis_usd = 0.0
         total_fees_usd = 0.0
         total_realized_pnl_usd = 0.0
         total_funding_fees_usd = 0.0
         total_buy_orders = 0
         total_sell_orders = 0
+        total_deposits_count = 0
+        total_deposits_usd = 0.0
+        total_withdrawals_count = 0
+        total_withdrawals_usd = 0.0
 
         per_coin: Dict[str, Dict[str, Any]] = {}
 
@@ -664,9 +952,12 @@ class TaxHistoryService:
                     "sell_count": 0,
                     "buy_volume_usd": 0.0,
                     "sell_volume_usd": 0.0,
+                    "cost_basis_usd": 0.0,
                     "total_volume_usd": 0.0,
                     "fees_usd": 0.0,
                     "realized_pnl_usd": 0.0,
+                    "deposits_usd": 0.0,
+                    "withdrawals_usd": 0.0,
                 }
 
             c_data = per_coin[coin]
@@ -676,6 +967,7 @@ class TaxHistoryService:
             vol = float(t.get("total_usd", 0.0))
             fee = float(t.get("fee_usd", 0.0))
             pnl = float(t.get("realized_pnl_usd", 0.0))
+            cost = float(t.get("cost_basis_usd", 0.0))
 
             total_volume_usd += vol
             total_fees_usd += fee
@@ -692,18 +984,35 @@ class TaxHistoryService:
             elif side == "SELL":
                 total_sell_volume_usd += vol
                 total_sell_orders += 1
+                total_cost_basis_usd += cost
                 c_data["sell_volume_usd"] += vol
+                c_data["cost_basis_usd"] += cost
                 c_data["sell_count"] += 1
+            elif side == "DEPOSIT":
+                total_deposits_count += 1
+                total_deposits_usd += vol
+                c_data["deposits_usd"] += vol
+            elif side == "WITHDRAW":
+                total_withdrawals_count += 1
+                total_withdrawals_usd += vol
+                c_data["withdrawals_usd"] += vol
             elif "FUNDING" in side:
                 total_funding_fees_usd += pnl
+
+        # Israeli capital gains tax estimation: 25% on net capital gain, or tax loss carryforward
+        estimated_tax_usd = max(0.0, round(total_realized_pnl_usd * 0.25, 2))
+        tax_loss_carryforward_usd = abs(min(0.0, round(total_realized_pnl_usd, 2)))
 
         # Round per-coin aggregates
         for k, v in per_coin.items():
             v["buy_volume_usd"] = round(v["buy_volume_usd"], 2)
             v["sell_volume_usd"] = round(v["sell_volume_usd"], 2)
+            v["cost_basis_usd"] = round(v["cost_basis_usd"], 2)
             v["total_volume_usd"] = round(v["total_volume_usd"], 2)
             v["fees_usd"] = round(v["fees_usd"], 4)
             v["realized_pnl_usd"] = round(v["realized_pnl_usd"], 4)
+            v["deposits_usd"] = round(v["deposits_usd"], 2)
+            v["withdrawals_usd"] = round(v["withdrawals_usd"], 2)
 
         return {
             "total_operations": total_operations,
@@ -712,9 +1021,16 @@ class TaxHistoryService:
             "total_volume_usd": round(total_volume_usd, 2),
             "total_buy_volume_usd": round(total_buy_volume_usd, 2),
             "total_sell_volume_usd": round(total_sell_volume_usd, 2),
+            "total_cost_basis_usd": round(total_cost_basis_usd, 2),
             "total_fees_usd": round(total_fees_usd, 4),
             "total_funding_fees_usd": round(total_funding_fees_usd, 4),
             "total_realized_pnl_usd": round(total_realized_pnl_usd, 4),
+            "estimated_tax_usd": estimated_tax_usd,
+            "tax_loss_carryforward_usd": tax_loss_carryforward_usd,
+            "total_deposits_count": total_deposits_count,
+            "total_deposits_usd": round(total_deposits_usd, 2),
+            "total_withdrawals_count": total_withdrawals_count,
+            "total_withdrawals_usd": round(total_withdrawals_usd, 2),
             "per_coin_summary": per_coin,
         }
 
@@ -733,9 +1049,13 @@ class TaxHistoryService:
         writer.writerow([f"# תאריך הפקת הדוח (Generated At): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"])
         writer.writerow([f"# טווח תאריכים נבחר (Timeframe): {timeframe}"])
         writer.writerow([f"# סה\"כ פעולות (Total Transactions): {summary.get('total_operations', 0)}"])
-        writer.writerow([f"# מחזור עסקאות כולל (Total Consideration USD): ${summary.get('total_volume_usd', 0.0):,.2f}"])
+        writer.writerow([f"# מחזור מכירות / תמורה כוללת (Total Consideration USD): ${summary.get('total_sell_volume_usd', 0.0):,.2f}"])
+        writer.writerow([f"# עלות רכישה מקורית ממומשת (Total Cost Basis USD): ${summary.get('total_cost_basis_usd', 0.0):,.2f}"])
+        writer.writerow([f"# רווח/הפסד הון ממומש נטו (Net Realized Capital Gain/Loss USD): ${summary.get('total_realized_pnl_usd', 0.0):,.2f}"])
+        writer.writerow([f"# אומדן מס רווחי הון 25% (Estimated 25% Tax USD): ${summary.get('estimated_tax_usd', 0.0):,.2f}"])
         writer.writerow([f"# סה\"כ עמלות מסחר מותרות בניכוי (Allowable Trading Fees USD): ${summary.get('total_fees_usd', 0.0):,.2f}"])
-        writer.writerow([f"# רווח/הפסד הון ממומש נטו (Net Realized Capital PnL USD): ${summary.get('total_realized_pnl_usd', 0.0):,.2f}"])
+        writer.writerow([f"# סה\"כ הפקדות (Total Deposits USD): ${summary.get('total_deposits_usd', 0.0):,.2f} ({summary.get('total_deposits_count', 0)} הפקדות)"])
+        writer.writerow([f"# סה\"כ משיכות (Total Withdrawals USD): ${summary.get('total_withdrawals_usd', 0.0):,.2f} ({summary.get('total_withdrawals_count', 0)} משיכות)"])
         writer.writerow(["# =========================================================================================="])
         writer.writerow([])
 
@@ -744,24 +1064,27 @@ class TaxHistoryService:
             "#",
             "תאריך ושעה UTC (Date UTC)",
             "תאריך ושעה מקומי (Local Date)",
-            "מטבע בסיס (Asset / Coin)",
+            "נכס / מטבע (Asset / Coin)",
             "צמד מסחר (Symbol)",
             "סוג פעולה (Action / Side)",
             "שוק (Market)",
             "כמות (Quantity)",
             "מחיר ביצוע ב-$ (Exec Price USD)",
             "תמורה / שווי כולל ב-$ (Total Value USD)",
+            "עלות רכישה מקורית ב-$ (Cost Basis USD)",
             "עמלות מסחר ב-$ (Fee USD)",
-            "רווח / הפסד ממומש ב-$ (Realized PnL USD)",
-            "מזהה פקודה / עסקה (Order / Trade ID)",
+            "רווח / הפסד הון ממומש ב-$ (Realized Capital Gain/Loss USD)",
+            "תשואה % (Return %)",
+            "מזהה פקודה / עסקה / TxID (Order / Trade / TxID)",
             "מקור הנתון (Data Source)",
             "סטטוס (Status)",
-            "הערות / סיבת פקודה (Notes)",
+            "הערות / פירוט (Notes)",
         ]
         writer.writerow(headers)
 
         # Write each trade row
         for idx, t in enumerate(trades, 1):
+            pnl_pct_str = f"{t.get('realized_pnl_pct', 0.0):+.2f}%" if t.get("realized_pnl_pct") else "-"
             writer.writerow([
                 idx,
                 t.get("datetime_utc", ""),
@@ -773,12 +1096,14 @@ class TaxHistoryService:
                 f"{t.get('amount', 0.0):.8f}",
                 f"{t.get('price', 0.0):.4f}",
                 f"{t.get('total_usd', 0.0):.2f}",
+                f"{t.get('cost_basis_usd', 0.0):.2f}",
                 f"{t.get('fee_usd', 0.0):.4f}",
-                f"{t.get('realized_pnl_usd', 0.0):.4f}",
+                f"{t.get('realized_pnl_usd', 0.0):+.4f}" if t.get("realized_pnl_usd") else "0.0000",
+                pnl_pct_str,
                 t.get("trade_id") or t.get("exchange_order_id") or t.get("id", ""),
                 t.get("source", ""),
                 t.get("status", ""),
-                t.get("notes", ""),
+                t.get("notes", "") or t.get("pnl_note", ""),
             ])
 
         return output.getvalue()

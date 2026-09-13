@@ -166,6 +166,85 @@ class TestTaxHistoryService(unittest.TestCase):
                 self.assertGreaterEqual(res["total_count"], 1)
                 self.assertEqual(res["trades"][0]["client_order_id"], "bot_test_order_1")
 
+    def test_fifo_cost_basis_spot_trades(self):
+        trades = [
+            {
+                "id": "buy1",
+                "timestamp_ms": 1000,
+                "coin": "BTC",
+                "symbol": "BTC/USDT",
+                "side": "BUY",
+                "market": "SPOT",
+                "amount": 0.0032,
+                "price": 30000.0,
+                "total_usd": 96.0,
+                "fee_usd": 0.096,
+            },
+            {
+                "id": "buy2",
+                "timestamp_ms": 2000,
+                "coin": "BTC",
+                "symbol": "BTC/USDT",
+                "side": "BUY",
+                "market": "SPOT",
+                "amount": 0.0032,
+                "price": 40000.0,
+                "total_usd": 128.0,
+                "fee_usd": 0.128,
+            },
+            {
+                "id": "sell1",
+                "timestamp_ms": 3000,
+                "coin": "BTC",
+                "symbol": "BTC/USDT",
+                "side": "SELL",
+                "market": "SPOT",
+                "amount": 0.0032,
+                "price": 50000.0,
+                "total_usd": 160.0,
+                "fee_usd": 0.160,
+            },
+        ]
+
+        processed = self.service._apply_fifo_cost_basis(trades)
+        # Sells should match buy1 lot (FIFO)
+        sell_trade = next(t for t in processed if t["id"] == "sell1")
+        self.assertEqual(sell_trade["cost_basis_usd"], 96.0)
+        # Net Realized PnL = Proceeds (160.0) - Cost Basis (96.0) - Sell Fee (0.16) - Buy Fee (0.096)
+        expected_pnl = round(160.0 - 96.0 - 0.160 - 0.096, 4)
+        self.assertAlmostEqual(sell_trade["realized_pnl_usd"], expected_pnl, places=3)
+        self.assertGreater(sell_trade["realized_pnl_pct"], 60.0)
+
+    def test_deposits_withdrawals_tracking(self):
+        trades = [
+            {
+                "id": "dep1",
+                "timestamp_ms": 1000,
+                "coin": "USDT",
+                "side": "DEPOSIT",
+                "action_type": "DEPOSIT",
+                "total_usd": 500.0,
+                "amount": 500.0,
+                "fee_usd": 0.0,
+            },
+            {
+                "id": "wd1",
+                "timestamp_ms": 2000,
+                "coin": "USDT",
+                "side": "WITHDRAW",
+                "action_type": "WITHDRAW",
+                "total_usd": 200.0,
+                "amount": 200.0,
+                "fee_usd": 1.0,
+            },
+        ]
+
+        summary = self.service.calculate_tax_summary(trades)
+        self.assertEqual(summary["total_deposits_count"], 1)
+        self.assertEqual(summary["total_deposits_usd"], 500.0)
+        self.assertEqual(summary["total_withdrawals_count"], 1)
+        self.assertEqual(summary["total_withdrawals_usd"], 200.0)
+
 
 if __name__ == "__main__":
     unittest.main()

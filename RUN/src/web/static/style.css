@@ -3724,6 +3724,8 @@ body {
     background: rgba(56, 189, 248, 0.08);
     border: 1px solid rgba(56, 189, 248, 0.25);
     color: #bae6fd;
+    direction: rtl;
+    text-align: right;
 }
 
 .tax-status-banner.warning {
@@ -3868,25 +3870,43 @@ body {
 .tax-data-table {
     width: 100%;
     font-size: 0.78rem;
+    direction: rtl;
+    text-align: right;
+    border-collapse: separate;
+    border-spacing: 0;
 }
 
 .tax-data-table th {
     font-size: 0.74rem;
+    font-weight: 700;
     text-transform: uppercase;
-    color: var(--text-muted);
-    padding: 8px 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #94a3b8;
+    padding: 9px 8px;
+    background: #0b1329 !important; /* Solid opaque dark surface - stops bleed-through! */
+    border-bottom: 2px solid rgba(255, 255, 255, 0.12);
     white-space: nowrap;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 40 !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.6);
+    text-align: right;
 }
 
 .tax-data-table td {
-    padding: 7px 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     white-space: nowrap;
+    text-align: right;
 }
 
 .tax-data-table tr:hover td {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.tax-data-table .num-cell {
+    font-family: var(--font-mono);
+    direction: ltr;
+    text-align: left;
 }
 
 .badge-side {
@@ -3908,6 +3928,18 @@ body {
     background: rgba(239, 68, 68, 0.2);
     color: #f87171;
     border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.badge-side.badge-deposit {
+    background: rgba(14, 165, 233, 0.2);
+    color: #38bdf8;
+    border: 1px solid rgba(14, 165, 233, 0.4);
+}
+
+.badge-side.badge-withdraw {
+    background: rgba(249, 115, 22, 0.2);
+    color: #fb923c;
+    border: 1px solid rgba(249, 115, 22, 0.4);
 }
 
 .badge-side.badge-pnl {
