@@ -830,6 +830,12 @@ async function triggerManualPull() {
         if (res.ok && data.success) {
             if (data.updated) {
                 showToast(`🚀 ${data.message}`, "success");
+                if (data.restarting) {
+                    showToast("🔄 שרת הבוט מאתחל את עצמו כעת עם הקוד החדש. הדף יתרענן בעוד 3 שניות...", "info");
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 3500);
+                }
             } else {
                 showToast(`ℹ️ ${data.message}`, "info");
             }
@@ -4890,7 +4896,11 @@ async function fetchTradeHistory(forceRefresh = false) {
     try {
         const res = await apiFetch(url);
         if (!res.ok) {
-            throw new Error(`Server returned HTTP ${res.status}`);
+            if (res.status === 404) {
+                throw new Error("נתיב ההיסטוריה לא זוהה בשרת (HTTP 404). תהליך הבוט בשרת עדיין מריץ קוד ישן בזיכרון ודורש אתחול (Restart).");
+            }
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `Server returned HTTP ${res.status}`);
         }
         const data = await res.json();
 
@@ -4954,8 +4964,23 @@ async function fetchTradeHistory(forceRefresh = false) {
     } catch (err) {
         if (typeof logger !== "undefined" && logger.error) logger.error("Failed to fetch tax trade history:", err);
         showToast("❌ שגיאה בשליפת היסטוריית פעולות: " + err.message, "error");
+        const is404 = String(err.message).includes("404");
+        const restartBtnHtml = is404
+            ? `<div style="margin-top: 1rem;"><button class="btn btn-primary" onclick="executeQuickRestart()" style="font-weight: 700; padding: 8px 16px;">🔄 לחץ כאן לאתחול הבוט עכשיו (Restart Server)</button></div>`
+            : "";
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="13" class="empty-cell" style="color: var(--accent-danger, #f43f5e); padding: 2rem;">❌ שגיאה בטעינת נתונים: ${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="13" class="empty-cell" style="color: var(--accent-danger, #f43f5e); padding: 2rem;">
+                <div style="font-size: 1.1rem; margin-bottom: 0.5rem;">❌ שגיאה בטעינת נתונים: ${escapeHtml(err.message)}</div>
+                ${is404 ? '<div style="color: var(--text-muted, #94a3b8); font-size: 0.9rem;">שרת ה-Python המרוחק פועל ברציפות. לאחר משיכת קוד מ-GitHub יש לבצע אתחול כדי להחיל את הנתיבים החדשים.</div>' : ''}
+                ${restartBtnHtml}
+            </td></tr>`;
+        }
+        if (banner && is404) {
+            banner.className = "tax-status-banner warning";
+            if (bannerIcon) bannerIcon.textContent = "⚠️";
+            if (bannerContent) {
+                bannerContent.innerHTML = `<strong>נדרש אתחול שרת:</strong> השרת מריץ את גרסת ה-Python הקודמת. ${restartBtnHtml}`;
+            }
         }
     } finally {
         isTaxLoading = false;
@@ -5168,6 +5193,28 @@ function copyIpAddress(ip) {
     });
 }
 
+async function executeQuickRestart() {
+    showToast("🔄 שולח פקודת אתחול מחדש לשרת הבוט...", "info");
+    try {
+        let res = await apiFetch("/api/restart", { method: "POST" });
+        if (!res.ok) {
+            // Fallback to /api/mode which is supported on older server versions
+            const activeMode = currentMode || (systemStatus && systemStatus.mode) || "DRY_RUN";
+            res = await apiFetch("/api/mode", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mode: activeMode })
+            });
+        }
+        showToast("✅ פקודת אתחול בוצעה בהצלחה! השרת מאתחל, הדף יתרענן...", "success");
+        setTimeout(() => {
+            window.location.reload();
+        }, 3500);
+    } catch (e) {
+        showToast("❌ שגיאה באתחול השרת: " + e, "error");
+    }
+}
+
 // Global window registration for HTML onclick handlers
 window.openTradeHistoryModal = openTradeHistoryModal;
 window.closeTradeHistoryModal = closeTradeHistoryModal;
@@ -5180,6 +5227,7 @@ window.fetchTradeHistory = fetchTradeHistory;
 window.downloadTaxCsv = downloadTaxCsv;
 window.copyTaxHistory = copyTaxHistory;
 window.copyIpAddress = copyIpAddress;
+window.executeQuickRestart = executeQuickRestart;
 
 // Add backdrop and Esc key click handler
 document.addEventListener("DOMContentLoaded", () => {

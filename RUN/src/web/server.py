@@ -416,6 +416,8 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             self._handle_update_keys()
         elif clean_path == "/api/mode":
             self._handle_switch_mode()
+        elif clean_path in ("/api/restart", "/api/system/restart"):
+            self._handle_system_restart()
         else:
             self._send_json({"error": "Endpoint not found"}, status=404)
 
@@ -2196,13 +2198,29 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             logger.info("Manual Git Pull executed via API: %s (Output: %s)", "Success" if res.returncode == 0 else "Failed", output_msg)
 
             if res.returncode == 0:
-                msg = "Updated code pulled successfully from GitHub!" if updated else "Code is already up to date."
+                msg = "Updated code pulled successfully from GitHub! Restarting server..." if updated else "Code is already up to date."
                 self._send_json({
                     "success": True,
                     "updated": updated,
+                    "restarting": updated,
                     "message": msg,
                     "output": output_msg
                 })
+                if updated:
+                    import threading
+                    def _reboot_after_pull():
+                        time.sleep(1.0)
+                        try:
+                            subprocess.Popen(
+                                ["bash", "-c", "sleep 1 && make restart"],
+                                cwd=str(project_dir),
+                                start_new_session=True,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                        except Exception as ex:
+                            logger.error("Error restarting server after manual pull: %s", ex)
+                    threading.Thread(target=_reboot_after_pull, daemon=True).start()
             else:
                 self._send_json({
                     "success": False,
@@ -2210,6 +2228,33 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 }, status=500)
         except Exception as e:
             logger.error("Failed to execute manual git pull: %s", e)
+            self._send_json({"error": str(e)}, status=500)
+
+    def _handle_system_restart(self) -> None:
+        try:
+            self._send_json({
+                "success": True,
+                "message": "Restart command initiated. The bot server is rebooting...",
+            })
+            import subprocess
+            import threading
+            def _reboot():
+                time.sleep(0.5)
+                try:
+                    proj_dir = Path(__file__).resolve().parent.parent.parent.parent
+                    subprocess.Popen(
+                        ["bash", "-c", "sleep 1 && make restart"],
+                        cwd=str(proj_dir),
+                        start_new_session=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception as ex:
+                    logger.error("Error during manual server restart: %s", ex)
+
+            threading.Thread(target=_reboot, daemon=True).start()
+        except Exception as e:
+            logger.error("Failed to trigger server restart: %s", e)
             self._send_json({"error": str(e)}, status=500)
 
     def _get_telegram_service(self) -> Any:
