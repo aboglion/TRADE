@@ -29,20 +29,36 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger("bot.services.tax_history")
 
 
+_cached_ip_val: Optional[str] = None
+_cached_ip_ts: float = 0.0
+
+
 def _get_outbound_ip() -> str:
-    """Helper to detect server outbound IP for Binance whitelisting instructions."""
+    """Helper to detect server outbound IP for Binance whitelisting instructions (cached 1h)."""
+    global _cached_ip_val, _cached_ip_ts
+    now = time.time()
+    if _cached_ip_val and (now - _cached_ip_ts < 3600.0):
+        return _cached_ip_val
+
     import urllib.request
     try:
         req = urllib.request.Request("https://api.ipify.org", headers={"User-Agent": "TradeBot/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            return resp.read().decode("utf-8").strip()
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            _cached_ip_val = resp.read().decode("utf-8").strip()
+            _cached_ip_ts = now
+            return _cached_ip_val
     except Exception:
         try:
             req = urllib.request.Request("https://ifconfig.me/ip", headers={"User-Agent": "TradeBot/1.0"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.read().decode("utf-8").strip()
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                _cached_ip_val = resp.read().decode("utf-8").strip()
+                _cached_ip_ts = now
+                return _cached_ip_val
         except Exception:
-            return "89.139.94.94"
+            _cached_ip_val = "89.139.94.94"
+            _cached_ip_ts = now
+            return _cached_ip_val
+
 
 
 class TaxHistoryService:
@@ -230,7 +246,11 @@ class TaxHistoryService:
         now_ms = int(time.time() * 1000)
         since_ms, until_ms = self._resolve_timeframe(timeframe, now_ms, custom_start_ts, custom_end_ts)
 
-        cache_key = f"{timeframe}_{since_ms}_{until_ms}"
+        if timeframe == "custom":
+            cache_key = f"custom_{custom_start_ts}_{custom_end_ts}"
+        else:
+            cache_key = timeframe
+
         with self._lock:
             if not force_refresh and (time.time() - self._cache_ts < self._cache_ttl_seconds) and cache_key in self._cache:
                 raw_trades, binance_status = self._cache[cache_key]
@@ -305,44 +325,48 @@ class TaxHistoryService:
         if api_key and api_secret and api_key not in ("your_api_key_here", ""):
             try:
                 import ccxt
-                # Setup CCXT exchange instance with adjusted time window
+                from concurrent.futures import ThreadPoolExecutor
+
+                # Setup CCXT exchange instance with adjusted time window and strict 4s timeout
                 exchange = ccxt.binance({
                     "apiKey": api_key,
                     "secret": api_secret,
                     "enableRateLimit": True,
-                    "timeout": 15000,
+                    "timeout": 4000,
                     "options": {
                         "defaultType": "future",
                         "adjustForTimeDifference": True,
                         "recvWindow": 10000,
                     },
                 })
-
-                # Fetch Futures Trades across symbols
                 symbols = self._get_tracked_symbols()
-                f_trades = self._fetch_binance_futures_trades(exchange, symbols, since_ms, until_ms)
+
+                # Execute all 4 Binance query tasks concurrently in parallel to avoid frontend hanging
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    fut_f = pool.submit(self._fetch_binance_futures_trades, exchange, symbols, since_ms, until_ms)
+                    fut_i = pool.submit(self._fetch_binance_futures_income, exchange, since_ms, until_ms)
+                    fut_s = pool.submit(self._fetch_binance_spot_trades, api_key, api_secret, symbols, since_ms, until_ms)
+                    fut_d = pool.submit(self._fetch_binance_deposits_and_withdrawals, api_key, api_secret, since_ms, until_ms)
+
+                    f_trades = fut_f.result()
+                    income_records = fut_i.result()
+                    spot_trades = fut_s.result()
+                    dep_withdraw = fut_d.result()
+
                 binance_trades.extend(f_trades)
-                binance_status["futures_trades_count"] = len(f_trades)
-
-                # Fetch Futures Income (Realized PnL, Commission, Funding Fees)
-                income_records = self._fetch_binance_futures_income(exchange, since_ms, until_ms)
                 binance_trades.extend(income_records)
-                binance_status["income_records_count"] = len(income_records)
-
-                # Fetch Spot Trades
-                spot_trades = self._fetch_binance_spot_trades(api_key, api_secret, symbols, since_ms, until_ms)
                 binance_trades.extend(spot_trades)
-                binance_status["spot_trades_count"] = len(spot_trades)
-
-                # Fetch Deposits & Withdrawals (Crypto & Fiat)
-                dep_withdraw = self._fetch_binance_deposits_and_withdrawals(api_key, api_secret, since_ms, until_ms)
                 binance_trades.extend(dep_withdraw)
+
+                binance_status["futures_trades_count"] = len(f_trades)
+                binance_status["income_records_count"] = len(income_records)
+                binance_status["spot_trades_count"] = len(spot_trades)
                 binance_status["deposits_count"] = sum(1 for x in dep_withdraw if x.get("side") == "DEPOSIT")
                 binance_status["withdrawals_count"] = sum(1 for x in dep_withdraw if x.get("side") == "WITHDRAW")
 
                 binance_status["connected"] = True
                 logger.info(
-                    "Binance API trades fetched: %d futures, %d income, %d spot, %d deposits/withdrawals",
+                    "Binance API trades fetched concurrently: %d futures, %d income, %d spot, %d deposits/withdrawals",
                     len(f_trades),
                     len(income_records),
                     len(spot_trades),
@@ -460,6 +484,8 @@ class TaxHistoryService:
 
                 except Exception as ex:
                     logger.debug("Error fetching futures trades for %s: %s", clean_sym, ex)
+                    if any(x in str(ex) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                        return results
                     break
 
         return results
@@ -557,7 +583,7 @@ class TaxHistoryService:
                 "apiKey": api_key,
                 "secret": api_secret,
                 "enableRateLimit": True,
-                "timeout": 10000,
+                "timeout": 3500,
                 "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
             })
 
@@ -569,6 +595,8 @@ class TaxHistoryService:
                         params: Dict[str, Any] = {"symbol": clean_sym, "limit": 1000}
                         if from_id > 0:
                             params["fromId"] = from_id
+                        elif since_ms > 0:
+                            params["startTime"] = since_ms
 
                         trades = spot_ex.privateGetMyTrades(params)
                         if not trades:
@@ -618,6 +646,8 @@ class TaxHistoryService:
                         from_id = int(trades[-1]["id"]) + 1
                     except Exception as ex_sym:
                         logger.debug("Spot trade fetch error for %s: %s", clean_sym, ex_sym)
+                        if any(x in str(ex_sym) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                            return results
                         break
         except Exception as ex:
             logger.debug("Error initializing spot trade fetcher: %s", ex)
@@ -646,13 +676,13 @@ class TaxHistoryService:
                 "apiKey": api_key,
                 "secret": api_secret,
                 "enableRateLimit": True,
-                "timeout": 12000,
+                "timeout": 3500,
                 "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
             })
 
             DAY_MS = 86400 * 1000
             WINDOW_MS = 85 * DAY_MS
-            MAX_CHUNKS = 35  # Covers ~8.15 years (reaches back to 2021, 2020, 2019)
+            MAX_CHUNKS = 4  # Covers ~340 days (~1 year). Older records are added via manual deposits.
 
             now_ms = int(time.time() * 1000)
             target_until = until_ms if until_ms > 0 else now_ms
@@ -667,9 +697,12 @@ class TaxHistoryService:
                 curr_end = curr_start - 1
 
             seen_transfer_ids = set()
+            sapi_available = True
 
             # 1. Crypto Deposits (sapiGetCapitalDepositHisrec)
             for c_start, c_end in chunks:
+                if not sapi_available:
+                    break
                 try:
                     dep_params = {"startTime": c_start, "endTime": c_end, "limit": 1000}
                     deposits = ex.sapiGetCapitalDepositHisrec(dep_params)
@@ -721,124 +754,135 @@ class TaxHistoryService:
                 except Exception as e_dep:
                     logger.debug("Could not fetch crypto deposits for chunk [%s-%s]: %s", c_start, c_end, e_dep)
                     if any(x in str(e_dep) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                        sapi_available = False
                         break
 
             # 2. Crypto Withdrawals (sapiGetCapitalWithdrawHistory)
-            for c_start, c_end in chunks:
-                try:
-                    wd_params = {"startTime": c_start, "endTime": c_end, "limit": 1000}
-                    withdrawals = ex.sapiGetCapitalWithdrawHistory(wd_params)
-                    if isinstance(withdrawals, list):
-                        for w in withdrawals:
-                            status_code = w.get("status")
-                            # Binance withdrawal status: 6 = Completed/Success. Skip Cancelled (1), Rejected (3), Failure (5)!
-                            if status_code != 6:
-                                logger.debug("Ignoring non-completed withdrawal status %s (txId: %s)", status_code, w.get("txId"))
-                                continue
-
-                            apply_time_str = str(w.get("applyTime", ""))
-                            try:
-                                dt_apply = datetime.strptime(apply_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                                w_ts = int(dt_apply.timestamp() * 1000)
-                            except Exception:
-                                w_ts = c_start
-
-                            tx_id = str(w.get("txId", "") or w_ts)
-                            wd_id = f"wd_{tx_id}"
-                            if wd_id in seen_transfer_ids:
-                                continue
-                            seen_transfer_ids.add(wd_id)
-
-                            coin = str(w.get("coin", "USDT")).upper()
-                            amount = float(w.get("amount", 0.0))
-                            tx_fee = float(w.get("transactionFee", 0.0))
-                            dt_utc = datetime.fromtimestamp(w_ts / 1000.0, tz=timezone.utc)
-                            dt_local = datetime.fromtimestamp(w_ts / 1000.0)
-
-                            results.append({
-                                "id": wd_id,
-                                "timestamp_ms": w_ts,
-                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                                "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
-                                "coin": coin,
-                                "side": "WITHDRAW",
-                                "action_type": "WITHDRAW",
-                                "market": "TRANSFER",
-                                "amount": amount,
-                                "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                                "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
-                                "cost_basis_usd": 0.0,
-                                "fee_usd": round(tx_fee, 4),
-                                "fee_currency": coin,
-                                "realized_pnl_usd": 0.0,
-                                "realized_pnl_pct": 0.0,
-                                "client_order_id": "",
-                                "exchange_order_id": str(w.get("txId", "")),
-                                "trade_id": str(w.get("id", "") or tx_id),
-                                "status": "SUCCESS",
-                                "source": "BINANCE_WITHDRAWAL",
-                                "notes": f"משיכת קריפטו מוצלחת לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
-                            })
-                except Exception as e_wd:
-                    logger.debug("Could not fetch crypto withdrawals for chunk [%s-%s]: %s", c_start, c_end, e_wd)
-                    if any(x in str(e_wd) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+            if sapi_available:
+                for c_start, c_end in chunks:
+                    if not sapi_available:
                         break
+                    try:
+                        wd_params = {"startTime": c_start, "endTime": c_end, "limit": 1000}
+                        withdrawals = ex.sapiGetCapitalWithdrawHistory(wd_params)
+                        if isinstance(withdrawals, list):
+                            for w in withdrawals:
+                                status_code = w.get("status")
+                                # Binance withdrawal status: 6 = Completed/Success. Skip Cancelled (1), Rejected (3), Failure (5)!
+                                if status_code != 6:
+                                    logger.debug("Ignoring non-completed withdrawal status %s (txId: %s)", status_code, w.get("txId"))
+                                    continue
+
+                                apply_time_str = str(w.get("applyTime", ""))
+                                try:
+                                    dt_apply = datetime.strptime(apply_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                                    w_ts = int(dt_apply.timestamp() * 1000)
+                                except Exception:
+                                    w_ts = c_start
+
+                                tx_id = str(w.get("txId", "") or w_ts)
+                                wd_id = f"wd_{tx_id}"
+                                if wd_id in seen_transfer_ids:
+                                    continue
+                                seen_transfer_ids.add(wd_id)
+
+                                coin = str(w.get("coin", "USDT")).upper()
+                                amount = float(w.get("amount", 0.0))
+                                tx_fee = float(w.get("transactionFee", 0.0))
+                                dt_utc = datetime.fromtimestamp(w_ts / 1000.0, tz=timezone.utc)
+                                dt_local = datetime.fromtimestamp(w_ts / 1000.0)
+
+                                results.append({
+                                    "id": wd_id,
+                                    "timestamp_ms": w_ts,
+                                    "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "symbol": f"{coin}/USDT" if coin != "USDT" else "USDT/USD",
+                                    "coin": coin,
+                                    "side": "WITHDRAW",
+                                    "action_type": "WITHDRAW",
+                                    "market": "TRANSFER",
+                                    "amount": amount,
+                                    "price": 1.0 if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                    "total_usd": round(amount, 2) if coin in ("USDT", "USD", "USDC", "FDUSD") else 0.0,
+                                    "cost_basis_usd": 0.0,
+                                    "fee_usd": round(tx_fee, 4),
+                                    "fee_currency": coin,
+                                    "realized_pnl_usd": 0.0,
+                                    "realized_pnl_pct": 0.0,
+                                    "client_order_id": "",
+                                    "exchange_order_id": str(w.get("txId", "")),
+                                    "trade_id": str(w.get("id", "") or tx_id),
+                                    "status": "SUCCESS",
+                                    "source": "BINANCE_WITHDRAWAL",
+                                    "notes": f"משיכת קריפטו מוצלחת לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
+                                })
+                    except Exception as e_wd:
+                        logger.debug("Could not fetch crypto withdrawals for chunk [%s-%s]: %s", c_start, c_end, e_wd)
+                        if any(x in str(e_wd) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                            sapi_available = False
+                            break
 
             # 3. Fiat Orders (Deposits & Withdrawals)
-            for c_start, c_end in chunks:
-                for t_type, act_side, act_title in (("0", "DEPOSIT", "הפקדת פיאט"), ("1", "WITHDRAW", "משיכת פיאט")):
-                    try:
-                        fiat_res = ex.sapiGetFiatOrders({"transactionType": t_type, "beginTime": c_start, "endTime": c_end, "limit": 500})
-                        fiat_list = fiat_res.get("data", []) if isinstance(fiat_res, dict) else []
-                        for f_ord in fiat_list:
-                            raw_status = str(f_ord.get("status", "")).strip().upper()
-                            # CRITICAL: Only include SUCCESSFUL fiat orders! Skip Failed, Cancelled, Expired!
-                            if raw_status not in ("SUCCESSFUL", "SUCCESS", "COMPLETED"):
-                                logger.debug("Skipping failed/cancelled fiat order %s with status '%s'", f_ord.get("orderNo"), raw_status)
-                                continue
-
-                            f_ts = int(f_ord.get("createTime", 0))
-                            ord_no = str(f_ord.get("orderNo", "") or f_ts)
-                            f_id = f"fiat_{act_side.lower()}_{ord_no}"
-                            if f_id in seen_transfer_ids:
-                                continue
-                            seen_transfer_ids.add(f_id)
-
-                            fiat_curr = str(f_ord.get("fiatCurrency", "USD")).upper()
-                            fiat_amt = float(f_ord.get("amount", 0.0))
-                            dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
-                            dt_local = datetime.fromtimestamp(f_ts / 1000.0)
-
-                            results.append({
-                                "id": f_id,
-                                "timestamp_ms": f_ts,
-                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                                "symbol": f"{fiat_curr}/USDT",
-                                "coin": fiat_curr,
-                                "side": act_side,
-                                "action_type": f"FIAT_{act_side}",
-                                "market": "FIAT",
-                                "amount": fiat_amt,
-                                "price": 1.0,
-                                "total_usd": round(fiat_amt, 2),
-                                "cost_basis_usd": round(fiat_amt, 2) if act_side == "DEPOSIT" else 0.0,
-                                "fee_usd": float(f_ord.get("totalFee", 0.0)),
-                                "fee_currency": fiat_curr,
-                                "realized_pnl_usd": 0.0,
-                                "realized_pnl_pct": 0.0,
-                                "client_order_id": "",
-                                "exchange_order_id": ord_no,
-                                "trade_id": ord_no,
-                                "status": "SUCCESS",
-                                "source": "BINANCE_FIAT",
-                                "notes": f"{act_title} מוצלחת: {fiat_amt} {fiat_curr} באמצעות {f_ord.get('method', 'Bank/Card')}",
-                            })
-                    except Exception as e_fiat:
-                        logger.debug("Could not fetch fiat orders [%s]: %s", act_side, e_fiat)
-                        if any(x in str(e_fiat) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+            if sapi_available:
+                for c_start, c_end in chunks:
+                    if not sapi_available:
+                        break
+                    for t_type, act_side, act_title in (("0", "DEPOSIT", "הפקדת פיאט"), ("1", "WITHDRAW", "משיכת פיאט")):
+                        if not sapi_available:
                             break
+                        try:
+                            fiat_res = ex.sapiGetFiatOrders({"transactionType": t_type, "beginTime": c_start, "endTime": c_end, "limit": 500})
+                            fiat_list = fiat_res.get("data", []) if isinstance(fiat_res, dict) else []
+                            for f_ord in fiat_list:
+                                raw_status = str(f_ord.get("status", "")).strip().upper()
+                                # CRITICAL: Only include SUCCESSFUL fiat orders! Skip Failed, Cancelled, Expired!
+                                if raw_status not in ("SUCCESSFUL", "SUCCESS", "COMPLETED"):
+                                    logger.debug("Skipping failed/cancelled fiat order %s with status '%s'", f_ord.get("orderNo"), raw_status)
+                                    continue
+
+                                f_ts = int(f_ord.get("createTime", 0))
+                                ord_no = str(f_ord.get("orderNo", "") or f_ts)
+                                f_id = f"fiat_{act_side.lower()}_{ord_no}"
+                                if f_id in seen_transfer_ids:
+                                    continue
+                                seen_transfer_ids.add(f_id)
+
+                                fiat_curr = str(f_ord.get("fiatCurrency", "USD")).upper()
+                                fiat_amt = float(f_ord.get("amount", 0.0))
+                                dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
+                                dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+
+                                results.append({
+                                    "id": f_id,
+                                    "timestamp_ms": f_ts,
+                                    "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "symbol": f"{fiat_curr}/USDT",
+                                    "coin": fiat_curr,
+                                    "side": act_side,
+                                    "action_type": f"FIAT_{act_side}",
+                                    "market": "FIAT",
+                                    "amount": fiat_amt,
+                                    "price": 1.0,
+                                    "total_usd": round(fiat_amt, 2),
+                                    "cost_basis_usd": round(fiat_amt, 2) if act_side == "DEPOSIT" else 0.0,
+                                    "fee_usd": float(f_ord.get("totalFee", 0.0)),
+                                    "fee_currency": fiat_curr,
+                                    "realized_pnl_usd": 0.0,
+                                    "realized_pnl_pct": 0.0,
+                                    "client_order_id": "",
+                                    "exchange_order_id": ord_no,
+                                    "trade_id": ord_no,
+                                    "status": "SUCCESS",
+                                    "source": "BINANCE_FIAT",
+                                    "notes": f"{act_title} מוצלחת: {fiat_amt} {fiat_curr} באמצעות {f_ord.get('method', 'Bank/Card')}",
+                                })
+                        except Exception as e_fiat:
+                            logger.debug("Could not fetch fiat orders [%s]: %s", act_side, e_fiat)
+                            if any(x in str(e_fiat) for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                                sapi_available = False
+                                break
 
         except Exception as ex:
             logger.debug("Error in deposit/withdrawal master fetcher: %s", ex)

@@ -4903,8 +4903,12 @@ async function fetchTradeHistory(forceRefresh = false) {
         url += `&end_ts=${taxCustomEndTs}`;
     }
 
+    const abortCtrl = new AbortController();
+    const abortTimer = setTimeout(() => abortCtrl.abort(), 15000);
+
     try {
-        const res = await apiFetch(url);
+        const res = await apiFetch(url, { signal: abortCtrl.signal });
+        clearTimeout(abortTimer);
         if (!res.ok) {
             if (res.status === 404) {
                 throw new Error("נתיב ההיסטוריה לא זוהה בשרת (HTTP 404). תהליך הבוט בשרת עדיין מריץ קוד ישן בזיכרון ודורש אתחול (Restart).");
@@ -4972,6 +4976,26 @@ async function fetchTradeHistory(forceRefresh = false) {
         }
 
     } catch (err) {
+        clearTimeout(abortTimer);
+        if (err.name === "AbortError") {
+            showToast("⏳ שליפת הנתונים מ-Binance התעכבה (מעל 15 שניות). לחץ לניסיון חוזר.", "warning");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="13" class="empty-cell" style="padding: 2rem; text-align: center; color: var(--accent-warning, #f59e0b);">
+                    <div style="font-size: 1.15rem; font-weight: 700; margin-bottom: 0.5rem;">⏳ השליפה מ-Binance התעכבה (Timeout)</div>
+                    <div style="color: var(--text-muted, #94a3b8); font-size: 0.9rem; margin-bottom: 1rem;">
+                        השרת או Binance לא הגיבו תוך 15 שניות. לחץ על הכפתור מטה לניסיון חוזר או בחר טווח קצר יותר.
+                    </div>
+                    <button class="btn btn-primary" onclick="fetchTradeHistory(true)" style="font-weight: 700; padding: 8px 18px;">🔄 נסה לשלוף שוב עכשיו</button>
+                </td></tr>`;
+            }
+            if (banner) {
+                banner.className = "tax-status-banner warning";
+                if (bannerIcon) bannerIcon.textContent = "⏳";
+                if (bannerContent) bannerContent.innerHTML = `<strong>הפעולה התעכבה:</strong> לחץ על כפתור הרענון לניסיון חוזר.`;
+            }
+            return;
+        }
+
         if (typeof logger !== "undefined" && logger.error) logger.error("Failed to fetch tax trade history:", err);
         showToast("❌ שגיאה בשליפת היסטוריית פעולות: " + err.message, "error");
         const is404 = String(err.message).includes("404");
@@ -5394,7 +5418,7 @@ async function handleManualDepositSubmit(event) {
 
     try {
         if (saveBtn) saveBtn.disabled = true;
-        const res = await fetch("/api/history/manual-deposits", {
+        const res = await apiFetch("/api/history/manual-deposits", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5432,7 +5456,7 @@ async function handleManualDepositSubmit(event) {
 async function deleteManualDeposit(depositId) {
     if (!confirm("האם אתה בטוח שברצונך למחוק הפקדה ידנית זו?")) return;
     try {
-        const res = await fetch("/api/history/manual-deposits/delete", {
+        const res = await apiFetch("/api/history/manual-deposits/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: depositId })
