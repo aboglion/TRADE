@@ -4904,7 +4904,7 @@ async function fetchTradeHistory(forceRefresh = false) {
     }
 
     const abortCtrl = new AbortController();
-    const abortTimer = setTimeout(() => abortCtrl.abort(), 15000);
+    const abortTimer = setTimeout(() => abortCtrl.abort(), 45000);
 
     try {
         const res = await apiFetch(url, { signal: abortCtrl.signal });
