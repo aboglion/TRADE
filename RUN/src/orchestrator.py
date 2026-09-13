@@ -285,7 +285,8 @@ class BotOrchestrator:
             is_bear_regime = (decision.regime == Regime.BEAR or getattr(decision.regime, "value", decision.regime) == "bear")
             short_lev = decision.metadata.get("short_leverage", 2.0) if decision.metadata else 2.0
 
-            if hasattr(self._gateway, "set_leverage"):
+            if hasattr(self._gateway, "set_leverages") or hasattr(self._gateway, "set_leverage"):
+                target_lev_map: dict[str, float] = {}
                 for p in pairs.values():
                     lev_to_set = 1.0
                     try:
@@ -298,9 +299,21 @@ class BotOrchestrator:
                         from src.utils.math_utils import clamp_leverage_by_binance_bracket
                         notional_approx = float(portfolio.total_value_usd or 0.0) * raw_lev
                         lev_to_set = clamp_leverage_by_binance_bracket(p, raw_lev, notional_approx)
-                        self._gateway.set_leverage(lev_to_set, p)
+                        target_lev_map[p] = lev_to_set
                     except Exception as ex:
-                        logger.warning("Could not sync leverage=%.1fx for %s: %s", lev_to_set, p, ex)
+                        logger.warning("Could not calculate target leverage for %s: %s", p, ex)
+
+                if hasattr(self._gateway, "set_leverages"):
+                    try:
+                        self._gateway.set_leverages(target_lev_map)
+                    except Exception as ex:
+                        logger.warning("Could not sync leverages (%s): %s", target_lev_map, ex)
+                elif hasattr(self._gateway, "set_leverage"):
+                    for p, lev in target_lev_map.items():
+                        try:
+                            self._gateway.set_leverage(lev, p)
+                        except Exception as ex:
+                            logger.warning("Could not sync leverage=%.1fx for %s: %s", lev, p, ex)
 
             plan = self._portfolio_service.compute_rebalance_plan(
                 portfolio=portfolio,

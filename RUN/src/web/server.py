@@ -96,10 +96,19 @@ def _fetch_market_metrics_worker() -> None:
                 else:
                     pct_sma150 = 0.0
 
+                prev_5d = float(closes[-6]) if len(closes) >= 6 else (float(closes[0]) if closes else curr_price)
+                pct_5d = ((curr_price - prev_5d) / prev_5d * 100.0) if prev_5d > 0 else 0.0
+
+                highs_5d = [float(c[2]) for c in c1d[-5:]] if len(c1d) >= 5 else [curr_price]
+                high_5d = max(highs_5d) if highs_5d else curr_price
+                pb_5d = ((curr_price - high_5d) / high_5d * 100.0) if high_5d > 0 else 0.0
+
                 results[coin] = {
                     "price": curr_price,
                     "change_4h": round(pct_4h, 2),
                     "change_24h": round(pct_24h, 2),
+                    "change_5d": round(pct_5d, 2),
+                    "pullback_5d": round(pb_5d, 2),
                     "change_sma150": round(pct_sma150, 2),
                 }
             except Exception as ex:

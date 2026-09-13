@@ -245,6 +245,19 @@ class DryRunExchange:
         self._current_leverage[symbol] = lev_float
         logger.debug("[DRY_RUN] Set leverage=%.1fx for %s", leverage, symbol)
 
+    def set_leverages(self, leverage_map: dict[str, float]) -> None:
+        """Set leverage for multiple symbols in simulation."""
+        changed: dict[float, list[str]] = {}
+        for symbol, leverage in leverage_map.items():
+            lev_float = float(leverage)
+            if self._current_leverage.get(symbol) == lev_float:
+                continue
+            self._current_leverage[symbol] = lev_float
+            changed.setdefault(lev_float, []).append(symbol)
+        if changed:
+            parts = [f"{lev:.1f}x for {', '.join(syms)}" for lev, syms in changed.items()]
+            logger.debug("[DRY_RUN] Set leverage: %s", "; ".join(parts))
+
     def _get_active_leverage(self, symbol: str) -> float:
         levs = getattr(self, "_current_leverage", {})
         if symbol in levs:

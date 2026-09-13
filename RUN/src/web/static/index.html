@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=22">
+    <link rel="stylesheet" href="style.css?v=28">
 </head>
 <body>
     <div class="ambient-glow bg-glow-1"></div>
@@ -71,10 +71,6 @@
                         <span>🧹</span> <span class="btn-text">Reset PNL Stats</span>
                     </button>
 
-                    <button class="btn btn-outline" id="dryRunModalBtn" title="Configure simulation holdings (Dry Run Initial Holdings)" onclick="openDryRunModal()">
-                        <span>⚙️</span> <span class="btn-text">Dry Run Balances</span>
-                    </button>
-
                     <button class="btn btn-outline" id="telegramModalBtn" title="Configure Telegram notification alerts (Telegram API Alerts)" onclick="openTelegramModal()">
                         <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
                     </button>
@@ -116,7 +112,6 @@
                         <button class="tf-btn" data-tf="24h">24H</button>
                         <button class="tf-btn" data-tf="7d">7D</button>
                         <button class="tf-btn active" data-tf="all">ALL</button>
-                        <button class="tf-btn tf-btn-reset" id="pnlResetMiniBtn" title="Reset PnL Graph, Stats & Fees">🧹</button>
                     </div>
                 </div>
                 <div class="portfolio-card-body">
@@ -226,9 +221,6 @@
                         <span class="card-icon">📊</span>
                         <span class="card-title">PORTFOLIO ALLOCATION SPLIT</span>
                     </div>
-                    <button class="btn btn-sm btn-action" id="triggerCycleBtn" title="Trigger instant trading cycle now">
-                        <span>▶</span> <span>Run Instant Cycle</span>
-                    </button>
                 </div>
                 <div class="allocation-bars" id="allocationBars">
                     <div class="empty-state">Loading portfolio holdings...</div>
@@ -948,6 +940,11 @@
                         </div>
                         <div class="mode-opt-title">סימולציה (Simulation)</div>
                         <div class="mode-opt-desc">מסחר בדיקה על נתוני שוק חיים. אפס סיכון כספי.</div>
+                        <div style="margin-top: 10px;">
+                            <button type="button" class="btn btn-sm btn-outline" id="configDryBalancesBtn" style="font-size: 0.78rem; padding: 4px 8px; width: 100%;" onclick="openDryRunModal(); event.stopPropagation();" title="הגדר יתרות סימולציה ראשוניות (USDT, BTC, ETH, SOL)">
+                                ⚙️ יתרות סימולציה (Holdings)
+                            </button>
+                        </div>
                     </div>
 
                     <div class="mode-option-card" id="modeOptTestnet" onclick="selectModeTarget('TESTNET')">
@@ -988,6 +985,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=27"></script>
+    <script src="app.js?v=28"></script>
 </body>
 </html>

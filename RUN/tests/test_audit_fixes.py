@@ -187,3 +187,50 @@ def test_retry_transient_error_log_levels(caplog):
     warn_records = [r for r in caplog.records if r.levelno == logging.WARNING and "attempt 2/3" in r.message]
     assert len(warn_records) == 1
 
+
+def test_set_leverages_consolidates_identical_leverage_logs(caplog):
+    """Test that setting same leverage across multiple symbols emits exactly ONE log line."""
+    import logging
+    from src.exchanges.exchange_gateway import ExchangeGateway
+    from src.config.config_manager import ExchangeConfig
+
+    config = ExchangeConfig(name="binance", api_key="k", api_secret="s", market_type="future")
+    gw = ExchangeGateway(config, run_mode=MagicMock())
+    gw._initialized = True
+    gw._exchange = MagicMock()
+
+    with caplog.at_level(logging.INFO):
+        gw.set_leverages({"BTC/USDT": 1.0, "ETH/USDT": 1.0, "SOL/USDT": 1.0})
+
+    # Exactly one INFO log should be emitted for all 3 symbols
+    lev_records = [r for r in caplog.records if "Set leverage" in r.message and r.levelno == logging.INFO]
+    assert len(lev_records) == 1
+    assert "Set leverage=1x for BTC/USDT, ETH/USDT, SOL/USDT" in lev_records[0].message
+
+    # Re-running with same leverage should emit 0 logs (no-op)
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        gw.set_leverages({"BTC/USDT": 1.0, "ETH/USDT": 1.0, "SOL/USDT": 1.0})
+    lev_records_noop = [r for r in caplog.records if "Set leverage" in r.message]
+    assert len(lev_records_noop) == 0
+
+
+def test_set_leverages_consolidates_mixed_leverage_logs(caplog):
+    """Test that setting different leverages across symbols emits exactly ONE consolidated line."""
+    import logging
+    from src.exchanges.exchange_gateway import ExchangeGateway
+    from src.config.config_manager import ExchangeConfig
+
+    config = ExchangeConfig(name="binance", api_key="k", api_secret="s", market_type="future")
+    gw = ExchangeGateway(config, run_mode=MagicMock())
+    gw._initialized = True
+    gw._exchange = MagicMock()
+
+    with caplog.at_level(logging.INFO):
+        gw.set_leverages({"BTC/USDT": 2.0, "ETH/USDT": 1.0, "SOL/USDT": 1.0})
+
+    lev_records = [r for r in caplog.records if "Set leverage" in r.message and r.levelno == logging.INFO]
+    assert len(lev_records) == 1
+    assert "Set leverage: 2x for BTC/USDT; 1x for ETH/USDT, SOL/USDT" in lev_records[0].message
+
+

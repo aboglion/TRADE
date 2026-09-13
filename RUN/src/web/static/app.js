@@ -527,6 +527,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Dry Run modal event listeners
     safeAddListener("dryRunModalBtn", "click", openDryRunModal);
+    safeAddListener("configDryBalancesBtn", "click", openDryRunModal);
     safeAddListener("closeDryRunModal", "click", closeDryRunModal);
     safeAddListener("cancelDryRunSave", "click", closeDryRunModal);
     safeAddListener("saveDryRunBalances", "click", openDryRunConfirmModal);
@@ -945,7 +946,7 @@ async function fetchStatus() {
             regimeLevPill.className = isBull ? (isSafeHaven ? "pnl-pill pnl-pill-mid" : "pnl-pill pnl-pill-high") : "pnl-pill pnl-pill-low";
         }
 
-        // Update Market Performance Table (BTC, ETH, SOL: 4H, 24H, SMA-150)
+        // Update Market Performance Table (BTC, ETH, SOL: 4H, 24H, 5D, SMA-150)
         const macroCoinPerf = document.getElementById("macroCoinPerf");
         if (macroCoinPerf && data.market_metrics) {
             const metrics = data.market_metrics;
@@ -961,11 +962,17 @@ async function fetchStatus() {
                 if (coin === "SOL") icon = "◎";
 
                 const formatCell = (val) => {
+                    if (typeof val !== 'number' || isNaN(val)) {
+                        return `<span class="perf-val-neutral">--</span>`;
+                    }
                     const isPos = val >= 0;
                     const sign = isPos ? "+" : "";
                     const cls = isPos ? "perf-val-up" : "perf-val-down";
                     return `<span class="${cls}">${sign}${val.toFixed(2)}%</span>`;
                 };
+
+                const val5d = typeof item.change_5d === 'number' ? item.change_5d : 0.0;
+                const pb5dStr = typeof item.pullback_5d === 'number' ? ` | 5D High Pullback: ${item.pullback_5d.toFixed(2)}%` : "";
 
                 rowsHtml += `
                     <div class="macro-perf-row">
@@ -973,9 +980,10 @@ async function fetchStatus() {
                             <span class="coin-mini-icon">${icon}</span>
                             <span class="coin-name">${coin}</span>
                         </div>
-                        <div class="col-tf" title="4-Hour Change">${formatCell(item.change_4h)}</div>
-                        <div class="col-tf" title="24-Hour Change">${formatCell(item.change_24h)}</div>
-                        <div class="col-tf" title="Distance from SMA-150 Trendline">${formatCell(item.change_sma150)}</div>
+                        <div class="col-tf" title="${coin} 4-Hour Price Change (Strategy Candle)">${formatCell(item.change_4h)}</div>
+                        <div class="col-tf" title="${coin} 24-Hour Price Change (Daily Macro Trend)">${formatCell(item.change_24h)}</div>
+                        <div class="col-tf" title="${coin} 5-Day Price Change${pb5dStr} (Donchian-30 & Crash Shield Window)">${formatCell(val5d)}</div>
+                        <div class="col-tf" title="${coin} Distance from SMA-150 Trendline (Macro Regime)">${formatCell(item.change_sma150)}</div>
                     </div>
                 `;
             });
@@ -985,9 +993,10 @@ async function fetchStatus() {
                     <div class="macro-perf-table">
                         <div class="macro-perf-header">
                             <div class="col-coin">COIN</div>
-                            <div class="col-tf" title="4-Hour Price Change">4H</div>
-                            <div class="col-tf" title="24-Hour Price Change">24H</div>
-                            <div class="col-tf" title="Distance from SMA-150 Trendline">SMA-150</div>
+                            <div class="col-tf" title="4-Hour Price Change (Strategy Candle)">4H</div>
+                            <div class="col-tf" title="24-Hour Price Change (Daily Macro Trend)">24H</div>
+                            <div class="col-tf" title="5-Day Price Change (Donchian-30 & Crash Shield Window)">5D</div>
+                            <div class="col-tf" title="Distance from SMA-150 Trendline (Macro Regime)">SMA-150</div>
                         </div>
                         ${rowsHtml}
                     </div>
@@ -1207,7 +1216,9 @@ async function fetchOrders() {
         const tableBody = document.getElementById("ordersTableBody");
         tableBody.innerHTML = "";
 
-        const allOrders = [...(data.pending || []), ...(data.completed || [])].reverse();
+        const pendingList = (data.pending || []).map(o => ({ ...o, _isPendingGroup: true }));
+        const completedList = (data.completed || []).map(o => ({ ...o, _isPendingGroup: false }));
+        const allOrders = [...pendingList, ...completedList].reverse();
         latestOrdersList = data.completed || [];
         document.getElementById("orderCount").textContent = allOrders.length;
         updatePnlAndFeesDisplay(selectedPnlTimeframe);
@@ -1250,21 +1261,40 @@ async function fetchOrders() {
                 }
             }
 
-            let statusRaw = (o.status || "FILLED").toUpperCase();
-            let statusDisplay = statusRaw;
-            let statusClass = "tag-filled";
+            const statusRaw = String(o.status || (o._isPendingGroup ? "PENDING" : "FILLED")).toUpperCase();
+            let statusDisplay = "DONE";
+            let statusClass = "tag-done";
+            let rowClass = "order-row-done";
+            let statusTitle = "בוצע בהצלחה (Executed & Completed)";
 
-            if (statusRaw === "FILLED") {
+            const isWaiting = o._isPendingGroup ||
+                ["PENDING", "OPEN", "INTENT", "SUBMITTED", "NEW", "WAITING", "QUEUED"].includes(statusRaw);
+            const isPartial = statusRaw === "PARTIALLY_FILLED" || statusRaw === "PARTIAL";
+            const isFailed = ["FAILED", "REJECTED", "CANCELLED", "CANCELED", "EXPIRED"].includes(statusRaw);
+
+            if (isWaiting) {
+                statusDisplay = "⏳ WAITING";
+                statusClass = "tag-waiting";
+                rowClass = "order-row-pending";
+                statusTitle = "עדיין מחכה לביצוע (Waiting for Execution)";
+            } else if (isPartial) {
+                statusDisplay = "🔄 PARTIAL";
+                statusClass = "tag-partial";
+                rowClass = "order-row-pending";
+                statusTitle = "בוצע חלקית - ממתין להשלמה (Partially Filled)";
+            } else if (isFailed) {
+                statusDisplay = statusRaw === "EXPIRED" ? "EXPIRED" : (statusRaw.includes("CANCEL") ? "CANCELLED" : "FAILED");
+                statusClass = "tag-failed";
+                rowClass = "order-row-failed";
+                statusTitle = "נכשל או בוטל (Order Failed or Cancelled)";
+            } else {
                 statusDisplay = "DONE";
-                statusClass = "tag-filled";
-            } else if (statusRaw === "FAILED" || statusRaw === "REJECTED") {
-                statusDisplay = "FAILED";
-                statusClass = "tag-sell";
-            } else if (statusRaw === "PENDING" || statusRaw === "OPEN") {
-                statusDisplay = "PENDING";
-                statusClass = "tag-buy";
+                statusClass = "tag-done";
+                rowClass = "order-row-done";
+                statusTitle = "בוצע בהצלחה (Executed & Completed)";
             }
 
+            tr.className = rowClass;
             tr.innerHTML = `
                 <td><code>${(o.client_order_id || o.exchange_order_id || "N/A").substring(0, 18)}</code></td>
                 <td><span class="tag ${sideClass}">${side}</span></td>
@@ -1273,7 +1303,7 @@ async function fetchOrders() {
                 <td>${priceStr}</td>
                 <td>${feeStr}</td>
                 <td><span style="${netStyle}">${netTotalStr}</span></td>
-                <td><span class="tag ${statusClass}">${statusDisplay}</span></td>
+                <td><span class="tag ${statusClass}" title="${statusTitle}">${statusDisplay}</span></td>
             `;
             tableBody.appendChild(tr);
         });

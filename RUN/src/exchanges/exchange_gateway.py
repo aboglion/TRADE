@@ -164,31 +164,57 @@ class ExchangeGateway:
                         self.set_margin_mode("cross", symbol)
                     except Exception as mm_err:
                         logger.debug("Could not verify cross margin for %s: %s", symbol, mm_err)
-                    self.set_leverage(2, symbol)
+
+            init_lev_map = {
+                sym: 1.0
+                for sym in ("BTC/USDT", "ETH/USDT", "SOL/USDT")
+                if sym in self._markets or f"{sym}:USDT" in self._markets
+            }
+            if init_lev_map:
+                self.set_leverages(init_lev_map)
+
+    def set_leverages(self, leverage_map: dict[str, float]) -> None:
+        """Set leverage for multiple futures market symbols, consolidating logs cleanly."""
+        if self._config.market_type != "future" or not leverage_map:
+            return
+
+        succeeded: dict[int, list[str]] = {}
+
+        for symbol, leverage in leverage_map.items():
+            lev_int = max(1, round(leverage))
+            if self._current_leverage.get(symbol) == lev_int:
+                continue
+
+            sym_to_use = symbol
+            if self._markets:
+                if symbol in self._markets:
+                    sym_to_use = symbol
+                elif f"{symbol}:USDT" in self._markets:
+                    sym_to_use = f"{symbol}:USDT"
+                elif ":" in symbol and symbol.split(":")[0] in self._markets:
+                    sym_to_use = symbol.split(":")[0]
+
+            try:
+                self._retry(lambda s=sym_to_use, l=lev_int: self.exchange.set_leverage(l, s))
+                self._current_leverage[symbol] = lev_int
+                succeeded.setdefault(lev_int, []).append(symbol)
+            except Exception as e:
+                logger.warning("Could not set leverage=%dx for %s: %s", lev_int, symbol, e)
+
+        if not succeeded:
+            return
+
+        # Consolidate log line: single line if all have the same leverage, or grouped by leverage
+        if len(succeeded) == 1:
+            lev, syms = next(iter(succeeded.items()))
+            logger.info("Set leverage=%dx for %s", lev, ", ".join(syms))
+        else:
+            parts = [f"{lev}x for {', '.join(syms)}" for lev, syms in sorted(succeeded.items(), reverse=True)]
+            logger.info("Set leverage: %s", "; ".join(parts))
 
     def set_leverage(self, leverage: float, symbol: str) -> None:
         """Set leverage for a futures market symbol."""
-        if self._config.market_type != "future":
-            return
-        lev_int = max(1, round(leverage))
-        if self._current_leverage.get(symbol) == lev_int:
-            return
-
-        sym_to_use = symbol
-        if self._markets:
-            if symbol in self._markets:
-                sym_to_use = symbol
-            elif f"{symbol}:USDT" in self._markets:
-                sym_to_use = f"{symbol}:USDT"
-            elif ":" in symbol and symbol.split(":")[0] in self._markets:
-                sym_to_use = symbol.split(":")[0]
-
-        try:
-            self._retry(lambda: self.exchange.set_leverage(lev_int, sym_to_use))
-            self._current_leverage[symbol] = lev_int
-            logger.info("Set leverage=%dx for %s (%s)", lev_int, symbol, sym_to_use)
-        except Exception as e:
-            logger.warning("Could not set leverage=%dx for %s: %s", lev_int, symbol, e)
+        self.set_leverages({symbol: leverage})
 
     def set_margin_mode(self, margin_mode: str, symbol: str) -> None:
         """Set margin mode ('cross' or 'isolated') for a futures market symbol."""
