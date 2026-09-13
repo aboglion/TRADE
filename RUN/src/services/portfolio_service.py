@@ -22,10 +22,12 @@ from src.core.models import (
     TargetAllocation,
 )
 from src.utils.math_utils import (
+    BINANCE_DEFAULT_MIN_NOTIONAL,
     compute_order_amount,
     get_market_constraints,
     is_above_min_order,
     truncate_to_precision,
+    truncate_to_step_size,
 )
 
 logger = logging.getLogger("bot.services.portfolio")
@@ -179,6 +181,7 @@ class PortfolioService:
                     unrealized_pnl=unrealized_pnl,
                     entry_price=entry_price,
                     leverage=leverage,
+                    contracts=contracts,
                 )
         except Exception as e:
             logger.warning("Failed to fetch futures positions: %s", e)
@@ -367,13 +370,20 @@ class PortfolioService:
             # Get market constraints
             try:
                 market_info = self._gateway.get_market_info(pair_symbol)
-                constraints = get_market_constraints(market_info)
+                constraints = get_market_constraints(market_info, symbol=pair_symbol)
             except Exception:
+                base_up = base.upper()
+                def_notional = BINANCE_DEFAULT_MIN_NOTIONAL.get(base_up, 10.0) if self._is_futures else 10.0
                 constraints = {
                     "amount_precision": 8,
+                    "price_precision": 2,
                     "min_amount": 0.00001,
-                    "min_notional": 10.0,
+                    "max_amount": float("inf"),
+                    "min_price": 0.0,
+                    "min_notional": def_notional,
+                    "step_size": None,
                 }
+            step_sz = constraints.get("step_size")
 
             holding = portfolio.holdings.get(base)
             target_meta = getattr(target, "metadata", {}) or {}
@@ -419,32 +429,42 @@ class PortfolioService:
             )
 
             if is_flip and holding:
-                # 1. Close current position completely
-                raw_close_qty = abs(holding.total)
-                close_amount = truncate_to_precision(raw_close_qty, constraints["amount_precision"])
-                close_side = OrderSide.SELL if current_weight > 0 else OrderSide.BUY
                 order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
                 order_price = None if order_type == OrderType.MARKET else price
-                close_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else pos_lev)
 
-                if is_above_min_order(close_amount, price, constraints["min_amount"], constraints["min_notional"]):
-                    intent_close = OrderIntent(
-                        client_order_id=OrderIntent.generate_id(),
-                        symbol=pair_symbol,
-                        side=close_side,
-                        order_type=order_type,
-                        amount=close_amount,
-                        price=order_price,
-                        estimated_price=price,
-                        reason=f"Close previous {current_weight:+.2%} position for regime reversal",
-                        candle_ts=target.timestamp_ms,
-                        reduce_only=self._is_futures,
-                        leverage=close_lev,
-                    )
-                    if close_side == OrderSide.SELL:
-                        sell_orders.append(intent_close)
+                # 1. Close current position completely (only if an actual position exists on exchange)
+                open_contracts = float(getattr(holding, "contracts", 0.0) or 0.0)
+                if open_contracts == 0.0 and abs(holding.total) > 1e-8:
+                    open_contracts = holding.total
+                raw_close_qty = abs(open_contracts) if self._is_futures else abs(holding.total)
+
+                if raw_close_qty > 1e-8:
+                    if step_sz is not None and step_sz > 0:
+                        close_amount = truncate_to_step_size(raw_close_qty, step_size=step_sz, precision=constraints["amount_precision"])
                     else:
-                        buy_orders.append(intent_close)
+                        close_amount = truncate_to_precision(raw_close_qty, constraints["amount_precision"])
+                    close_side = OrderSide.SELL if (open_contracts > 0 if self._is_futures else current_weight > 0) else OrderSide.BUY
+                    close_lev = float(holding.leverage if (holding and holding.leverage > 1.0) else pos_lev)
+
+                    # In Binance Futures, reduce-only orders are allowed below min_notional ("unless you choose reduce only")
+                    if is_above_min_order(close_amount, price, constraints["min_amount"], constraints["min_notional"], is_reduce_only=self._is_futures):
+                        intent_close = OrderIntent(
+                            client_order_id=OrderIntent.generate_id(),
+                            symbol=pair_symbol,
+                            side=close_side,
+                            order_type=order_type,
+                            amount=close_amount,
+                            price=order_price,
+                            estimated_price=price,
+                            reason=f"Close previous {current_weight:+.2%} position for regime reversal",
+                            candle_ts=target.timestamp_ms,
+                            reduce_only=self._is_futures,
+                            leverage=close_lev,
+                        )
+                        if close_side == OrderSide.SELL:
+                            sell_orders.append(intent_close)
+                        else:
+                            buy_orders.append(intent_close)
 
                 # 2. Open new target position in opposite direction
                 target_open_val = abs(target_weight) * total_value
@@ -454,6 +474,7 @@ class PortfolioService:
                     amount_precision=constraints["amount_precision"],
                     min_amount=constraints["min_amount"],
                     min_notional=constraints["min_notional"],
+                    step_size=step_sz,
                 )
                 open_side = OrderSide.SELL if target_weight < 0 else OrderSide.BUY
                 open_lev = float(s_lev if (target_weight < 0 and is_target_bear) else pos_lev)
@@ -478,26 +499,28 @@ class PortfolioService:
 
             if is_full_liquidation:
                 if holding:
-                    raw_qty = abs(holding.free if not self._is_futures else holding.total)
-                    full_amount = truncate_to_precision(raw_qty, constraints["amount_precision"])
-                    if full_amount >= constraints["min_amount"] and (full_amount * price) >= constraints["min_notional"]:
+                    if self._is_futures:
+                        open_contracts = float(getattr(holding, "contracts", 0.0) or 0.0)
+                        if open_contracts == 0.0 and abs(holding.total) > 1e-8:
+                            open_contracts = holding.total
+                        raw_qty = abs(open_contracts)
+                    else:
+                        raw_qty = abs(holding.free)
+
+                    if raw_qty < 1e-8:
+                        continue
+
+                    if step_sz is not None and step_sz > 0:
+                        full_amount = truncate_to_step_size(raw_qty, step_size=step_sz, precision=constraints["amount_precision"])
+                    else:
+                        full_amount = truncate_to_precision(raw_qty, constraints["amount_precision"])
+
+                    if is_above_min_order(full_amount, price, constraints["min_amount"], constraints["min_notional"], is_reduce_only=self._is_futures):
                         amount = full_amount
                     else:
-                        amount = compute_order_amount(
-                            target_value_usd=target_value_usd,
-                            price=price,
-                            amount_precision=constraints["amount_precision"],
-                            min_amount=constraints["min_amount"],
-                            min_notional=constraints["min_notional"],
-                        )
+                        amount = None
                 else:
-                    amount = compute_order_amount(
-                        target_value_usd=target_value_usd,
-                        price=price,
-                        amount_precision=constraints["amount_precision"],
-                        min_amount=constraints["min_amount"],
-                        min_notional=constraints["min_notional"],
-                    )
+                    amount = None
             else:
                 amount = compute_order_amount(
                     target_value_usd=target_value_usd,
@@ -505,6 +528,7 @@ class PortfolioService:
                     amount_precision=constraints["amount_precision"],
                     min_amount=constraints["min_amount"],
                     min_notional=constraints["min_notional"],
+                    step_size=step_sz,
                 )
 
             if amount is None:
@@ -545,27 +569,46 @@ class PortfolioService:
             order_type = OrderType.MARKET if self._allow_market_orders else OrderType.LIMIT
             order_price = None if order_type == OrderType.MARKET else price
 
-            is_reducing = bool(
-                self._is_futures
-                and (
-                    is_full_liquidation
-                    or (current_weight > 1e-6 and deviation < 0)
-                    or (current_weight < -1e-6 and deviation > 0)
-                )
-            )
-
-            if self._is_futures and is_reducing and holding:
-                pos_qty = abs(holding.total)
-                if amount > pos_qty:
-                    amount = truncate_to_precision(pos_qty, constraints["amount_precision"])
-                    if not is_above_min_order(amount, price, constraints["min_amount"], constraints["min_notional"]):
-                        logger.debug("Reduce quantity for %s ($%.2f) below exchange minimums, skipping", symbol, amount * price)
-                        continue
-
             if is_full_liquidation and holding:
-                order_side = OrderSide.SELL if holding.total > 0 else OrderSide.BUY
+                if self._is_futures:
+                    open_contracts = float(getattr(holding, "contracts", 0.0) or 0.0)
+                    if open_contracts == 0.0 and abs(holding.total) > 1e-8:
+                        open_contracts = holding.total
+                    order_side = OrderSide.SELL if open_contracts > 0 else OrderSide.BUY
+                else:
+                    order_side = OrderSide.SELL if holding.total > 0 else OrderSide.BUY
             else:
                 order_side = OrderSide.SELL if deviation < 0 else OrderSide.BUY
+
+            # Strictly verify whether this order is reducing an active futures contract position
+            is_reducing = False
+            if self._is_futures and holding:
+                open_contracts = float(getattr(holding, "contracts", 0.0) or 0.0)
+                if open_contracts == 0.0 and abs(holding.total) > 1e-8:
+                    open_contracts = holding.total
+
+                if order_side == OrderSide.SELL and open_contracts > 1e-8:
+                    # Selling reduces an existing long position
+                    is_reducing = True
+                    if amount > open_contracts:
+                        if step_sz is not None and step_sz > 0:
+                            amount = truncate_to_step_size(open_contracts, step_size=step_sz, precision=constraints["amount_precision"])
+                        else:
+                            amount = truncate_to_precision(open_contracts, constraints["amount_precision"])
+                elif order_side == OrderSide.BUY and open_contracts < -1e-8:
+                    # Buying reduces an existing short position
+                    is_reducing = True
+                    short_qty = abs(open_contracts)
+                    if amount > short_qty:
+                        if step_sz is not None and step_sz > 0:
+                            amount = truncate_to_step_size(short_qty, step_size=step_sz, precision=constraints["amount_precision"])
+                        else:
+                            amount = truncate_to_precision(short_qty, constraints["amount_precision"])
+
+                if is_reducing:
+                    if not is_above_min_order(amount, price, constraints["min_amount"], constraints["min_notional"], is_reduce_only=True):
+                        logger.debug("Reduce quantity for %s ($%.2f) below exchange minimums, skipping", symbol, amount * price)
+                        continue
 
             intent = OrderIntent(
                 client_order_id=OrderIntent.generate_id(),

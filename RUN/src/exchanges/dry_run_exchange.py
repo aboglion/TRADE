@@ -295,7 +295,35 @@ class DryRunExchange:
         # Determine expanding amount for margin requirement
         existing_pos = self._get_pos(intent.symbol)
         existing_contracts = float(existing_pos.get("contracts", 0.0) or 0.0)
-        
+
+        if getattr(intent, "reduce_only", False):
+            if intent.side == OrderSide.SELL and existing_contracts <= 1e-8:
+                return OrderResult(
+                    client_order_id=intent.client_order_id,
+                    exchange_order_id=f"closed_{intent.client_order_id}",
+                    symbol=intent.symbol,
+                    status=OrderStatus.FILLED,
+                    filled_amount=0.0,
+                    average_price=price,
+                    fees=0.0,
+                    fee_currency="USDT",
+                    timestamp_ms=int(time.time() * 1000),
+                    error_message="Position already closed on exchange",
+                )
+            elif intent.side == OrderSide.BUY and existing_contracts >= -1e-8:
+                return OrderResult(
+                    client_order_id=intent.client_order_id,
+                    exchange_order_id=f"closed_{intent.client_order_id}",
+                    symbol=intent.symbol,
+                    status=OrderStatus.FILLED,
+                    filled_amount=0.0,
+                    average_price=price,
+                    fees=0.0,
+                    fee_currency="USDT",
+                    timestamp_ms=int(time.time() * 1000),
+                    error_message="Position already closed on exchange",
+                )
+
         if intent.side == OrderSide.BUY:
             if existing_contracts >= 0:
                 expanding_qty = intent.amount

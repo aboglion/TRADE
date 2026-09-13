@@ -67,6 +67,7 @@ class ExchangeGateway:
         self._markets: dict[str, Any] = {}
         self._initialized = False
         self._current_leverage: dict[str, int] = {}
+        self._is_hedged: bool = False
 
     def initialize(self) -> None:
         """Create the CCXT exchange instance and load markets."""
@@ -129,8 +130,9 @@ class ExchangeGateway:
             len(self._markets),
         )
 
-        # Ensure One-Way Mode on Binance Futures (required for directional trading & short hedges)
+        # Detect and configure Binance Futures Position Mode (One-Way Mode vs Hedge Mode)
         if self._config.market_type == "future":
+            self._is_hedged = False
             try:
                 self._exchange.set_position_mode(hedged=False)
                 logger.info("Binance Futures position mode verified: One-Way Mode")
@@ -138,13 +140,30 @@ class ExchangeGateway:
                 err_str = str(ex)
                 if "-4059" in err_str or "No need to change" in err_str:
                     logger.debug("Binance Futures already in One-Way Mode")
+                    self._is_hedged = False
                 else:
-                    logger.warning("Could not set One-Way Mode on Binance Futures: %s", ex)
+                    try:
+                        mode_res = self._retry(lambda: self._exchange.fetch_position_mode())
+                        self._is_hedged = bool(mode_res.get("hedged", False))
+                        if self._is_hedged:
+                            logger.warning(
+                                "Binance Futures is in HEDGE MODE (Dual-Side Position). "
+                                "Orders will automatically include positionSide parameters to prevent -4061 errors."
+                            )
+                        else:
+                            logger.info("Binance Futures position mode verified: One-Way Mode")
+                    except Exception as mode_err:
+                        logger.warning("Could not query Binance Futures position mode (%s). Defaulting to One-Way Mode.", mode_err)
+                        self._is_hedged = False
 
-        # Set default leverage for futures markets if applicable
+        # Set default leverage and ensure cross margin mode for futures markets
         if self._config.market_type == "future":
             for symbol in ("BTC/USDT", "ETH/USDT", "SOL/USDT"):
-                if symbol in self._markets:
+                if symbol in self._markets or f"{symbol}:USDT" in self._markets:
+                    try:
+                        self.set_margin_mode("cross", symbol)
+                    except Exception as mm_err:
+                        logger.debug("Could not verify cross margin for %s: %s", symbol, mm_err)
                     self.set_leverage(2, symbol)
 
     def set_leverage(self, leverage: float, symbol: str) -> None:
@@ -367,14 +386,37 @@ class ExchangeGateway:
         }
         if intent.order_type.value == "limit" and "timeInForce" not in params:
             params["timeInForce"] = "GTC"
+
+        intent_amount = intent.amount
+
         if self._config.market_type == "future" and getattr(intent, "reduce_only", False):
             params["reduceOnly"] = True
 
-        # Apply strict exchange precision formatting to prevent API error -1111
+        # Dynamic Binance Futures Hedge Mode (Dual-Side Position) handling to eliminate -4061
+        if self._config.market_type == "future" and getattr(self, "_is_hedged", False):
+            params["hedged"] = True
+            if intent.side.value.lower() == "buy":
+                params["positionSide"] = "SHORT" if params.get("reduceOnly") else "LONG"
+            else:  # sell
+                params["positionSide"] = "LONG" if params.get("reduceOnly") else "SHORT"
+
+        # Apply strict exchange step size and precision formatting to prevent -1111 and LOT_SIZE errors
         try:
-            formatted_amount = self.amount_to_precision(resolved_sym, intent.amount)
+            market_info = self.get_market_info(resolved_sym)
+            from src.utils.math_utils import get_market_constraints, truncate_to_step_size, truncate_to_precision
+            constraints = get_market_constraints(market_info, symbol=resolved_sym)
+            step_sz = constraints.get("step_size")
+            prec = constraints.get("amount_precision", 8)
+            if step_sz is not None and step_sz > 0:
+                clamped_amt = truncate_to_step_size(intent_amount, step_size=step_sz, precision=prec)
+            else:
+                clamped_amt = truncate_to_precision(intent_amount, prec)
+            formatted_amount = self.amount_to_precision(resolved_sym, clamped_amt)
         except Exception:
-            formatted_amount = intent.amount
+            try:
+                formatted_amount = self.amount_to_precision(resolved_sym, intent_amount)
+            except Exception:
+                formatted_amount = intent_amount
 
         if formatted_amount is not None:
             try:
@@ -389,7 +431,7 @@ class ExchangeGateway:
                     formatted_amount = truncate_to_precision(intent.amount, prec)
                 if float(formatted_amount) <= 0.0:
                     raise InvalidOrderError(
-                        f"Order amount {intent.amount} formatted to 0.0 for {resolved_sym} due to exchange lot size/precision"
+                        f"Order amount {intent_amount} formatted to 0.0 for {resolved_sym} due to exchange lot size/precision"
                     )
             except (ValueError, TypeError):
                 pass
@@ -400,6 +442,37 @@ class ExchangeGateway:
                 formatted_price = self.price_to_precision(resolved_sym, intent.price)
             except Exception:
                 formatted_price = intent.price
+
+        # Minimum notional verification for expanding orders on Binance Futures to prevent -4164 / -1013
+        if self._config.market_type == "future" and not params.get("reduceOnly"):
+            try:
+                est_px = float(intent.price or intent.estimated_price or 0.0)
+                if est_px <= 0:
+                    try:
+                        est_px = float(self.fetch_ticker_price(resolved_sym) or 0.0)
+                    except Exception:
+                        est_px = 0.0
+                if est_px > 0 and formatted_amount:
+                    order_notional = float(formatted_amount) * est_px
+                    c_min = None
+                    try:
+                        c_min = self.get_market_info(resolved_sym).get("limits", {}).get("cost", {}).get("min")
+                    except Exception:
+                        pass
+                    if c_min and float(c_min) > 0:
+                        min_req = float(c_min)
+                    else:
+                        from src.utils.math_utils import BINANCE_DEFAULT_MIN_NOTIONAL
+                        base_key = resolved_sym.split("/")[0].split(":")[0].upper()
+                        min_req = BINANCE_DEFAULT_MIN_NOTIONAL.get(base_key, 10.0)
+                    if order_notional < (min_req - 1e-6):
+                        raise InvalidOrderError(
+                            f"Order notional ${order_notional:.2f} for {resolved_sym} is below Binance minimum notional ${min_req:.2f}"
+                        )
+            except InvalidOrderError:
+                raise
+            except Exception as notional_err:
+                logger.debug("Could not verify min notional pre-flight: %s", notional_err)
 
         try:
             raw = self._retry(lambda: self.exchange.create_order(
@@ -486,7 +559,7 @@ class ExchangeGateway:
                     except Exception:
                         new_formatted_amt = rem_qty
 
-                    if 0 < float(new_formatted_amt) < float(formatted_amount):
+                    if 0 < float(new_formatted_amt) <= float(formatted_amount):
                         logger.info("Retrying reduceOnly order with exact remaining position amount: %.8f -> %.8f", float(formatted_amount), float(new_formatted_amt))
                         raw = self._retry(lambda: self.exchange.create_order(
                             symbol=resolved_sym,

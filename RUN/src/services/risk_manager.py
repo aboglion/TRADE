@@ -234,11 +234,20 @@ class RiskManager(IRiskManager):
         # Position reduction/liquidation orders must never be trapped by minimum order value
         if self._is_position_reducing_order(intent, portfolio):
             return True, ""
+        if self._config.min_order_value_usd <= 0:
+            return True, ""
         order_value = self._get_order_value(intent)
-        if order_value < self._config.min_order_value_usd:
+        if order_value <= 0:
+            return True, ""
+        from src.utils.math_utils import BINANCE_DEFAULT_MIN_NOTIONAL
+        base_sym = intent.symbol.split("/")[0].split(":")[0].upper()
+        min_required = self._config.min_order_value_usd
+        if self._is_futures and base_sym in BINANCE_DEFAULT_MIN_NOTIONAL:
+            min_required = max(min_required, BINANCE_DEFAULT_MIN_NOTIONAL[base_sym])
+        if order_value < (min_required - 1e-4):
             return (
                 False,
-                f"Order value ${order_value:.2f} below minimum ${self._config.min_order_value_usd:.2f}",
+                f"Order value ${order_value:.2f} below minimum ${min_required:.2f}",
             )
         return True, ""
 

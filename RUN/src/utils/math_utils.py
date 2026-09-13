@@ -41,6 +41,32 @@ def parse_precision_to_decimals(precision: Any) -> int:
     return int(val)
 
 
+BINANCE_DEFAULT_MIN_NOTIONAL: dict[str, float] = {
+    "BTC": 50.0,
+    "ETH": 20.0,
+    "SOL": 5.0,
+}
+
+
+def truncate_to_step_size(value: float, step_size: float | None = None, precision: Any = None) -> float:
+    """
+    Truncate a float towards zero to the nearest multiple of step_size.
+    Falls back to decimal precision if step_size is None or <= 0.
+    """
+    if math.isnan(value) or math.isinf(value):
+        return 0.0
+    sign = -1.0 if value < 0 else 1.0
+    val_abs = abs(value)
+
+    if step_size is not None and step_size > 0:
+        dec_places = parse_precision_to_decimals(precision if precision is not None else step_size)
+        units = math.floor(round(val_abs / step_size, 8))
+        truncated = units * step_size
+        return sign * round(truncated, dec_places)
+
+    return truncate_to_precision(value, precision)
+
+
 def truncate_to_precision(value: float, precision: Any) -> float:
     """
     Truncate (floor towards zero) a float to *precision* decimal places.
@@ -79,6 +105,7 @@ def is_above_min_order(
     price: float,
     min_amount: float,
     min_notional: float,
+    is_reduce_only: bool = False,
 ) -> bool:
     """
     Check if an order meets exchange minimums with float precision tolerance.
@@ -87,13 +114,19 @@ def is_above_min_order(
         amount: Order quantity in base currency.
         price: Current price.
         min_amount: Minimum order amount (e.g., 0.00001 BTC).
-        min_notional: Minimum order value in USD (e.g., $10).
+        min_notional: Minimum order value in USD (e.g., $10 or $50 for BTC futures).
+        is_reduce_only: If True, Binance allows closing positions below min_notional ("unless you choose reduce only").
     """
     if amount <= 0.0 or price <= 0.0:
         return False
+    amount_ok = amount >= (min_amount - 1e-10)
+    if not amount_ok:
+        return False
+    if is_reduce_only:
+        # Binance Futures explicitly allows reduce-only orders below minimum notional to close positions
+        return True
     notional = amount * price
-    # Use 1e-8 tolerance for notional and 1e-10 for amount to avoid floating point precision traps
-    return (amount >= (min_amount - 1e-10)) and (notional >= (min_notional - 1e-8))
+    return notional >= (min_notional - 1e-8)
 
 
 def compute_order_amount(
@@ -102,6 +135,8 @@ def compute_order_amount(
     amount_precision: Any,
     min_amount: float,
     min_notional: float,
+    is_reduce_only: bool = False,
+    step_size: float | None = None,
 ) -> float | None:
     """
     Compute a valid order amount from a target USD value.
@@ -111,18 +146,21 @@ def compute_order_amount(
     if price <= 0.0 or target_value_usd <= 0.0:
         return None
     raw_amount = target_value_usd / price
-    amount = truncate_to_precision(raw_amount, amount_precision)
-    if not is_above_min_order(amount, price, min_amount, min_notional):
+    if step_size is not None and step_size > 0:
+        amount = truncate_to_step_size(raw_amount, step_size=step_size, precision=amount_precision)
+    else:
+        amount = truncate_to_precision(raw_amount, amount_precision)
+    if not is_above_min_order(amount, price, min_amount, min_notional, is_reduce_only=is_reduce_only):
         return None
     return amount
 
 
-def get_market_constraints(market_info: dict[str, Any]) -> dict[str, Any]:
+def get_market_constraints(market_info: dict[str, Any], symbol: str | None = None) -> dict[str, Any]:
     """
     Extract precision and limit constraints from CCXT market info.
 
     Returns a dict with keys:
-        amount_precision, price_precision, min_amount, min_notional, min_price
+        amount_precision, price_precision, min_amount, max_amount, min_notional, min_price, step_size
     """
     limits = market_info.get("limits", {})
     precision = market_info.get("precision", {})
@@ -134,13 +172,36 @@ def get_market_constraints(market_info: dict[str, Any]) -> dict[str, Any]:
     raw_amt_prec = precision.get("amount", 8)
     raw_price_prec = precision.get("price", 2)
 
+    sym = symbol or market_info.get("symbol", "") or ""
+    clean_base = sym.split("/")[0].split(":")[0].upper()
+
+    # Determine accurate minimum notional
+    min_cost = cost_limits.get("min", None)
+    if min_cost is not None and float(min_cost) > 0.0:
+        min_notional = float(min_cost)
+    else:
+        min_notional = BINANCE_DEFAULT_MIN_NOTIONAL.get(clean_base, 10.0)
+
+    # Extract step_size if available
+    step_size = None
+    if isinstance(raw_amt_prec, float) and raw_amt_prec < 1.0:
+        step_size = raw_amt_prec
+    for f in market_info.get("info", {}).get("filters", []):
+        if f.get("filterType") in ("LOT_SIZE", "MARKET_LOT_SIZE") and f.get("stepSize"):
+            try:
+                step_size = float(f["stepSize"])
+                break
+            except Exception:
+                pass
+
     return {
         "amount_precision": parse_precision_to_decimals(raw_amt_prec),
         "price_precision": parse_precision_to_decimals(raw_price_prec),
-        "min_amount": amount_limits.get("min", 0.0) or 0.0,
-        "max_amount": amount_limits.get("max") or float("inf"),
-        "min_price": price_limits.get("min", 0.0) or 0.0,
-        "min_notional": cost_limits.get("min", 10.0) or 10.0,
+        "min_amount": float(amount_limits.get("min", 0.0) or 0.0),
+        "max_amount": float(amount_limits.get("max") or float("inf")),
+        "min_price": float(price_limits.get("min", 0.0) or 0.0),
+        "min_notional": min_notional,
+        "step_size": step_size,
     }
 
 

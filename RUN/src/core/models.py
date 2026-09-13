@@ -59,6 +59,7 @@ class AssetHolding:
     unrealized_pnl: float = 0.0
     entry_price: float = 0.0
     leverage: float = 1.0
+    contracts: float = 0.0
 
 
 @dataclass(frozen=True)
