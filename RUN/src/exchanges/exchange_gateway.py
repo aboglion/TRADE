@@ -196,7 +196,18 @@ class ExchangeGateway:
             self._retry(lambda: self.exchange.set_margin_mode(margin_mode.upper(), symbol))
             logger.info("Set margin_mode=%s for %s", margin_mode, symbol)
         except Exception as e:
-            logger.warning("Could not set margin_mode=%s for %s: %s", margin_mode, symbol, e)
+            err_msg = str(e)
+            # Portfolio Margin accounts (papi) always use cross margin;
+            # -2015 / "already" / "No need" are expected and harmless.
+            if (
+                "-2015" in err_msg
+                or "already" in err_msg.lower()
+                or "no need" in err_msg.lower()
+                or "not supported" in err_msg.lower()
+            ):
+                logger.debug("Margin mode already cross for %s (Portfolio Margin) — skipped", symbol)
+            else:
+                logger.warning("Could not set margin_mode=%s for %s: %s", margin_mode, symbol, e)
 
     @property
     def exchange(self) -> ccxt.Exchange:
@@ -842,10 +853,18 @@ class ExchangeGateway:
                 elif isinstance(e, _TRANSIENT_ERRORS):
                     if attempt < retries:
                         wait = (delay_ms * (2 ** attempt)) / 1000
-                        logger.warning(
-                            "⚠️ Exchange communication issue: %s — %s, retrying in %.1fs (attempt %d/%d)",
-                            type(e).__name__, e, wait, attempt + 1, retries,
-                        )
+                        # First retry attempt is very common (transient blip) — log at DEBUG
+                        # to avoid cluttering logs. WARNING only on 2nd+ attempt.
+                        if attempt == 0:
+                            logger.debug(
+                                "Exchange transient issue: %s — %s, retrying in %.1fs (attempt %d/%d)",
+                                type(e).__name__, e, wait, attempt + 1, retries,
+                            )
+                        else:
+                            logger.warning(
+                                "⚠️ Exchange communication issue: %s — %s, retrying in %.1fs (attempt %d/%d)",
+                                type(e).__name__, e, wait, attempt + 1, retries,
+                            )
                         time.sleep(wait)
                         continue
                     else:

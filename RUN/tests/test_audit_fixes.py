@@ -131,3 +131,59 @@ def test_order_manager_cancel_stale_orders_symbol_resolution():
 
     assert canceled == 1
     mock_gateway.cancel_order.assert_called_once_with(symbol="BTC/USDT", order_id="exc_999")
+
+
+def test_set_margin_mode_silences_portfolio_margin_error(caplog):
+    """Test that set_margin_mode logs debug and does not warn on -2015 / already cross."""
+    import logging
+    from src.exchanges.exchange_gateway import ExchangeGateway
+    from src.config.config_manager import ExchangeConfig
+
+    config = ExchangeConfig(name="binance", api_key="k", api_secret="s")
+    gw = ExchangeGateway(config, run_mode=MagicMock())
+    gw._initialized = True
+    mock_exchange = MagicMock()
+    mock_exchange.set_margin_mode.side_effect = Exception("binance -2015: Invalid API-key, IP, or permissions")
+    gw._exchange = mock_exchange
+
+    with caplog.at_level(logging.DEBUG):
+        gw.set_margin_mode("cross", "BTC/USDT")
+
+    # Check that it logged debug, but NO warning
+    assert any("Portfolio Margin" in rec.message for rec in caplog.records if rec.levelno == logging.DEBUG)
+    assert not any(rec.levelno >= logging.WARNING for rec in caplog.records)
+
+
+def test_retry_transient_error_log_levels(caplog):
+    """Test that _retry transient errors log at DEBUG on 1st attempt and WARNING on 2nd+."""
+    import logging
+    import ccxt
+    from src.exchanges.exchange_gateway import ExchangeGateway
+    from src.config.config_manager import ExchangeConfig
+
+    config = ExchangeConfig(name="binance", api_key="k", api_secret="s", retry_delay_base_ms=1)
+    gw = ExchangeGateway(config, run_mode=MagicMock())
+
+    attempts = 0
+
+    def flaky_fn():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ccxt.NetworkError("temporary connection reset")
+        return "success"
+
+    with caplog.at_level(logging.DEBUG):
+        res = gw._retry(flaky_fn, max_retries=3)
+
+    assert res == "success"
+    assert attempts == 3
+
+    # Attempt 0 (first failure) should log DEBUG
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG and "attempt 1/3" in r.message]
+    assert len(debug_records) == 1
+
+    # Attempt 1 (second failure) should log WARNING
+    warn_records = [r for r in caplog.records if r.levelno == logging.WARNING and "attempt 2/3" in r.message]
+    assert len(warn_records) == 1
+
