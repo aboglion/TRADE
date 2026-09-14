@@ -247,3 +247,45 @@ class TelegramService:
 
         except Exception as e:
             return False, f"Error sending test message: {e}"
+
+    def send_boot_notification(
+        self,
+        run_mode: str = "DRY_RUN",
+        details: str | None = None,
+    ) -> bool:
+        """
+        Send an emergency alert when the host machine reboots and the trading bot resumes.
+
+        Guaranteed non-blocking, exception-safe.
+        """
+        if not self.enabled or not self.is_configured():
+            return False
+
+        try:
+            if hasattr(run_mode, "name"):
+                mode_str = str(run_mode.name)
+            elif hasattr(run_mode, "value"):
+                mode_str = str(run_mode.value)
+            else:
+                mode_str = str(run_mode or "DRY_RUN")
+
+            url_to_link = self.dashboard_url or "http://localhost:8090"
+            if url_to_link and not url_to_link.startswith("http"):
+                url_to_link = f"http://{url_to_link}"
+
+            time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            safe_mode = html.escape(mode_str)
+            extra = f"\nℹ️ <b>Details:</b> {html.escape(details)}" if details else ""
+
+            msg = (
+                f"🟢 <b>SYSTEM REBOOT / AUTO-START</b>\n\n"
+                f"⚡ <b>Host server came back online and Trading Bot automatically resumed!</b>\n"
+                f"⚙️ <b>Engine Mode:</b> <code>{safe_mode}</code>\n"
+                f"⏱️ <b>Resume Time:</b> {time_str}{extra}\n\n"
+                f"🌐 <b><a href=\"{url_to_link}\">Click here to open live dashboard</a></b>"
+            )
+            return self.send_message(msg)
+        except Exception as e:
+            logger.warning("Error formatting or sending Telegram boot notification: %s", e)
+            return False
+

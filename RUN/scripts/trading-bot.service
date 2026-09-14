@@ -1,0 +1,15 @@
+[Unit]
+Description=Automated 24/7 Trading Bot Supervisor & Crash Recovery
+After=network-online.target default.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/uns/TRADE
+ExecStart=/home/uns/TRADE/RUN/scripts/on_boot.sh
+ExecStop=/home/uns/TRADE/RUN/scripts/stop_bot.sh 8090 --hard
+TimeoutSec=120
+
+[Install]
+WantedBy=default.target

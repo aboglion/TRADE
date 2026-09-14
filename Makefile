@@ -91,3 +91,29 @@ watch-status:
 
 watch-logs:
 	tail -n 100 -f logs/updater.log
+
+# Boot Autostart Management
+autostart-status:
+	@echo "================ Autostart Status ================"
+	@echo -n "User lingering: "
+	@loginctl show-user $$(whoami) 2>/dev/null | grep Linger || echo "unknown"
+	@echo -n "Systemd user service: "
+	@systemctl --user is-enabled trading-bot.service 2>/dev/null || echo "not enabled"
+	@echo "Crontab @reboot entry:"
+	@crontab -l 2>/dev/null | grep -E "(on_boot|trading)" || echo "None"
+	@echo "=================================================="
+
+autostart-enable:
+	@mkdir -p ~/.config/systemd/user
+	@cp RUN/scripts/trading-bot.service ~/.config/systemd/user/trading-bot.service
+	@systemctl --user daemon-reload
+	@systemctl --user enable trading-bot.service
+	@loginctl enable-linger $$(whoami) 2>/dev/null || true
+	@(crontab -l 2>/dev/null | grep -v "on_boot\.sh"; echo "@reboot sleep 15 && $(CURDIR)/RUN/scripts/on_boot.sh >> $(CURDIR)/logs/boot.log 2>&1") | crontab -
+	@echo "🟢 Autostart on server boot successfully enabled via Systemd & Crontab"
+
+autostart-disable:
+	@systemctl --user disable trading-bot.service 2>/dev/null || true
+	@crontab -l 2>/dev/null | grep -v "on_boot\.sh" | crontab - 2>/dev/null || true
+	@echo "🛑 Autostart on boot disabled"
+

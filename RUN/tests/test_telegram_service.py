@@ -152,6 +152,27 @@ telegram:
             Path(tf_path).unlink(missing_ok=True)
             Path(st_path).unlink(missing_ok=True)
 
+    @patch("urllib.request.urlopen")
+    def test_send_boot_notification(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        # Disabled service should return False without network call
+        disabled_svc = TelegramService(bot_token="12345:token", chat_id="999", enabled=False)
+        self.assertFalse(disabled_svc.send_boot_notification(run_mode="LIVE"))
+        mock_urlopen.assert_not_called()
+
+        # Enabled service should send message
+        enabled_svc = TelegramService(bot_token="12345:token", chat_id="999", enabled=True, dashboard_url="http://myserver:8090")
+        success = enabled_svc.send_boot_notification(run_mode="LIVE", details="System reboot test")
+        self.assertTrue(success)
+        mock_urlopen.assert_called_once()
+        sent_req = mock_urlopen.call_args[0][0]
+        self.assertIn("SYSTEM REBOOT", sent_req.data.decode("utf-8"))
+        self.assertIn("LIVE", sent_req.data.decode("utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
+
