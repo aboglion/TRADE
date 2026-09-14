@@ -110,6 +110,7 @@ class ReconciliationService:
                             if fee_val > 0:
                                 local_order["fees"] = fee_val
                                 local_order["fee_currency"] = curr
+                                local_order["fee_estimated"] = getattr(res, "fee_estimated", False) or bool(local_order.get("fee_estimated"))
                                 if not local_order.get("fees_recorded"):
                                     self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
                                     local_order["fees_recorded"] = True
@@ -167,6 +168,7 @@ class ReconciliationService:
                     if fee_val > 0:
                         local_order["fees"] = fee_val
                         local_order["fee_currency"] = curr
+                        local_order["fee_estimated"] = getattr(result, "fee_estimated", False) or bool(local_order.get("fee_estimated"))
                         if not local_order.get("fees_recorded"):
                             self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
                             local_order["fees_recorded"] = True

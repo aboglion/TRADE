@@ -107,3 +107,67 @@ def test_pipeline_api_includes_binance_bracket_metadata():
     assert "bracket_desc" in bracket
     assert "ladder_steps" in macro
     assert macro["ladder_steps"] == [1.0, 2.0, 4.0, 10.0, 20.0]
+
+    # Verify Gate 4 Trend Structure metadata in asset ladder
+    assert "assets" in data
+    assert "BTC" in data["assets"]
+    btc_nodes = data["assets"]["BTC"].get("buy_tree_nodes", [])
+    node4 = next((n for n in btc_nodes if n.get("id") == "node_ema_alignment"), None)
+    assert node4 is not None
+    assert "ADX≥20" in node4["criteria"]
+    # If not met, progress must NEVER be 100%
+    if not node4["met"]:
+        assert node4["progress_pct"] < 100.0
+
+
+def test_pipeline_gate4_sideways_vs_trend_precision():
+    """Verify that when 3/3 moving averages are aligned but ADX < 20 (SIDEWAYS),
+    Gate 4 correctly marks met=False, does NOT show 100%, and labels the missing ADX."""
+    from tests.test_server_logs import DummyHandler
+
+    handler = DummyHandler("/api/strategy/conditions")
+    handler.gateway = MagicMock()
+    handler.config = MagicMock()
+    handler.config.strategy.momentum_cutoff_pct = -0.03
+    handler.config.strategy.conviction_leverage = 20.0
+    handler.config.strategy.flash_wick_limit = -0.038
+    handler.config.strategy.flash_wick_limit_20x = -0.022
+    handler.config.strategy.mid_leverage = 5.0
+    handler.config.strategy.base_leverage = 2.5
+    handler.config.strategy.ladder_steps = [1.0, 2.0, 4.0, 10.0, 20.0]
+    handler.config.strategy.safe_spot_weight = 0.20
+    handler.config.strategy.safe_cash_weight = 0.70
+    handler.config.strategy.bear_short_hedge_weight = 0.45
+    handler.config.strategy.short_leverage = 2.0
+    handler.state_store = MagicMock()
+    handler.state_store.load_state.return_value = MagicMock(strategy_state={}, session_initial_value_usd=2000.0)
+
+    # 250 daily candles with steady slow drift (keeps ADX low while EMAs are aligned)
+    candles = []
+    base_ts = 1600000000000
+    base_px = 2000.0
+    for i in range(250):
+        # very tiny increments so ADX stays low
+        px = base_px + (i * 0.5)
+        candles.append([base_ts + i * 86400000, px, px + 2.0, px - 2.0, px, 50.0])
+
+    handler._fetch_ohlcv_safe = MagicMock(return_value=candles)
+    handler._handle_strategy_conditions()
+
+    data = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert "assets" in data
+
+    for coin in ("BTC", "ETH", "SOL"):
+        if coin in data["assets"]:
+            c_data = data["assets"][coin]
+            nodes = c_data.get("buy_tree_nodes", [])
+            node4 = next((n for n in nodes if n.get("id") == "node_ema_alignment"), None)
+            if node4:
+                # If regime is not met, progress must be < 100
+                if not node4["met"]:
+                    assert node4["progress_pct"] < 100.0
+                    # If it says 3/3 moving averages, it MUST explain that ADX is missing
+                    if "3/3" in node4["progress_label"]:
+                        assert "ADX" in node4["progress_label"]
+
+

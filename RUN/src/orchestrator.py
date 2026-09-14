@@ -554,6 +554,10 @@ class BotOrchestrator:
                     elif result.status in (OrderStatus.FAILED, OrderStatus.CANCELLED):
                         failed_symbols.add(intent.symbol)
                         failed_symbols.add(base_sym)
+                    fee_display = "0"
+                    if result.fees:
+                        est_suffix = " (est.)" if getattr(result, "fee_estimated", False) else ""
+                        fee_display = f"{result.fees:.6f} {result.fee_currency}{est_suffix}".strip()
                     logger.info(
                         "✅ Order executed: %s %s %.8f — %s (Price: %s, Fee: %s)",
                         intent.side.value.upper(),
@@ -561,7 +565,7 @@ class BotOrchestrator:
                         result.filled_amount or intent.amount,
                         result.status.value,
                         f"{result.average_price:.4f}" if result.average_price else "MARKET",
-                        f"{result.fees:.6f} {result.fee_currency}" if result.fees else "0",
+                        fee_display,
                     )
                 except Exception as e:
                     logger.error("❌ Order execution failed for %s %s: %s", intent.side.value, intent.symbol, e)

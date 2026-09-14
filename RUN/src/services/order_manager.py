@@ -102,13 +102,15 @@ class OrderManager:
             # 4. Update state
             self._update_order_result(intent, result)
 
+            est_str = " (est.)" if getattr(result, "fee_estimated", False) else ""
             logger.info(
-                "Order result: ID=%s, status=%s, filled=%.8f @ %.4f, fees=%.6f",
+                "Order result: ID=%s, status=%s, filled=%.8f @ %.4f, fees=%.6f%s",
                 result.exchange_order_id or "N/A",
                 result.status.value,
                 result.filled_amount,
                 result.average_price,
                 result.fees,
+                est_str,
             )
 
             return result
@@ -196,6 +198,7 @@ class OrderManager:
                         if fee_val > 0:
                             order_data["fees"] = fee_val
                             order_data["fee_currency"] = curr
+                            order_data["fee_estimated"] = getattr(result, "fee_estimated", False) or bool(order_data.get("fee_estimated"))
                             if not order_data.get("fees_recorded"):
                                 self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
                                 order_data["fees_recorded"] = True
@@ -341,6 +344,7 @@ class OrderManager:
             "status": "intent",
             "fees": 0.0,
             "fee_currency": "",
+            "fee_estimated": False,
             "timestamp": int(time.time() * 1000),
         }
         self._state.pending_orders.append(order_data)
@@ -357,6 +361,7 @@ class OrderManager:
                 order_data["average_price"] = result.average_price
                 order_data["fees"] = result.fees
                 order_data["fee_currency"] = result.fee_currency
+                order_data["fee_estimated"] = getattr(result, "fee_estimated", False)
                 order_data["error_message"] = result.error_message
 
                 # Move completed orders out of pending
@@ -374,6 +379,7 @@ class OrderManager:
                         if fee_val > 0:
                             order_data["fees"] = fee_val
                             order_data["fee_currency"] = curr
+                            order_data["fee_estimated"] = getattr(result, "fee_estimated", False) or bool(order_data.get("fee_estimated"))
                             if not order_data.get("fees_recorded"):
                                 self._state.session_fees[curr] = float(self._state.session_fees.get(curr, 0.0) or 0.0) + fee_val
                                 order_data["fees_recorded"] = True

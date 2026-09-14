@@ -137,6 +137,7 @@ class OrderResult:
     timestamp_ms: int = 0
     raw_response: dict[str, Any] = field(default_factory=dict)
     error_message: str = ""
+    fee_estimated: bool = False
 
 
 # ── Strategy ─────────────────────────────────────────────────

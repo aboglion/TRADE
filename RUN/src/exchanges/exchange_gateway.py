@@ -548,6 +548,18 @@ class ExchangeGateway:
                 filled_amt = float(raw.get("amount", 0) or formatted_amount or intent.amount or 0)
 
             fee_cost, fee_curr = self._extract_fee(raw)
+            fee_estimated = False
+            if fee_cost <= 0.0 and filled_amt > 0 and mapped_status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+                try:
+                    fee_cost, fee_curr, fee_estimated = self._resolve_filled_order_fee(
+                        resolved_sym=resolved_sym,
+                        order_id=str(raw.get("id", "")),
+                        filled_amt=filled_amt,
+                        avg_px=avg_px,
+                    )
+                except Exception as fee_exc:
+                    logger.warning("Safely handled fee resolution exception in create_order: %s", fee_exc)
+
             return OrderResult(
                 client_order_id=intent.client_order_id,
                 exchange_order_id=str(raw.get("id", "")),
@@ -558,6 +570,7 @@ class ExchangeGateway:
                 fee_currency=fee_curr,
                 timestamp_ms=int(raw.get("timestamp", 0) or 0),
                 raw_response=raw,
+                fee_estimated=fee_estimated,
             )
         except ccxt.InsufficientFunds as e:
             raise InsufficientBalanceError(str(e)) from e
@@ -692,6 +705,106 @@ class ExchangeGateway:
                     return total_cost, ",".join(sorted(currs))
         return 0.0, ""
 
+    def _resolve_filled_order_fee(
+        self,
+        resolved_sym: str,
+        order_id: str,
+        filled_amt: float,
+        avg_px: float,
+    ) -> tuple[float, str, bool]:
+        """
+        Resolve fee for a filled/partially filled order when raw fee is missing (e.g. Binance Futures).
+        Step 2: Fetch exact trade fees from exchange trades (fetch_my_trades).
+        Step 1: If step 2 fails/unavailable, fall back to estimated fee based on taker fee rate.
+        Returns: (fee_cost, fee_currency, is_estimated)
+        Guaranteed to never raise an unhandled exception.
+        """
+        fee_cost = 0.0
+        quote_curr = "USDT"
+        try:
+            if "/" in str(resolved_sym):
+                quote_curr = str(resolved_sym).split("/")[1].split(":")[0]
+        except Exception:
+            quote_curr = "USDT"
+
+        try:
+            # Step 2: Attempt to query exchange trades for this specific order
+            clean_order_id = str(order_id or "").strip()
+            if clean_order_id and clean_order_id not in ("N/A", "None", "") and not clean_order_id.startswith("closed_"):
+                try:
+                    order_id_param: Any = int(clean_order_id) if clean_order_id.isdigit() else clean_order_id
+                    trades = self._retry(
+                        lambda: self.exchange.fetch_my_trades(
+                            symbol=resolved_sym,
+                            params={"orderId": order_id_param},
+                        ),
+                        max_retries=1,
+                    )
+                    if trades and isinstance(trades, list):
+                        matching_trades = [
+                            t for t in trades
+                            if str(t.get("order") or t.get("orderId") or "") == clean_order_id
+                            or (isinstance(t.get("info"), dict) and str(t["info"].get("orderId", "")) == clean_order_id)
+                        ]
+                        target_trades = matching_trades if matching_trades else trades
+                        currs = set()
+                        total_fee = 0.0
+                        for t in target_trades:
+                            tf = t.get("fee")
+                            if isinstance(tf, dict) and tf.get("cost") is not None:
+                                total_fee += float(tf.get("cost") or 0.0)
+                                if tf.get("currency"):
+                                    currs.add(str(tf.get("currency")))
+                            elif isinstance(t.get("info"), dict):
+                                comm = float(t["info"].get("commission") or 0.0)
+                                total_fee += comm
+                                if t["info"].get("commissionAsset"):
+                                    currs.add(str(t["info"].get("commissionAsset")))
+                        if total_fee > 0.0:
+                            fee_cost = total_fee
+                            fee_curr = ",".join(sorted(currs)) if currs else quote_curr
+                            logger.info(
+                                "✅ Retrieved exact fee from exchange trades for order %s: %.6f %s",
+                                clean_order_id, fee_cost, fee_curr,
+                            )
+                            return fee_cost, fee_curr, False
+                except Exception as trade_err:
+                    logger.debug(
+                        "Could not fetch trade fees from exchange for order %s (%s). Falling back to estimation.",
+                        clean_order_id, trade_err,
+                    )
+
+            # Step 1 (Fallback): Calculate estimated fee based on market taker rate
+            taker_rate = 0.0005  # Standard Binance Futures taker fee (0.05%)
+            try:
+                market_info = self.get_market_info(resolved_sym)
+                if market_info and market_info.get("taker") is not None and float(market_info["taker"]) > 0:
+                    taker_rate = float(market_info["taker"])
+            except Exception:
+                pass
+
+            cur_px = avg_px
+            if cur_px <= 0:
+                try:
+                    cur_px = float(self.fetch_ticker_price(resolved_sym) or 0.0)
+                except Exception:
+                    cur_px = 0.0
+
+            notional = float(filled_amt or 0.0) * float(cur_px or 0.0)
+            if notional > 0:
+                fee_cost = notional * taker_rate
+                logger.warning(
+                    "⚠️ Using ESTIMATED fee for order %s (exact trades unavailable): ~%.6f %s (est. @ %.3f%% taker rate)",
+                    clean_order_id or "N/A", fee_cost, quote_curr, taker_rate * 100,
+                )
+                return fee_cost, quote_curr, True
+            else:
+                return 0.0, quote_curr, False
+
+        except Exception as e:
+            logger.warning("Error resolving fee for order %s (%s) — safely defaulting to 0.0", order_id, e)
+            return 0.0, quote_curr, False
+
     def cancel_order(self, symbol: str, order_id: str) -> OrderResult:
         """Cancel an open order, supporting numeric exchange order IDs and client order IDs."""
         sym = self._resolve_market_symbol(symbol)
@@ -760,6 +873,18 @@ class ExchangeGateway:
             filled_amt = float(raw.get("amount", 0) or 0)
 
         fee_cost, fee_curr = self._extract_fee(raw)
+        fee_estimated = False
+        if fee_cost <= 0.0 and filled_amt > 0 and mapped_status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            try:
+                fee_cost, fee_curr, fee_estimated = self._resolve_filled_order_fee(
+                    resolved_sym=sym,
+                    order_id=str(raw.get("id", target_id or "")),
+                    filled_amt=filled_amt,
+                    avg_px=avg_px,
+                )
+            except Exception as fee_exc:
+                logger.warning("Safely handled fee resolution exception in fetch_order: %s", fee_exc)
+
         return OrderResult(
             client_order_id=raw.get("clientOrderId", "") or (order_id if not str(order_id).isdigit() else ""),
             exchange_order_id=str(raw.get("id", "")),
@@ -770,6 +895,7 @@ class ExchangeGateway:
             fee_currency=fee_curr,
             timestamp_ms=int(raw.get("timestamp", 0) or 0),
             raw_response=raw,
+            fee_estimated=fee_estimated,
         )
 
     def fetch_open_orders(self, symbol: str | None = None) -> list[OrderResult]:

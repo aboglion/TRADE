@@ -1640,8 +1640,20 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                         c_20_50 = ema20 > ema50
                         c_50_200 = ema50 > ema200
                         trend_score = (1 if c_above_20 else 0) + (1 if c_20_50 else 0) + (1 if c_50_200 else 0)
-                        trend_prog = 100.0 if regime_ok else round((trend_score / 3.0) * 100.0, 0)
-                        trend_prog_label = "✓ 100% טרנד מאושר" if regime_ok else f"{trend_score}/3 ממוצעים עולים ({int(trend_prog)}%)"
+
+                        if regime_ok:
+                            trend_prog = 100.0
+                            trend_prog_label = "✓ 100% טרנד מאושר"
+                            actual_regime_desc = asset_regime
+                        elif trend_score == 3:
+                            # 3/3 moving averages aligned, but asset is in SIDEWAYS due to low ADX (< 20.0)
+                            trend_prog = min(85.0, max(50.0, round((c_adx / 20.0) * 80.0, 0))) if min_adx > 0 else 75.0
+                            trend_prog_label = "3/3 ממוצעים (חסר ADX≥20)"
+                            actual_regime_desc = f"{asset_regime} (ממוצעים 3/3 | ADX {c_adx:.1f} < 20)"
+                        else:
+                            trend_prog = round((trend_score / 3.0) * 75.0, 0)
+                            trend_prog_label = f"{trend_score}/3 ממוצעים עולים ({int(round(trend_score / 3.0 * 100.0, 0))}%)"
+                            actual_regime_desc = f"{asset_regime} ({trend_score}/3 ממוצעים)"
 
                         donch_prog = 100.0 if donchian_ok else (max(10.0, min(99.0, round((c_close / donchian30) * 100.0, 1))) if donchian30 > 0 else 0.0)
                         diff_usd = round(donchian30 - c_close, 2) if donchian30 > 0 else 0.0
@@ -1694,15 +1706,15 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             {
                                 "id": "node_ema_alignment",
                                 "shortTitle": "4. מבנה מגמה",
-                                "title": "4. מבנה ממוצעים בנכס (EMA Trend Structure)",
-                                "criteria": "Regime in [STRONG_BULL, TREND]",
-                                "actual": asset_regime,
+                                "title": "4. מבנה ממוצעים ומגמה (Trend & EMA Alignment)",
+                                "criteria": "Regime in [STRONG_BULL, TREND] (EMA עולים & ADX≥20)",
+                                "actual": actual_regime_desc,
                                 "live_val": asset_regime,
                                 "badge": "✓ מגמה עולה" if regime_ok else "✗ דורש טרנד",
                                 "progress_pct": trend_prog,
                                 "progress_label": trend_prog_label,
                                 "met": regime_ok,
-                                "explanation": f"אימות ש-{coin} נמצא במגמת עלייה טכנית מובהקת (EMA20 > EMA50 > EMA200)."
+                                "explanation": f"אימות ש-{coin} נמצא במגמת עלייה טכנית (EMA20 > EMA50 > EMA200) ובעוצמת תנועה (ADX >= 20) ליציאה מדשדוש (SIDEWAYS)."
                             },
                             {
                                 "id": "node_donchian_breakout",

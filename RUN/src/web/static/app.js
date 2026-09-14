@@ -1250,7 +1250,8 @@ async function fetchOrders() {
             const amountVal = o.filled_amount || o.amount || 0;
 
             const feeVal = typeof o.fees === 'number' ? o.fees : 0.0;
-            const feeStr = feeVal > 0 ? `${feeVal.toFixed(4)} ${o.fee_currency || ''}`.trim() : "0.0";
+            const feeEstTag = o.fee_estimated ? ' (משוער)' : '';
+            const feeStr = feeVal > 0 ? `${feeVal.toFixed(4)} ${o.fee_currency || ''}${feeEstTag}`.trim() : "0.0";
 
             // Calculate Net Total USD (Net cash flow impact after fees)
             const grossTotalUsd = amountVal * priceVal;

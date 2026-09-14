@@ -116,6 +116,8 @@ class TelegramService:
             price = float(order_data.get("average_price") or order_data.get("price") or order_data.get("estimated_price") or 0.0)
             fees = float(order_data.get("fees") or 0.0)
             fee_curr = str(order_data.get("fee_currency", "") or "").strip()
+            is_fee_est = bool(order_data.get("fee_estimated"))
+            fee_est_suffix = " (est.)" if is_fee_est else ""
             reason = str(order_data.get("reason", "Strategy rebalance") or "Strategy rebalance").strip()
 
             if hasattr(run_mode, "name"):
@@ -129,6 +131,7 @@ class TelegramService:
             safe_reason = html.escape(reason)
             safe_fee_curr = html.escape(fee_curr)
             safe_mode = html.escape(mode_str)
+            fee_display_str = f"{fees:.6f} {safe_fee_curr}{fee_est_suffix}".strip()
 
             total_usd = amount * price
             price_str = f"${price:,.4f}" if (0 < price < 10) else f"${price:,.2f}"
@@ -151,7 +154,7 @@ class TelegramService:
                 f"📊 <b>Amount:</b> <code>{amount:.6f}</code>\n"
                 f"💵 <b>Execution Price:</b> <code>{price_str}</code>\n"
                 f"💰 <b>Total Value:</b> <code>${total_usd:,.2f}</code>\n"
-                f"🏷️ <b>Fee:</b> <code>{fees:.6f} {safe_fee_curr}</code>\n"
+                f"🏷️ <b>Fee:</b> <code>{fee_display_str}</code>\n"
                 f"🎯 <b>Reason/Strategy:</b> {safe_reason}\n"
                 f"⚙️ <b>Engine Mode:</b> <code>{safe_mode}</code>\n"
                 f"⏱️ <b>Time:</b> {time_str}\n\n"
