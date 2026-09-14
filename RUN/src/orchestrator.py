@@ -100,6 +100,9 @@ class BotOrchestrator:
         self._is_futures = (getattr(config.exchange, "market_type", "") == "future")
         import threading
         self._cycle_lock = threading.Lock()
+        self._bot_start_ts: int = getattr(state, "bot_start_ts", None) or self._clock.now_ms()
+        if hasattr(self._state, "bot_start_ts") and not self._state.bot_start_ts:
+            self._state.bot_start_ts = self._bot_start_ts
 
     def clear_critical_errors(self) -> None:
         """Clear critical errors both in memory and persist state."""

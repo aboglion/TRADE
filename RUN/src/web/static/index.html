@@ -53,9 +53,10 @@
 
             <!-- Quick Action Toolbar (Mobile & Desktop Friendly) -->
             <div class="toolbar">
-                <div class="clock-display" id="utcClock" title="Real-time synchronized UTC Clock">
+                <div class="clock-display" id="utcClock" title="תאריך הפעלת הבוט האחרון וזמן אמת (UTC וזמן ירושלים)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span>00:00:00 UTC</span>
+                    <span id="botStartClockText">הפעלת בוט: --/--/---- --:-- UTC &bull; ירושלים: --/--/---- --:--</span>
+                    <span class="live-clock-inline" id="liveClockInline" style="border-left: 1px solid rgba(255,255,255,0.15); padding-left: 8px; margin-left: 6px; color: #38bdf8; font-size: 0.78rem;">00:00:00 UTC</span>
                 </div>
 
                 <div class="toolbar-actions">
@@ -214,7 +215,10 @@
                 </div>
 
                 <div class="metric-sub-footer" id="systemHealthSub">
-                    <span>Last cycle:</span> <strong id="lastCycleTime">Never</strong>
+                    <div style="display: flex; flex-direction: column; gap: 4px; width: 100%; font-size: 0.78rem;">
+                        <div><span>Last cycle:</span> <strong id="lastCycleTime">Never</strong></div>
+                        <div><span>הפעלת בוט אחרונה:</span> <strong id="botStartTimeHealth" style="color: #38bdf8;">Never</strong></div>
+                    </div>
                 </div>
             </div>
 
@@ -722,8 +726,8 @@
                         <div class="info-val" id="crashModalExitCode" style="font-weight: 700; font-size: 1.05rem; color: #fca5a5;">1</div>
                     </div>
                     <div class="info-box" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; text-align: center;">
-                        <div class="info-label" style="font-size: 0.75rem; color: var(--text-muted);">זמן התקלה</div>
-                        <div class="info-val" id="crashModalTime" style="font-weight: 600; font-size: 0.95rem; color: var(--text-main);">--:--:--</div>
+                        <div class="info-label" style="font-size: 0.75rem; color: var(--text-muted);">זמן אירוע / הפעלה</div>
+                        <div class="info-val" id="crashModalTime" style="font-weight: 600; font-size: 0.88rem; color: var(--text-main);">--:--:--</div>
                     </div>
                 </div>
 

@@ -254,7 +254,20 @@ function showServerCrashModal(data) {
     }
 
     if (exitCodeEl) exitCodeEl.textContent = data.exit_code != null ? data.exit_code : (status === "STOPPED" ? "0" : "1");
-    if (timeEl) timeEl.textContent = data.crash_time || new Date().toLocaleTimeString();
+    if (timeEl) {
+        if (data.crash_time) {
+            const dt = new Date(data.crash_time.replace(" ", "T"));
+            if (!isNaN(dt.getTime())) {
+                const f = formatJerusalemAndUtc(dt.getTime());
+                timeEl.innerHTML = `${f.utc} UTC &bull; <span style="color: #67e8f9;">${f.jerusalem}</span>`;
+            } else {
+                timeEl.textContent = data.crash_time;
+            }
+        } else {
+            const f = formatJerusalemAndUtc(Date.now());
+            timeEl.innerHTML = `${f.utc} UTC &bull; <span style="color: #67e8f9;">${f.jerusalem}</span>`;
+        }
+    }
     if (tracebackEl) {
         tracebackEl.textContent = data.error_summary || data.message || "Trading engine stopped or crashed.";
     }
@@ -735,12 +748,74 @@ async function manualRefresh() {
     showToast("✨ Dashboard data refreshed successfully!", "success");
 }
 
+// ── Date & Time Formatters (UTC & Jerusalem) ───────────────
+
+function formatJerusalemAndUtc(timestampMs) {
+    if (!timestampMs || timestampMs <= 0) {
+        return {
+            jerusalem: "Never",
+            utc: "Never",
+            combined: "Never",
+        };
+    }
+    const d = new Date(timestampMs);
+    if (isNaN(d.getTime())) {
+        return {
+            jerusalem: "Never",
+            utc: "Never",
+            combined: "Never",
+        };
+    }
+
+    const optJerusalem = {
+        timeZone: "Asia/Jerusalem",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    };
+    const optUtc = {
+        timeZone: "UTC",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    };
+
+    const jerusalemFormatter = new Intl.DateTimeFormat("en-GB", optJerusalem);
+    const utcFormatter = new Intl.DateTimeFormat("en-GB", optUtc);
+
+    const jerusalemPart = jerusalemFormatter.format(d).replace(",", "");
+    const utcPart = utcFormatter.format(d).replace(",", "");
+
+    return {
+        jerusalem: jerusalemPart,
+        utc: utcPart,
+        combined: `${utcPart} UTC &bull; ירושלים: ${jerusalemPart}`,
+    };
+}
+
 // ── Clock ──────────────────────────────────────────────────
 
 function initClock() {
     function updateClock() {
         const now = new Date();
-        document.getElementById("utcClock").textContent = now.toUTCString().split(" ")[4] + " UTC";
+        const liveEl = document.getElementById("liveClockInline");
+        if (liveEl) {
+            const jerTime = now.toLocaleTimeString("en-GB", { timeZone: "Asia/Jerusalem", hour12: false });
+            const utcTime = now.toUTCString().split(" ")[4];
+            liveEl.textContent = `⏱️ ${utcTime} UTC (${jerTime} י-ם)`;
+            liveEl.title = `שעון זמן אמת: ${jerTime} (שעון ירושלים) | ${utcTime} (UTC)`;
+        } else {
+            const utcEl = document.getElementById("utcClock");
+            if (utcEl && !document.getElementById("botStartClockText")) {
+                utcEl.textContent = now.toUTCString().split(" ")[4] + " UTC";
+            }
+        }
     }
     updateClock();
     setInterval(updateClock, 1000);
@@ -1041,11 +1116,26 @@ async function fetchStatus() {
             }
         }
 
+        const botStartTs = data.bot_start_ts || data.last_run_ts || (data.strategy_state && data.strategy_state.last_run_ts) || (latestPortfolioData && latestPortfolioData.timestamp_ms);
+        const botStartClockEl = document.getElementById("botStartClockText");
+        if (botStartClockEl) {
+            if (botStartTs && botStartTs > 0) {
+                const f = formatJerusalemAndUtc(botStartTs);
+                botStartClockEl.innerHTML = `<span style="color: #a7f3d0; font-weight: 600;">🚀 הפעלת בוט:</span> ${f.utc} UTC &bull; <span style="color: #67e8f9; font-weight: 600;">ירושלים:</span> ${f.jerusalem}`;
+            } else {
+                botStartClockEl.textContent = "הפעלת בוט: טרם הופעל";
+            }
+        }
+        const utcClockContainer = document.getElementById("utcClock");
+        if (utcClockContainer && botStartTs && botStartTs > 0) {
+            const f = formatJerusalemAndUtc(botStartTs);
+            utcClockContainer.title = `תאריך הפעלת הבוט האחרון: ${f.utc} UTC | שעון ירושלים: ${f.jerusalem}`;
+        }
+
         const lastRunTs = data.last_run_ts || (data.strategy_state && data.strategy_state.last_run_ts) || (latestPortfolioData && latestPortfolioData.timestamp_ms);
         const lastCycleEl = document.getElementById("lastCycleTime");
         if (lastCycleEl) {
             if (lastRunTs && lastRunTs > 0) {
-                const date = new Date(lastRunTs);
                 const diffSec = Math.max(0, Math.floor((Date.now() - lastRunTs) / 1000));
                 let agoStr = "Just now";
                 if (diffSec >= 60) {
@@ -1054,9 +1144,20 @@ async function fetchStatus() {
                 } else if (diffSec >= 5) {
                     agoStr = `${diffSec}s ago`;
                 }
-                lastCycleEl.textContent = `${date.toLocaleTimeString()} (${agoStr})`;
+                const f = formatJerusalemAndUtc(lastRunTs);
+                lastCycleEl.innerHTML = `${f.utc} UTC (${agoStr}) &bull; <span style="color: #67e8f9;">${f.jerusalem}</span>`;
             } else {
                 lastCycleEl.textContent = "Never";
+            }
+        }
+
+        const botHealthEl = document.getElementById("botStartTimeHealth");
+        if (botHealthEl) {
+            if (botStartTs && botStartTs > 0) {
+                const f = formatJerusalemAndUtc(botStartTs);
+                botHealthEl.innerHTML = `${f.utc} UTC &bull; <span style="color: #67e8f9;">ירושלים: ${f.jerusalem}</span>`;
+            } else {
+                botHealthEl.textContent = "Never";
             }
         }
 

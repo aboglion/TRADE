@@ -1515,8 +1515,11 @@ body {
         width: 100%;
         justify-content: center;
         box-sizing: border-box;
-        font-size: 0.78rem;
+        font-size: 0.76rem;
         padding: 0.35rem 0.65rem;
+        white-space: normal;
+        flex-wrap: wrap;
+        text-align: center;
     }
 
     .toolbar-actions {

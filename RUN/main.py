@@ -247,6 +247,12 @@ def main() -> None:
     # Load state
     state_store = JsonStateStore(config.state.path)
     state = state_store.load_state()
+    import time
+    state.bot_start_ts = int(time.time() * 1000)
+    try:
+        state_store.save_state(state)
+    except Exception as ex:
+        logger.warning("Could not persist initial bot_start_ts: %s", ex)
 
     # Callback to persist dry run balance changes to config.yaml & bot_state.json
     def on_dry_run_balance_change(balances: dict[str, float]) -> None:

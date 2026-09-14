@@ -212,6 +212,23 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
         if clean_path in ("/", "", "/index", "/index.html"):
             self._serve_crash_page()
         elif clean_path == "/api/status":
+            bot_start_ts = None
+            last_run_ts = None
+            try:
+                for candidate_path in [
+                    RUN_DIR / "data" / "bot_state.json",
+                    PROJECT_DIR / "data" / "bot_state.json",
+                    Path("/home/uns/TRADE/RUN/data/bot_state.json"),
+                ]:
+                    if candidate_path.exists():
+                        st_data = json.loads(candidate_path.read_text(encoding="utf-8"))
+                        bot_start_ts = st_data.get("bot_start_ts") or st_data.get("last_run_ts")
+                        last_run_ts = st_data.get("last_run_ts")
+                        if bot_start_ts:
+                            break
+            except Exception:
+                pass
+
             self._send_json({
                 "status": FallbackCrashHandler.system_status,
                 "is_crashed": FallbackCrashHandler.system_status == "CRASHED",
@@ -219,6 +236,8 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                 "is_updating": FallbackCrashHandler.system_status == "UPDATING",
                 "exit_code": FallbackCrashHandler.exit_code,
                 "crash_time": FallbackCrashHandler.crash_time,
+                "bot_start_ts": bot_start_ts,
+                "last_run_ts": last_run_ts,
                 "error_summary": FallbackCrashHandler.last_crash_error,
                 "message": f"Trading engine is currently {FallbackCrashHandler.system_status.lower()}. Emergency Fallback Server is active on port {FallbackCrashHandler.port}."
             })
@@ -387,6 +406,39 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                     <span>⬇️</span> משוך עדכונים והפעל (Git Pull & Restart)
                 </button>
             """
+
+        import zoneinfo
+        import datetime as dt_module
+        try:
+            jer_tz = zoneinfo.ZoneInfo("Asia/Jerusalem")
+        except Exception:
+            jer_tz = dt_module.timezone(dt_module.timedelta(hours=3))
+        utc_tz = dt_module.timezone.utc
+
+        crash_time_formatted = FallbackCrashHandler.crash_time or "N/A"
+        try:
+            raw_ct = FallbackCrashHandler.crash_time
+            if raw_ct:
+                parsed_dt = datetime.strptime(raw_ct, "%Y-%m-%d %H:%M:%S")
+                dt_jer = parsed_dt.replace(tzinfo=jer_tz)
+                dt_utc = dt_jer.astimezone(utc_tz)
+                crash_time_formatted = f"{dt_utc.strftime('%d/%m/%Y %H:%M')} UTC &bull; <span style=\"color: #67e8f9;\">ירושלים: {dt_jer.strftime('%d/%m/%Y %H:%M')}</span>"
+        except Exception:
+            pass
+
+        bot_start_formatted = "טרם הופעל"
+        try:
+            for cand in [RUN_DIR / "data" / "bot_state.json", PROJECT_DIR / "data" / "bot_state.json"]:
+                if cand.exists():
+                    st_data = json.loads(cand.read_text(encoding="utf-8"))
+                    ts_val = st_data.get("bot_start_ts") or st_data.get("last_run_ts")
+                    if ts_val:
+                        dt_val = datetime.fromtimestamp(ts_val / 1000.0, tz=utc_tz)
+                        dt_val_jer = dt_val.astimezone(jer_tz)
+                        bot_start_formatted = f"{dt_val.strftime('%d/%m/%Y %H:%M')} UTC &bull; <span style=\"color: #67e8f9;\">ירושלים: {dt_val_jer.strftime('%d/%m/%Y %H:%M')}</span>"
+                        break
+        except Exception:
+            pass
 
         page_html = f"""<!DOCTYPE html>
 <html lang="en" dir="ltr">
@@ -623,8 +675,12 @@ class FallbackCrashHandler(SimpleHTTPRequestHandler):
                 <div class="info-val">{FallbackCrashHandler.exit_code}</div>
             </div>
             <div class="info-box">
-                <div class="info-label">Timestamp</div>
-                <div class="info-val" style="font-size: 1rem;">{FallbackCrashHandler.crash_time}</div>
+                <div class="info-label">תאריך הפעלת הבוט האחרון (Last Bot Launch)</div>
+                <div class="info-val" style="font-size: 0.95rem; line-height: 1.4;">{bot_start_formatted}</div>
+            </div>
+            <div class="info-box">
+                <div class="info-label">תאריך אירוע / השבתה (Event Timestamp)</div>
+                <div class="info-val" style="font-size: 0.95rem; line-height: 1.4;">{crash_time_formatted}</div>
             </div>
         </div>
 

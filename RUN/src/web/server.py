@@ -594,10 +594,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
             else:
                 last_regime = "bull"
 
+        bot_start = None
+        if state and getattr(state, "bot_start_ts", None):
+            bot_start = state.bot_start_ts
+        elif hasattr(self, "orchestrator") and self.orchestrator and getattr(self.orchestrator, "_bot_start_ts", None):
+            bot_start = self.orchestrator._bot_start_ts
+        elif state and state.last_run_ts:
+            bot_start = state.last_run_ts
+
         data = {
             "run_mode": self.config.run_mode.name if self.config else "UNKNOWN",
             "last_regime": last_regime,
             "last_run_ts": state.last_run_ts if state else None,
+            "bot_start_ts": bot_start,
             "last_cycle_success": state.last_cycle_success if state else True,
             "critical_errors_count": len(critical_errors),
             "latest_error": critical_errors[-1] if critical_errors else None,

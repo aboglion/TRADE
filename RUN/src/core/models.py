@@ -186,6 +186,7 @@ class BotState:
     pending_orders: list[dict[str, Any]] = field(default_factory=list)
     completed_orders: list[dict[str, Any]] = field(default_factory=list)
     last_run_ts: int | None = None
+    bot_start_ts: int | None = None
     last_cycle_success: bool = True
     critical_errors: list[str] = field(default_factory=list)
     strategy_state: dict[str, Any] = field(default_factory=dict)
@@ -203,6 +204,7 @@ class BotState:
             "pending_orders": self.pending_orders,
             "completed_orders": self.completed_orders[-5000:],  # Keep last 5000 trades
             "last_run_ts": self.last_run_ts,
+            "bot_start_ts": self.bot_start_ts,
             "last_cycle_success": self.last_cycle_success,
             "critical_errors": self.critical_errors[-50:],
             "strategy_state": self.strategy_state,
@@ -245,6 +247,7 @@ class BotState:
             pending_orders=data.get("pending_orders") if data.get("pending_orders") is not None else [],
             completed_orders=data.get("completed_orders") if data.get("completed_orders") is not None else [],
             last_run_ts=data.get("last_run_ts"),
+            bot_start_ts=data.get("bot_start_ts"),
             last_cycle_success=data.get("last_cycle_success", True) if data.get("last_cycle_success") is not None else True,
             critical_errors=data.get("critical_errors") if data.get("critical_errors") is not None else [],
             strategy_state=data.get("strategy_state") if data.get("strategy_state") is not None else {},
