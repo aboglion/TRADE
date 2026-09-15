@@ -132,3 +132,65 @@ def test_safe_pull_handles_conflicts_and_protects_stash(tmp_path: Path):
     backup_root = clone_dir / "backups" / "local_changes"
     assert backup_root.exists()
 
+
+def test_safe_pull_restores_critical_file_deleted_upstream(tmp_path: Path):
+    """
+    Security hardening test: when upstream untracks a critical runtime file
+    (e.g. 'git rm --cached RUN/config.yaml' so secrets never reach GitHub),
+    a plain pull would DELETE the local unmodified copy. safe_pull.sh must
+    back it up unconditionally and restore it after the pull, so the live
+    bot never loses its runtime configuration.
+    """
+    repo_dir = tmp_path / "repo"
+    clone_dir = tmp_path / "clone"
+    repo_dir.mkdir()
+
+    # 1. Initialize origin with a tracked runtime config (pre-untrack state)
+    subprocess.run(["git", "init", "-b", "main"], cwd=str(repo_dir), check=True)
+    subprocess.run(["git", "config", "user.name", "TestUser"], cwd=str(repo_dir), check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(repo_dir), check=True)
+
+    (repo_dir / "RUN").mkdir()
+    (repo_dir / "RUN" / "config.yaml").write_text("run_mode: LIVE\nleverage: 10\n")
+    (repo_dir / "version.txt").write_text("v1.0.0\n")
+    subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(repo_dir), check=True)
+
+    # 2. Clone (simulates the production server)
+    subprocess.run(["git", "clone", str(repo_dir), str(clone_dir)], check=True)
+
+    # Copy the current safe_pull.sh into the clone
+    safe_pull_src = Path(__file__).parent.parent / "scripts" / "safe_pull.sh"
+    clone_script = clone_dir / "RUN" / "scripts" / "safe_pull.sh"
+    clone_script.parent.mkdir(parents=True, exist_ok=True)
+    clone_script.write_text(safe_pull_src.read_text())
+    clone_script.chmod(0o755)
+
+    # 3. Upstream: untrack RUN/config.yaml (security fix) and ignore it
+    subprocess.run(["git", "rm", "--cached", "RUN/config.yaml"], cwd=str(repo_dir), check=True)
+    (repo_dir / ".gitignore").write_text("RUN/config.yaml\n")
+    subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True)
+    subprocess.run(["git", "commit", "-m", "security: untrack runtime config"], cwd=str(repo_dir), check=True)
+
+    # 4. Run safe_pull.sh in the clone. The local RUN/config.yaml is UNMODIFIED,
+    #    so a plain 'git pull' would silently delete it.
+    res = subprocess.run(
+        [str(clone_script), "main"],
+        cwd=str(clone_dir),
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"safe_pull.sh failed: {res.stdout}\n{res.stderr}"
+
+    # 5. The critical runtime file must still exist with its local content
+    cfg = clone_dir / "RUN" / "config.yaml"
+    assert cfg.exists(), "RUN/config.yaml was deleted by the pull and NOT restored"
+    assert cfg.read_text() == "run_mode: LIVE\nleverage: 10\n"
+
+    # 6. And it must now be ignored/untracked locally (no future accidental pushes)
+    ignore_res = subprocess.run(
+        ["git", "check-ignore", "RUN/config.yaml"],
+        cwd=str(clone_dir), capture_output=True, text=True,
+    )
+    assert ignore_res.returncode == 0, "RUN/config.yaml should be git-ignored after the update"
+

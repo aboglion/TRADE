@@ -84,6 +84,28 @@ else
     echo "✨ Working tree is clean. No local modifications to stash."
 fi
 
+# 3b. ALWAYS back up critical runtime files (even when unmodified/tracked), so an
+#     incoming upstream deletion or a hard reset can never wipe them out.
+#     (e.g. RUN/config.yaml being untracked upstream for security reasons)
+CRITICAL_FILES=(".env" "RUN/.env" "config.yaml" "RUN/config.yaml" "data/bot_state.json" "RUN/data/bot_state.json" "logs/last_mode" "RUN/logs/last_mode")
+if [ -z "$BACKUP_DIR" ]; then
+    TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
+    BACKUP_DIR="${PROJECT_DIR}/backups/local_changes/${TIMESTAMP}"
+fi
+mkdir -p "$BACKUP_DIR"
+CRITICAL_BACKED_UP=0
+for cfg in "${CRITICAL_FILES[@]}"; do
+    if [ -f "${PROJECT_DIR}/${cfg}" ]; then
+        mkdir -p "${BACKUP_DIR}/$(dirname "${cfg}")"
+        cp -p "${PROJECT_DIR}/${cfg}" "${BACKUP_DIR}/${cfg}" 2>/dev/null || true
+        CRITICAL_BACKED_UP=1
+    fi
+done
+if [ "$CRITICAL_BACKED_UP" -eq 1 ]; then
+    echo "🔐 Critical runtime files backed up to: $BACKUP_DIR"
+    log_bot "Critical runtime files backed up to $BACKUP_DIR"
+fi
+
 # 4. Pull latest code from GitHub
 echo "⬇️ Pulling latest changes from GitHub (origin/$BRANCH)..."
 PULL_SUCCESS=0
@@ -112,6 +134,17 @@ fi
 
 echo "✅ Latest changes pulled successfully."
 log_bot "✅ Latest git changes pulled successfully"
+
+# 4b. Restore critical runtime files if the incoming update deleted them
+#     (happens when a runtime file gets untracked upstream to keep secrets local).
+for cfg in "${CRITICAL_FILES[@]}"; do
+    if [ ! -f "${PROJECT_DIR}/${cfg}" ] && [ -f "${BACKUP_DIR}/${cfg}" ]; then
+        mkdir -p "$(dirname "${PROJECT_DIR}/${cfg}")"
+        cp -p "${BACKUP_DIR}/${cfg}" "${PROJECT_DIR}/${cfg}" 2>/dev/null || true
+        echo "♻️  Restored critical runtime file removed by update: ${cfg}"
+        log_bot "Restored critical runtime file after pull: ${cfg}"
+    fi
+done
 
 # 5. Restore stashed local changes if a stash was created
 if [ "$STASH_CREATED" -eq 1 ]; then
