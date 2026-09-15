@@ -755,21 +755,12 @@ class TaxHistoryService:
                     errors, "withdraw_history",
                 ))
 
-            def fetch_fiat(cs: int, ce: int, t: str):
-                resp = self._sapi_with_retry(
-                    ex.sapiGetFiatOrders,
-                    {"transactionType": t, "beginTime": cs, "endTime": ce, "limit": 500},
-                    errors, f"fiat_orders_{t}",
-                )
-                return (f"fiat_{t}", resp.get("data", []) if isinstance(resp, dict) else [])
-
+            # 1. Fetch crypto deposits & withdrawals via chunked thread pool (controlled concurrency)
             tasks = []
-            with ThreadPoolExecutor(max_workers=6) as pool:
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 for c_start, c_end in chunks:
                     tasks.append(pool.submit(fetch_dep, c_start, c_end))
                     tasks.append(pool.submit(fetch_wd, c_start, c_end))
-                    tasks.append(pool.submit(fetch_fiat, c_start, c_end, "0"))
-                    tasks.append(pool.submit(fetch_fiat, c_start, c_end, "1"))
 
                 for fut in as_completed(tasks):
                     kind, payload = fut.result()
@@ -871,20 +862,49 @@ class TaxHistoryService:
                                 "notes": f"משיכת קריפטו מוצלחת לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
                             })
 
-                    elif kind in ("fiat_0", "fiat_1"):
-                        for f_ord in payload:
-                            rec = self._parse_fiat_order(f_ord, kind)
-                            if rec is None or rec["id"] in seen_transfer_ids:
-                                continue
-                            seen_transfer_ids.add(rec["id"])
-                            results.append(rec)
+            # 2. Query Fiat deposit & withdrawal orders sequentially with throttling to prevent 429 rate limits
+            fiat_fn = getattr(ex, "sapiGetFiatOrders", None)
+            if fiat_fn is not None:
+                fiat_chunks = chunks[:4]  # Limit to most recent ~1 year of fiat records
+                fiat_throttled = False
+                for c_start, c_end in fiat_chunks:
+                    if fiat_throttled:
+                        break
+                    for t in ("0", "1"):
+                        resp = self._sapi_with_retry(
+                            fiat_fn,
+                            {"transactionType": t, "beginTime": c_start, "endTime": c_end, "limit": 500},
+                            errors,
+                            f"fiat_orders_{t}",
+                        )
+                        time.sleep(0.12)
+                        if not isinstance(resp, dict):
+                            if any("429" in str(e) or "Too many requests" in str(e) for e in errors):
+                                fiat_throttled = True
+                                break
+                            continue
+                        data = resp.get("data", [])
+                        if isinstance(data, list):
+                            for f_ord in data:
+                                rec = self._parse_fiat_order(f_ord, f"fiat_{t}")
+                                if rec is None or rec["id"] in seen_transfer_ids:
+                                    continue
+                                seen_transfer_ids.add(rec["id"])
+                                results.append(rec)
 
-                # P2P order history: paginated full-range query (independent of 85-day chunks)
-                for rec in self._fetch_binance_p2p_orders(ex, errors, fetch_from, target_until):
-                    if rec["id"] in seen_transfer_ids:
-                        continue
-                    seen_transfer_ids.add(rec["id"])
-                    results.append(rec)
+            # 3. P2P / C2C order history: paginated full-range query (independent of 85-day chunks)
+            for rec in self._fetch_binance_p2p_orders(ex, errors, fetch_from, target_until):
+                if rec["id"] in seen_transfer_ids:
+                    continue
+                seen_transfer_ids.add(rec["id"])
+                results.append(rec)
+
+            # 4. Binance Convert trade flow: converts fiat/crypto to trading inventory
+            for rec in self._fetch_binance_convert_orders(ex, errors, fetch_from, target_until):
+                if rec["id"] in seen_transfer_ids:
+                    continue
+                seen_transfer_ids.add(rec["id"])
+                results.append(rec)
 
         except Exception as ex_err:
             err_msg = str(ex_err)
@@ -982,7 +1002,6 @@ class TaxHistoryService:
         Non-rate-limit failures are recorded once per label into `errors` for transparency.
         """
         if fn is None:
-            errors.append(f"{label}: endpoint not available in installed ccxt version")
             return None
 
         delay = 1.0
@@ -995,6 +1014,9 @@ class TaxHistoryService:
                 is_rate_limit = any(
                     x in last_err for x in ("429", "418", "Too many requests", "rate limit", "WAY_TOO_MANY_REQUESTS")
                 )
+                if "-1003" in last_err:
+                    # Binance IP/UID rate limit: abort immediately to prevent increasing the penalty window
+                    break
                 if is_rate_limit and attempt < max_retries - 1:
                     time.sleep(delay)
                     delay *= 2.0
@@ -1002,7 +1024,12 @@ class TaxHistoryService:
                 break
 
         if last_err:
-            msg = f"{label}: {last_err[:180]}"
+            clean_err = last_err
+            if "-1003" in last_err or "Too many requests" in last_err or "429" in last_err:
+                clean_err = "Binance 429: מגבלת קצב SAPI — הקריאות הוגבלו כדי להגן על חשבונך"
+            elif "-2015" in last_err:
+                clean_err = "Binance -2015: נדרשת הרשאת קריאה/ארנק או הוספת כתובת ה-IP בבינאנס"
+            msg = f"{label}: {clean_err[:150]}"
             if not any(e.startswith(f"{label}:") for e in errors):
                 errors.append(msg)
             logger.warning("SAPI %s failed: %s", label, last_err[:180])
@@ -1077,7 +1104,8 @@ class TaxHistoryService:
     @staticmethod
     def _parse_p2p_order(o: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Parse one /sapi/v1/p2p/orderHistory/user entry into a unified BUY/SELL record.
+        Parse one P2P / C2C order entry into a unified BUY/SELL record.
+        Supports both /sapi/v1/c2c/orderMatch/listUserOrderHistory and /sapi/v1/p2p/orderHistory/user.
         Completed P2P buys create FIFO cost-basis lots; completed sells are disposals.
         """
         status = str(o.get("orderStatus", "")).strip().upper()
@@ -1094,18 +1122,18 @@ class TaxHistoryService:
 
         try:
             crypto_qty = float(o.get("amount") or 0.0)
-            fiat_amt = float(o.get("fiatAmount") or 0.0)
-            f_ts = int(o.get("orderFinishTime") or o.get("orderCreateTime") or 0)
+            fiat_amt = float(o.get("fiatAmount") or o.get("totalPrice") or 0.0)
+            f_ts = int(o.get("orderFinishTime") or o.get("orderCreateTime") or o.get("createTime") or 0)
         except (TypeError, ValueError):
             return None
 
         if crypto_qty <= 0 or fiat_amt <= 0 or f_ts <= 0:
             return None
 
-        fiat_curr = str(o.get("fiatCurrency", "USD") or "USD").upper()
+        fiat_curr = str(o.get("fiatCurrency") or o.get("fiat") or "USD").upper()
         ord_no = str(o.get("orderNumber", "") or o.get("orderId", "") or f_ts)
         rec_id = f"p2p_{trade_type.lower()}_{ord_no}"
-        unit_price = fiat_amt / crypto_qty
+        unit_price = float(o.get("unitPrice") or (fiat_amt / crypto_qty if crypto_qty > 0 else 0.0))
 
         dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
         dt_local = datetime.fromtimestamp(f_ts / 1000.0)
@@ -1145,18 +1173,28 @@ class TaxHistoryService:
         until_ms: int,
     ) -> List[Dict[str, Any]]:
         """
-        Fetch completed P2P buy/sell orders via /sapi/v1/p2p/orderHistory/user.
-        Uses full-range page pagination (rows<=100), so only a few requests are needed.
+        Fetch completed P2P / C2C buy/sell orders via Binance SAPI.
+        Supports both c2c/orderMatch/listUserOrderHistory and legacy endpoints.
         """
         results: List[Dict[str, Any]] = []
-        fn = getattr(ex, "sapiGetP2pOrderHistoryUser", None)
+        fn = (
+            getattr(ex, "sapiGetC2cOrderMatchListUserOrderHistory", None)
+            or getattr(ex, "sapi_get_c2c_ordermatch_listuserorderhistory", None)
+            or getattr(ex, "sapiGetP2pOrderHistoryUser", None)
+            or getattr(ex, "sapi_get_p2p_order_history_user", None)
+        )
         if fn is None:
-            errors.append("p2p_history: endpoint not available in installed ccxt version")
+            try:
+                fn = lambda p: ex.request("c2c/orderMatch/listUserOrderHistory", "sapi", "GET", p)
+            except Exception:
+                fn = None
+
+        if fn is None:
             return results
 
         for trade_type in ("BUY", "SELL"):
             page = 1
-            for _ in range(10):  # up to 1000 orders per side
+            for _ in range(5):  # up to 500 orders per side
                 params: Dict[str, Any] = {"tradeType": trade_type, "page": page, "rows": 100}
                 if since_ms > 0:
                     params["startTimestamp"] = since_ms
@@ -1164,6 +1202,7 @@ class TaxHistoryService:
                     params["endTimestamp"] = until_ms
 
                 resp = self._sapi_with_retry(fn, params, errors, f"p2p_{trade_type.lower()}")
+                time.sleep(0.1)
                 if not isinstance(resp, dict):
                     break
                 data = resp.get("data")
@@ -1186,6 +1225,111 @@ class TaxHistoryService:
                 if len(data) < 100:
                     break
                 page += 1
+
+        return results
+
+    @staticmethod
+    def _parse_convert_order(o: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Parse Binance Convert trade into FIFO inventory acquisition lot."""
+        status = str(o.get("orderStatus", "")).strip().upper()
+        if status not in ("SUCCESS", "COMPLETED", "FINISHED"):
+            return None
+
+        from_asset = str(o.get("fromAsset", "")).upper().strip()
+        to_asset = str(o.get("toAsset", "")).upper().strip()
+        if not from_asset or not to_asset:
+            return None
+
+        try:
+            from_amt = float(o.get("fromAmount") or 0.0)
+            to_amt = float(o.get("toAmount") or 0.0)
+            c_ts = int(o.get("createTime") or 0)
+        except (TypeError, ValueError):
+            return None
+
+        if from_amt <= 0 or to_amt <= 0 or c_ts <= 0:
+            return None
+
+        ord_id = str(o.get("quoteId", "") or o.get("orderId", "") or c_ts)
+        rec_id = f"convert_{ord_id}"
+        dt_utc = datetime.fromtimestamp(c_ts / 1000.0, tz=timezone.utc)
+        dt_local = datetime.fromtimestamp(c_ts / 1000.0)
+
+        unit_price = (from_amt / to_amt) if to_amt > 0 else 0.0
+        is_stable_or_fiat = from_asset in ("USDT", "USD", "USDC", "FDUSD", "BUSD", "EUR", "ILS")
+
+        return {
+            "id": rec_id,
+            "timestamp_ms": c_ts,
+            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": f"{to_asset}/{from_asset}" if from_asset in ("USDT", "USD", "USDC") else f"{to_asset}/USDT",
+            "coin": to_asset,
+            "side": "BUY",
+            "action_type": "CONVERT_BUY",
+            "market": "CONVERT",
+            "amount": to_amt,
+            "price": round(unit_price, 4),
+            "total_usd": round(from_amt, 2) if is_stable_or_fiat else 0.0,
+            "cost_basis_usd": round(from_amt, 2) if is_stable_or_fiat else 0.0,
+            "fee_usd": 0.0,
+            "fee_currency": from_asset,
+            "realized_pnl_usd": 0.0,
+            "realized_pnl_pct": 0.0,
+            "client_order_id": "",
+            "exchange_order_id": ord_id,
+            "trade_id": ord_id,
+            "status": "FILLED",
+            "source": "BINANCE_CONVERT",
+            "notes": f"המרה (Convert): רכישת {to_amt} {to_asset} תמורת {from_amt} {from_asset}",
+        }
+
+    def _fetch_binance_convert_orders(
+        self,
+        ex: Any,
+        errors: List[str],
+        since_ms: int,
+        until_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch completed Binance Convert orders via /sapi/v1/convert/tradeFlow.
+        Ensures crypto converted from fiat or stablecoins establishes proper FIFO cost basis.
+        """
+        results: List[Dict[str, Any]] = []
+        fn = (
+            getattr(ex, "sapiGetConvertTradeFlow", None)
+            or getattr(ex, "sapi_get_convert_tradeflow", None)
+        )
+        if fn is None:
+            try:
+                fn = lambda p: ex.request("convert/tradeFlow", "sapi", "GET", p)
+            except Exception:
+                fn = None
+
+        if fn is None:
+            return results
+
+        now_ms = int(time.time() * 1000)
+        target_until = until_ms if until_ms > 0 else now_ms
+        c_window = 28 * 86400 * 1000
+        start_t = max(since_ms, target_until - (180 * 86400 * 1000)) if since_ms <= 0 else since_ms
+
+        curr_start = start_t
+        for _ in range(6):  # up to 6 months
+            if curr_start >= target_until:
+                break
+            curr_end = min(target_until, curr_start + c_window)
+            params = {"startTime": curr_start, "endTime": curr_end, "limit": 100}
+            resp = self._sapi_with_retry(fn, params, errors, "convert_history")
+            time.sleep(0.1)
+            if isinstance(resp, dict):
+                data = resp.get("list") or resp.get("data") or []
+                if isinstance(data, list):
+                    for o in data:
+                        rec = self._parse_convert_order(o)
+                        if rec is not None:
+                            results.append(rec)
+            curr_start = curr_end + 1
 
         return results
 
@@ -1369,7 +1513,7 @@ class TaxHistoryService:
                 t["pnl_note"] = "רכישה (עלות בסיס נצברה למלאי)" if side == "BUY" else "הפקדה נכנסה למלאי"
 
             # 2. SELLS on SPOT -> Match against inventory using FIFO
-            elif side == "SELL" and market in ("SPOT", "BOT_EXECUTION", "TRANSFER", "P2P", "FIAT") and qty > 0:
+            elif side == "SELL" and market in ("SPOT", "BOT_EXECUTION", "TRANSFER", "P2P", "FIAT", "CONVERT") and qty > 0:
                 proceeds = round(qty * price, 2) if price > 0 else float(t.get("total_usd", 0.0))
                 t["total_usd"] = proceeds
 

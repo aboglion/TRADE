@@ -563,6 +563,58 @@ class TestTaxHistoryService(unittest.TestCase):
         self.assertIn("deposit_history: -2015", csv_text)
         self.assertIn("מכירות ללא עלות רכישה", csv_text)
 
+    def test_parse_p2p_order_c2c_schema(self):
+        # Official Binance C2C endpoint format
+        c2c_buy = TaxHistoryService._parse_p2p_order({
+            "orderNumber": "C2C_999",
+            "tradeType": "BUY",
+            "asset": "USDT",
+            "fiat": "USD",
+            "amount": "500.0",
+            "totalPrice": "500.0",
+            "unitPrice": "1.0",
+            "orderStatus": "COMPLETED",
+            "createTime": 1690000000000,
+        })
+        self.assertIsNotNone(c2c_buy)
+        self.assertEqual(c2c_buy["coin"], "USDT")
+        self.assertEqual(c2c_buy["amount"], 500.0)
+        self.assertEqual(c2c_buy["cost_basis_usd"], 500.0)
+        self.assertEqual(c2c_buy["price"], 1.0)
+        self.assertEqual(c2c_buy["market"], "P2P")
+
+    def test_parse_convert_order(self):
+        conv = TaxHistoryService._parse_convert_order({
+            "quoteId": "CONV_123",
+            "orderStatus": "SUCCESS",
+            "fromAsset": "USDT",
+            "toAsset": "BTC",
+            "fromAmount": "3000.0",
+            "toAmount": "0.1",
+            "ratio": "0.00003333",
+            "createTime": 1700000000000,
+        })
+        self.assertIsNotNone(conv)
+        self.assertEqual(conv["coin"], "BTC")
+        self.assertEqual(conv["amount"], 0.1)
+        self.assertEqual(conv["cost_basis_usd"], 3000.0)
+        self.assertEqual(conv["market"], "CONVERT")
+        self.assertEqual(conv["side"], "BUY")
+
+    def test_sapi_with_retry_aborts_on_1003_without_tight_loop(self):
+        call_count = 0
+        def fail_1003(params):
+            nonlocal call_count
+            call_count += 1
+            raise Exception('binance 429 {"code":-1003, "msg":"Too many requests; current request has limited."}')
+
+        errors = []
+        res = TaxHistoryService._sapi_with_retry(fail_1003, {}, errors, "fiat_orders_0", max_retries=3)
+        self.assertIsNone(res)
+        # Should abort on first 1003 attempt to not hammer rate limiter
+        self.assertEqual(call_count, 1)
+        self.assertTrue(any("429" in e or "מגבלת קצב" in e for e in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
