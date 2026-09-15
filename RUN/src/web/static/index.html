@@ -58,56 +58,70 @@
 
             <!-- Quick Action Toolbar (Mobile & Desktop Friendly) -->
             <div class="toolbar">
-                <div class="clock-display" id="utcClock" title="תאריך הפעלת הבוט האחרון וזמן אמת (UTC וזמן ירושלים)">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                    <span id="botStartClockText">הפעלת בוט: --/--/---- --:-- UTC &bull; ירושלים: --/--/---- --:--</span>
-                    <span class="live-clock-inline" id="liveClockInline" style="border-left: 1px solid rgba(255,255,255,0.15); padding-left: 8px; margin-left: 6px; color: #38bdf8; font-size: 0.78rem;">00:00:00 UTC</span>
+                <div class="clock-display" id="utcClock" title="תאריך הפעלת הבוט וזמן אמת (UTC ושעון ישראל)">
+                    <div class="clock-item clock-item-bot-start">
+                        <span class="clock-item-icon">🚀</span>
+                        <span class="clock-item-label">הפעלת בוט:</span>
+                        <span id="botStartClockText" class="clock-item-val" dir="ltr">--/--/---- --:--</span>
+                    </div>
+                    <div class="clock-divider"></div>
+                    <div class="clock-item clock-item-live">
+                        <span class="clock-item-icon live-pulse-icon">⏱️</span>
+                        <span class="clock-item-label">זמן אמת:</span>
+                        <span id="liveClockInline" class="clock-item-val" dir="ltr">00:00:00</span>
+                    </div>
                 </div>
 
                 <div class="toolbar-actions">
-                    <button class="btn btn-outline" id="manualPullBtn" title="Pull latest code from GitHub now (Manual Git Pull)" onclick="triggerManualPull()">
-                        <span>⬇️</span> <span class="btn-text">Git Pull</span>
-                    </button>
+                    <!-- שורה 1: כפתורי תפעול, עדכונים, רענון ובטיחות -->
+                    <div class="toolbar-btn-row toolbar-btn-row-1">
+                        <button class="btn btn-outline" id="manualPullBtn" title="Pull latest code from GitHub now (Manual Git Pull)" onclick="triggerManualPull()">
+                            <span>⬇️</span> <span class="btn-text">Git Pull</span>
+                        </button>
 
-                    <button class="btn btn-outline" id="toggleUpdaterBtn" title="Enable/Pause automatic updates from GitHub" onclick="toggleUpdater()">
-                        <span>🔄</span> <span class="btn-text">Auto-Pull Active</span>
-                    </button>
+                        <button class="btn btn-outline" id="toggleUpdaterBtn" title="Enable/Pause automatic updates from GitHub" onclick="toggleUpdater()">
+                            <span>🔄</span> <span class="btn-text">Auto-Pull Active</span>
+                        </button>
 
-                    <button class="btn btn-outline" id="resetStatsBtn" title="Reset PNL and fee statistics for a new session" onclick="openResetPnlModal()">
-                        <span>🧹</span> <span class="btn-text">Reset PNL Stats</span>
-                    </button>
+                        <button class="btn btn-outline" id="triggerCycleBtn" title="Run manual trading cycle immediately (Trigger Cycle)" onclick="openTriggerCycleConfirmModal()">
+                            <span>⚡</span> <span class="btn-text">Run Bot Cycle</span>
+                        </button>
 
-                    <button class="btn btn-outline" id="telegramModalBtn" title="Configure Telegram notification alerts (Telegram API Alerts)" onclick="openTelegramModal()">
-                        <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
-                    </button>
+                        <button class="btn btn-outline" id="refreshBtn" title="Force immediate data refresh" onclick="manualRefresh()">
+                            <span>🔄</span> <span class="btn-text">Refresh Data</span>
+                        </button>
 
-                    <button class="btn btn-outline" id="apiKeysModalBtn" title="Manage Binance API keys (.env) & Exchange Connection" onclick="openApiKeysModal()">
-                        <span>🔑</span> <span class="btn-text">API Keys (.env)</span>
-                    </button>
+                        <button class="btn btn-danger" id="killSwitchBtn" title="Emergency Stop! Enable/Disable Kill Switch to block new trading orders" onclick="openKillSwitchModal()">
+                            <span>🛡️</span> <span>KILL SWITCH</span>
+                        </button>
+                    </div>
 
-                    <button class="btn btn-outline btn-conditions" id="conditionsModalBtn" title="View visual real-time strategy buy/sell conditions & logic" onclick="openConditionsModal()">
-                        <span>🎯</span> <span class="btn-text">Strategy Conditions</span>
-                    </button>
+                    <!-- שורה 2: אסטרטגיה, דוחות מס, התראות והגדרות -->
+                    <div class="toolbar-btn-row toolbar-btn-row-2">
+                        <button class="btn btn-outline btn-conditions" id="conditionsModalBtn" title="View visual real-time strategy buy/sell conditions & logic" onclick="openConditionsModal()">
+                            <span>🎯</span> <span class="btn-text">Strategy Conditions</span>
+                        </button>
 
-                    <button class="btn btn-outline" id="triggerCycleBtn" title="Run manual trading cycle immediately (Trigger Cycle)" onclick="openTriggerCycleConfirmModal()">
-                        <span>⚡</span> <span class="btn-text">Run Bot Cycle</span>
-                    </button>
+                        <button class="btn btn-outline btn-tax-history" id="tradeHistoryModalBtn" title="שליפת היסטוריית כל הפעולות במטבעות והפקת דוח למס הכנסה (כל הזמנים / שנה אחרונה)" onclick="openTradeHistoryModal()">
+                            <span>📑</span> <span class="btn-text">היסטוריית פעולות ומס</span>
+                        </button>
 
-                    <button class="btn btn-outline btn-tax-history" id="tradeHistoryModalBtn" title="שליפת היסטוריית כל הפעולות במטבעות והפקת דוח למס הכנסה (כל הזמנים / שנה אחרונה)" onclick="openTradeHistoryModal()">
-                        <span>📑</span> <span class="btn-text">היסטוריית פעולות ומס</span>
-                    </button>
+                        <button class="btn btn-outline" id="telegramModalBtn" title="Configure Telegram notification alerts (Telegram API Alerts)" onclick="openTelegramModal()">
+                            <span>✈️</span> <span class="btn-text">Telegram Alerts</span>
+                        </button>
 
-                    <button class="btn btn-outline" id="refreshBtn" title="Force immediate data refresh" onclick="manualRefresh()">
-                        <span>🔄</span> <span class="btn-text">Refresh Data</span>
-                    </button>
+                        <button class="btn btn-outline" id="apiKeysModalBtn" title="Manage Binance API keys (.env) & Exchange Connection" onclick="openApiKeysModal()">
+                            <span>🔑</span> <span class="btn-text">API Keys (.env)</span>
+                        </button>
 
-                    <button class="btn btn-outline btn-lock" id="toolbarLockBtn" title="נעילת דשבורד ויציאה מהחשבון (Lock Dashboard)" onclick="lockDashboard()">
-                        <span>🔒</span> <span class="btn-text">נעילה</span>
-                    </button>
+                        <button class="btn btn-outline" id="resetStatsBtn" title="Reset PNL and fee statistics for a new session" onclick="openResetPnlModal()">
+                            <span>🧹</span> <span class="btn-text">Reset PNL Stats</span>
+                        </button>
 
-                    <button class="btn btn-danger" id="killSwitchBtn" title="Emergency Stop! Enable/Disable Kill Switch to block new trading orders" onclick="openKillSwitchModal()">
-                        <span>🛡️</span> <span>KILL SWITCH</span>
-                    </button>
+                        <button class="btn btn-outline btn-lock" id="toolbarLockBtn" title="נעילת דשבורד ויציאה מהחשבון (Lock Dashboard)" onclick="lockDashboard()">
+                            <span>🔒</span> <span class="btn-text">נעילה</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </header>

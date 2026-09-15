@@ -46,6 +46,7 @@ let offlineProbeInterval = null;
 let lastOfflineError = "";
 let crashDataCached = null;
 let mainPollInterval = null;
+let isAuthRequired = false;
 
 function updateConnectionBadge(online, textOverride = "") {
     const badge = document.getElementById("connBadge");
@@ -149,11 +150,13 @@ function setServerOfflineState(offline, err = null) {
         if (modal) modal.style.display = "none";
         stopOfflineReconnectCycle();
 
-        // Resume main polling now that server is back
-        startMainPolling();
+        // Resume main polling now that server is back (if authenticated or auth not required)
+        if (!isAuthRequired || authToken) {
+            startMainPolling();
+            fetchDashboardData();
+        }
 
         showToast("✅ החיבור לשרת שוחזר בהצלחה! הדאשבורד פעיל.", "success");
-        fetchDashboardData();
     }
 }
 
@@ -200,7 +203,8 @@ async function probeServerStatus() {
 
         if (res.status === 401 || res.status === 429) {
             setServerOfflineState(false);
-            showLoginModal();
+            stopMainPolling();
+            showLoginModal(false);
             return;
         }
 
@@ -464,9 +468,10 @@ async function apiFetch(url, options = {}) {
     try {
         const res = await fetch(url, options);
         if (res.status === 401) {
+            stopMainPolling();
             authToken = "";
             setStoredAuthToken("");
-            showLoginModal();
+            showLoginModal(false);
         } else {
             handleConnectionSuccess();
         }
@@ -646,8 +651,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (isAuthed) {
         fetchDashboardData();
         loadTelegramConfig();
+        startMainPolling();
     }
-    startMainPolling();
 });
 
 function updateLockButtonVisibility(authRequired) {
@@ -663,11 +668,13 @@ async function checkAuthStatus() {
         const res = await apiFetch("/api/auth_check");
         if (res.ok) {
             const data = await res.json();
+            isAuthRequired = !!data.auth_required;
             updateLockButtonVisibility(data.auth_required);
             if (data.auth_required && !data.authenticated) {
+                stopMainPolling();
                 authToken = "";
                 setStoredAuthToken("");
-                showLoginModal();
+                showLoginModal(false);
                 if (data.locked_out) {
                     const errorMsg = document.getElementById("loginErrorMsg");
                     if (errorMsg) {
@@ -677,6 +684,7 @@ async function checkAuthStatus() {
                 }
                 return false;
             }
+            return true;
         }
     } catch (e) {
         // apiFetch already triggered handleConnectionFailure for network errors,
@@ -686,19 +694,24 @@ async function checkAuthStatus() {
     return true;
 }
 
-function showLoginModal() {
+function showLoginModal(forceClear = false) {
     const modal = document.getElementById("loginModal");
     if (modal) {
+        const wasAlreadyActive = modal.classList.contains("active");
         modal.classList.add("active");
         const errorMsg = document.getElementById("loginErrorMsg");
-        if (errorMsg) {
-            errorMsg.style.display = "none";
-            errorMsg.textContent = "";
-        }
         const input = document.getElementById("dashboardPasswordInput");
-        if (input) {
-            input.value = "";
-            setTimeout(() => input.focus(), 100);
+
+        // Never clear input while user is typing or if modal is already open, unless explicitly forced (e.g. on logout)
+        if (!wasAlreadyActive || forceClear) {
+            if (errorMsg) {
+                errorMsg.style.display = "none";
+                errorMsg.textContent = "";
+            }
+            if (input) {
+                input.value = "";
+                setTimeout(() => input.focus(), 100);
+            }
         }
     }
 }
@@ -709,6 +722,7 @@ function closeLoginModal() {
 }
 
 async function lockDashboard() {
+    stopMainPolling();
     authToken = "";
     setStoredAuthToken("");
 
@@ -719,7 +733,7 @@ async function lockDashboard() {
     }
 
     showToast("🔒 הדשבורד ננעל בהצלחה (Dashboard Locked)", "info");
-    showLoginModal();
+    showLoginModal(true);
 }
 window.lockDashboard = lockDashboard;
 
@@ -755,6 +769,8 @@ async function performLogin() {
             updateLockButtonVisibility(true);
             showToast("🔑 Successfully logged in to dashboard!", "success");
             fetchDashboardData();
+            loadTelegramConfig();
+            startMainPolling();
         } else {
             authToken = "";
             setStoredAuthToken("");
@@ -812,6 +828,9 @@ function formatJerusalemAndUtc(timestampMs) {
             jerusalem: "Never",
             utc: "Never",
             combined: "Never",
+            date: "",
+            jerusalemTime: "",
+            utcTime: "",
         };
     }
     const d = new Date(timestampMs);
@@ -820,6 +839,9 @@ function formatJerusalemAndUtc(timestampMs) {
             jerusalem: "Never",
             utc: "Never",
             combined: "Never",
+            date: "",
+            jerusalemTime: "",
+            utcTime: "",
         };
     }
 
@@ -848,9 +870,15 @@ function formatJerusalemAndUtc(timestampMs) {
     const jerusalemPart = jerusalemFormatter.format(d).replace(",", "");
     const utcPart = utcFormatter.format(d).replace(",", "");
 
+    const jerParts = jerusalemPart.split(" ");
+    const utcParts = utcPart.split(" ");
+
     return {
         jerusalem: jerusalemPart,
         utc: utcPart,
+        date: jerParts[0] || "",
+        jerusalemTime: jerParts[1] || "",
+        utcTime: utcParts[1] || "",
         combined: `${utcPart} UTC &bull; ירושלים: ${jerusalemPart}`,
     };
 }
@@ -863,8 +891,8 @@ function initClock() {
         const liveEl = document.getElementById("liveClockInline");
         if (liveEl) {
             const jerTime = now.toLocaleTimeString("en-GB", { timeZone: "Asia/Jerusalem", hour12: false });
-            const utcTime = now.toUTCString().split(" ")[4];
-            liveEl.textContent = `⏱️ ${utcTime} UTC (${jerTime} י-ם)`;
+            const utcTime = now.toLocaleTimeString("en-GB", { timeZone: "UTC", hour12: false });
+            liveEl.innerHTML = `<span class="clock-val-primary" dir="ltr">${jerTime}</span> <span class="clock-val-tz">ישראל</span> <span class="clock-val-sep">•</span> <span class="clock-val-utc" dir="ltr">${utcTime} UTC</span>`;
             liveEl.title = `שעון זמן אמת: ${jerTime} (שעון ירושלים) | ${utcTime} (UTC)`;
         } else {
             const utcEl = document.getElementById("utcClock");
@@ -1177,15 +1205,15 @@ async function fetchStatus() {
         if (botStartClockEl) {
             if (botStartTs && botStartTs > 0) {
                 const f = formatJerusalemAndUtc(botStartTs);
-                botStartClockEl.innerHTML = `<span style="color: #a7f3d0; font-weight: 600;">🚀 הפעלת בוט:</span> ${f.utc} UTC &bull; <span style="color: #67e8f9; font-weight: 600;">ירושלים:</span> ${f.jerusalem}`;
+                botStartClockEl.innerHTML = `<span class="clock-val-date" dir="ltr">${f.date}</span> <span class="clock-val-primary" dir="ltr">${f.jerusalemTime}</span> <span class="clock-val-tz">ישראל</span> <span class="clock-val-sep">•</span> <span class="clock-val-utc" dir="ltr">${f.utcTime} UTC</span>`;
             } else {
-                botStartClockEl.textContent = "הפעלת בוט: טרם הופעל";
+                botStartClockEl.innerHTML = `<span class="clock-val-empty">טרם הופעל</span>`;
             }
         }
         const utcClockContainer = document.getElementById("utcClock");
         if (utcClockContainer && botStartTs && botStartTs > 0) {
             const f = formatJerusalemAndUtc(botStartTs);
-            utcClockContainer.title = `תאריך הפעלת הבוט האחרון: ${f.utc} UTC | שעון ירושלים: ${f.jerusalem}`;
+            utcClockContainer.title = `תאריך הפעלת הבוט: ${f.date} ${f.jerusalemTime} (שעון ירושלים) | ${f.utcTime} UTC`;
         }
 
         const lastRunTs = data.last_run_ts || (data.strategy_state && data.strategy_state.last_run_ts) || (latestPortfolioData && latestPortfolioData.timestamp_ms);
@@ -1211,7 +1239,7 @@ async function fetchStatus() {
         if (botHealthEl) {
             if (botStartTs && botStartTs > 0) {
                 const f = formatJerusalemAndUtc(botStartTs);
-                botHealthEl.innerHTML = `${f.utc} UTC &bull; <span style="color: #67e8f9;">ירושלים: ${f.jerusalem}</span>`;
+                botHealthEl.innerHTML = `<span dir="ltr">${f.date} ${f.jerusalemTime}</span> (ישראל) &bull; <span dir="ltr" style="color: #94a3b8;">${f.utcTime} UTC</span>`;
             } else {
                 botHealthEl.textContent = "Never";
             }
