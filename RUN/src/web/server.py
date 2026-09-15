@@ -1077,7 +1077,12 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 force_refresh=False,
             )
 
-            csv_text = svc.generate_tax_csv(timeframe, data.get("trades", []), data.get("summary", {}))
+            csv_text = svc.generate_tax_csv(
+                timeframe,
+                data.get("trades", []),
+                data.get("summary", {}),
+                data.get("binance_status"),
+            )
             
             # UTF-8 BOM for Excel compatibility
             content = b"\xef\xbb\xbf" + csv_text.encode("utf-8")

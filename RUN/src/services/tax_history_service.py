@@ -29,6 +29,14 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger("bot.services.tax_history")
 
 
+# Binance SAPI capital endpoints accept ~90-day windows per request; use 85 days for safety.
+_TRANSFER_WINDOW_MS = 85 * 86400 * 1000
+# Binance launched 2017-07-01; absolute lower bound for all-time deposit/withdrawal lookback.
+_BINANCE_INCEPTION_MS = 1498867200000
+# Safety cap: 45 chunks x 85 days ≈ 10.5 years of history per full scan.
+_MAX_TRANSFER_CHUNKS = 45
+
+
 _cached_ip_val: str = "89.139.94.94"
 _cached_ip_ts: float = 0.0
 _ip_fetch_in_progress: bool = False
@@ -352,7 +360,7 @@ class TaxHistoryService:
                     f_trades = fut_f.result()
                     income_records = fut_i.result()
                     spot_trades = fut_s.result()
-                    dep_withdraw = fut_d.result()
+                    dep_withdraw, transfer_meta = fut_d.result()
 
                 binance_trades.extend(f_trades)
                 binance_trades.extend(income_records)
@@ -364,6 +372,15 @@ class TaxHistoryService:
                 binance_status["spot_trades_count"] = len(spot_trades)
                 binance_status["deposits_count"] = sum(1 for x in dep_withdraw if x.get("side") == "DEPOSIT")
                 binance_status["withdrawals_count"] = sum(1 for x in dep_withdraw if x.get("side") == "WITHDRAW")
+                binance_status["transfer_fetch_errors"] = list(transfer_meta.get("errors", []))[:8]
+                binance_status["transfer_lookback_since_ms"] = transfer_meta.get("lookback_since_ms", 0)
+                binance_status["transfer_chunks_queried"] = transfer_meta.get("chunks_queried", 0)
+                if transfer_meta.get("errors"):
+                    logger.warning(
+                        "Transfer/deposit history fetch reported %d issue(s): %s",
+                        len(transfer_meta["errors"]),
+                        "; ".join(str(e) for e in transfer_meta["errors"][:3]),
+                    )
 
                 binance_status["connected"] = True
                 logger.info(
@@ -661,15 +678,55 @@ class TaxHistoryService:
         api_secret: str,
         since_ms: int,
         until_ms: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Fetch Crypto Deposits, Crypto Withdrawals, and Fiat Orders from Binance SAPI.
-        Bypasses 90-day SAPI query limits by chunking time ranges into <= 85-day segments.
-        Logs all movements for Israeli Tax Authority compliance (סעיפים 88-91).
+        Fetch Crypto Deposits, Crypto Withdrawals, Fiat Orders and P2P trades from Binance SAPI.
+
+        - All-time support: when since_ms == 0 the lookback paginates back to Binance
+          inception (2017-07) instead of the old ~340-day cap, so initial deposits appear.
+        - Bypasses 90-day SAPI query limits by chunking time ranges into <= 85-day segments.
+        - Persists fetched records locally (exchange_transfers.json) and refreshes
+          incrementally, so only the first full-history scan is expensive.
+        - Returns (records, meta); meta["errors"] surfaces fetch failures for UI/CSV
+          transparency instead of silently showing zero deposits.
+        - Logs all movements for Israeli Tax Authority compliance (סעיפים 88-91).
         """
+        meta: Dict[str, Any] = {
+            "errors": [],
+            "lookback_since_ms": 0,
+            "chunks_queried": 0,
+        }
         results: List[Dict[str, Any]] = []
         if not api_key or not api_secret:
-            return results
+            return results, meta
+
+        errors: List[str] = meta["errors"]
+        now_ms = int(time.time() * 1000)
+        target_until = until_ms if until_ms > 0 else now_ms
+
+        if since_ms > 0:
+            target_since = since_ms
+            span_chunks = (target_until - target_since) // _TRANSFER_WINDOW_MS + 2
+            max_chunks = int(min(_MAX_TRANSFER_CHUNKS, max(1, span_chunks)))
+        else:
+            # מאז ומעולם — paginate back to exchange inception (Binance launched 2017-07)
+            target_since = _BINANCE_INCEPTION_MS
+            max_chunks = _MAX_TRANSFER_CHUNKS
+
+        meta["lookback_since_ms"] = target_since
+
+        # Reuse deep history already fetched; only refresh the recent window incrementally
+        cache = self._load_transfer_cache()
+        cached_records: List[Dict[str, Any]] = [r for r in cache.get("records", []) if isinstance(r, dict)]
+        covered_since = int(cache.get("covered_since_ms", 0) or 0)
+        last_fetch = int(cache.get("last_fetch_ms", 0) or 0)
+        deep_history_ready = covered_since > 0 and covered_since <= target_since and last_fetch > 0
+
+        overlap_ms = 2 * 86400 * 1000
+        fetch_from = max(target_since, min(last_fetch, now_ms) - overlap_ms) if deep_history_ready else target_since
+
+        chunks = self._build_transfer_chunks(fetch_from, target_until, max_chunks)
+        meta["chunks_queried"] = len(chunks)
 
         try:
             import ccxt
@@ -678,46 +735,33 @@ class TaxHistoryService:
                 "apiKey": api_key,
                 "secret": api_secret,
                 "enableRateLimit": False,
-                "timeout": 3500,
+                "timeout": 8000,
                 "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
             })
-
-            DAY_MS = 86400 * 1000
-            WINDOW_MS = 85 * DAY_MS
-            MAX_CHUNKS = 4  # Covers ~340 days (~1 year). Older records are added via manual deposits.
-
-            now_ms = int(time.time() * 1000)
-            target_until = until_ms if until_ms > 0 else now_ms
-            target_since = since_ms if since_ms > 0 else max(0, target_until - (MAX_CHUNKS * WINDOW_MS))
-
-            # Build 85-day chunks from newest to oldest
-            chunks: List[Tuple[int, int]] = []
-            curr_end = target_until
-            while curr_end > target_since and len(chunks) < MAX_CHUNKS:
-                curr_start = max(target_since, curr_end - WINDOW_MS)
-                chunks.append((curr_start, curr_end))
-                curr_end = curr_start - 1
 
             seen_transfer_ids = set()
 
             def fetch_dep(cs: int, ce: int):
-                try:
-                    return ("dep", ex.sapiGetCapitalDepositHisrec({"startTime": cs, "endTime": ce, "limit": 1000}))
-                except Exception as e:
-                    return ("err", str(e))
+                return ("dep", self._sapi_with_retry(
+                    ex.sapiGetCapitalDepositHisrec,
+                    {"startTime": cs, "endTime": ce, "limit": 1000},
+                    errors, "deposit_history",
+                ))
 
             def fetch_wd(cs: int, ce: int):
-                try:
-                    return ("wd", ex.sapiGetCapitalWithdrawHistory({"startTime": cs, "endTime": ce, "limit": 1000}))
-                except Exception as e:
-                    return ("err", str(e))
+                return ("wd", self._sapi_with_retry(
+                    ex.sapiGetCapitalWithdrawHistory,
+                    {"startTime": cs, "endTime": ce, "limit": 1000},
+                    errors, "withdraw_history",
+                ))
 
             def fetch_fiat(cs: int, ce: int, t: str):
-                try:
-                    res = ex.sapiGetFiatOrders({"transactionType": t, "beginTime": cs, "endTime": ce, "limit": 500})
-                    return (f"fiat_{t}", res.get("data", []) if isinstance(res, dict) else [])
-                except Exception as e:
-                    return ("err", str(e))
+                resp = self._sapi_with_retry(
+                    ex.sapiGetFiatOrders,
+                    {"transactionType": t, "beginTime": cs, "endTime": ce, "limit": 500},
+                    errors, f"fiat_orders_{t}",
+                )
+                return (f"fiat_{t}", resp.get("data", []) if isinstance(resp, dict) else [])
 
             tasks = []
             with ThreadPoolExecutor(max_workers=6) as pool:
@@ -729,10 +773,10 @@ class TaxHistoryService:
 
                 for fut in as_completed(tasks):
                     kind, payload = fut.result()
-                    if kind == "err":
+                    if not isinstance(payload, list):
                         continue
 
-                    if kind == "dep" and isinstance(payload, list):
+                    if kind == "dep":
                         for d in payload:
                             status_code = d.get("status")
                             if status_code not in (1, 6):
@@ -776,7 +820,7 @@ class TaxHistoryService:
                                 "notes": f"הפקדת קריפטו מוצלחת לרשת {d.get('network', '')} | TxID: {str(tx_id)[:16]}...",
                             })
 
-                    elif kind == "wd" and isinstance(payload, list):
+                    elif kind == "wd":
                         for w in payload:
                             status_code = w.get("status")
                             if status_code != 6:
@@ -827,54 +871,321 @@ class TaxHistoryService:
                                 "notes": f"משיכת קריפטו מוצלחת לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
                             })
 
-                    elif kind in ("fiat_0", "fiat_1") and isinstance(payload, list):
-                        act_side = "DEPOSIT" if kind == "fiat_0" else "WITHDRAW"
-                        act_title = "הפקדת פיאט" if act_side == "DEPOSIT" else "משיכת פיאט"
+                    elif kind in ("fiat_0", "fiat_1"):
                         for f_ord in payload:
-                            raw_status = str(f_ord.get("status", "")).strip().upper()
-                            if raw_status not in ("SUCCESSFUL", "SUCCESS", "COMPLETED"):
+                            rec = self._parse_fiat_order(f_ord, kind)
+                            if rec is None or rec["id"] in seen_transfer_ids:
                                 continue
+                            seen_transfer_ids.add(rec["id"])
+                            results.append(rec)
 
-                            f_ts = int(f_ord.get("createTime", 0))
-                            ord_no = str(f_ord.get("orderNo", "") or f_ts)
-                            f_id = f"fiat_{act_side.lower()}_{ord_no}"
-                            if f_id in seen_transfer_ids:
-                                continue
-                            seen_transfer_ids.add(f_id)
+                # P2P order history: paginated full-range query (independent of 85-day chunks)
+                for rec in self._fetch_binance_p2p_orders(ex, errors, fetch_from, target_until):
+                    if rec["id"] in seen_transfer_ids:
+                        continue
+                    seen_transfer_ids.add(rec["id"])
+                    results.append(rec)
 
-                            fiat_curr = str(f_ord.get("fiatCurrency", "USD")).upper()
-                            fiat_amt = float(f_ord.get("amount", 0.0))
-                            dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
-                            dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+        except Exception as ex_err:
+            err_msg = str(ex_err)
+            errors.append(f"transfer_master_fetcher: {err_msg[:180]}")
+            logger.warning("Error in deposit/withdrawal master fetcher: %s", err_msg)
 
-                            results.append({
-                                "id": f_id,
-                                "timestamp_ms": f_ts,
-                                "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                                "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
-                                "symbol": f"{fiat_curr}/USDT",
-                                "coin": fiat_curr,
-                                "side": act_side,
-                                "action_type": f"FIAT_{act_side}",
-                                "market": "FIAT",
-                                "amount": fiat_amt,
-                                "price": 1.0,
-                                "total_usd": round(fiat_amt, 2),
-                                "cost_basis_usd": round(fiat_amt, 2) if act_side == "DEPOSIT" else 0.0,
-                                "fee_usd": float(f_ord.get("totalFee", 0.0)),
-                                "fee_currency": fiat_curr,
-                                "realized_pnl_usd": 0.0,
-                                "realized_pnl_pct": 0.0,
-                                "client_order_id": "",
-                                "exchange_order_id": ord_no,
-                                "trade_id": ord_no,
-                                "status": "SUCCESS",
-                                "source": "BINANCE_FIAT",
-                                "notes": f"{act_title} מוצלחת: {fiat_amt} {fiat_curr} באמצעות {f_ord.get('method', 'Bank/Card')}",
-                            })
+        # Merge with persisted cache (dedup by record id) and save for fast incremental refreshes
+        merged_by_id: Dict[str, Dict[str, Any]] = {}
+        for r in cached_records + results:
+            rid = str(r.get("id") or f"{r.get('source', '')}_{r.get('timestamp_ms', 0)}_{r.get('trade_id', '')}")
+            merged_by_id[rid] = r
+        all_records = list(merged_by_id.values())
 
-        except Exception as ex:
-            logger.debug("Error in deposit/withdrawal master fetcher: %s", ex)
+        if not errors:
+            new_covered = min(covered_since, target_since) if covered_since > 0 else target_since
+            self._save_transfer_cache(all_records, new_covered, now_ms)
+        else:
+            # Persist what we got but do not advance coverage markers, so gaps get retried
+            self._save_transfer_cache(all_records, covered_since, last_fetch)
+
+        # Filter to the requested window
+        windowed = [
+            r for r in all_records
+            if int(r.get("timestamp_ms", 0) or 0) >= max(0, since_ms)
+            and int(r.get("timestamp_ms", 0) or 0) <= target_until
+        ]
+        windowed.sort(key=lambda r: int(r.get("timestamp_ms", 0) or 0))
+        return windowed, meta
+
+    def _get_transfer_cache_file(self) -> Path:
+        """Resolve canonical path for persisted exchange transfer/deposit history."""
+        candidates = [
+            Path("/home/uns/TRADE/RUN/data/exchange_transfers.json"),
+            Path("/home/uns/TRADE/data/exchange_transfers.json"),
+            Path("RUN/data/exchange_transfers.json"),
+            Path("data/exchange_transfers.json"),
+        ]
+        for p in candidates:
+            if p.exists():
+                return p
+        default_p = Path("/home/uns/TRADE/RUN/data/exchange_transfers.json")
+        default_p.parent.mkdir(parents=True, exist_ok=True)
+        return default_p
+
+    def _load_transfer_cache(self) -> Dict[str, Any]:
+        """Load persisted transfer history cache (records + coverage markers)."""
+        p = self._get_transfer_cache_file()
+        if not p.exists():
+            return {"records": [], "covered_since_ms": 0, "last_fetch_ms": 0}
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("records"), list):
+                return {
+                    "records": data.get("records", []),
+                    "covered_since_ms": int(data.get("covered_since_ms", 0) or 0),
+                    "last_fetch_ms": int(data.get("last_fetch_ms", 0) or 0),
+                }
+        except Exception as e:
+            logger.warning("Failed to load transfer cache: %s", e)
+        return {"records": [], "covered_since_ms": 0, "last_fetch_ms": 0}
+
+    def _save_transfer_cache(self, records: List[Dict[str, Any]], covered_since_ms: int, last_fetch_ms: int) -> None:
+        """Persist transfer history so repeated report generation stays fast."""
+        try:
+            p = self._get_transfer_cache_file()
+            payload = {
+                "covered_since_ms": int(covered_since_ms),
+                "last_fetch_ms": int(last_fetch_ms),
+                "records": records,
+            }
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+        except Exception as e:
+            logger.warning("Failed to save transfer cache: %s", e)
+
+    @staticmethod
+    def _build_transfer_chunks(target_since: int, target_until: int, max_chunks: int) -> List[Tuple[int, int]]:
+        """
+        Build <=85-day query chunks from newest to oldest covering [target_since, target_until].
+        Binance SAPI capital endpoints only accept ~90-day windows per request.
+        """
+        chunks: List[Tuple[int, int]] = []
+        curr_end = target_until
+        while curr_end > target_since and len(chunks) < max_chunks:
+            curr_start = max(target_since, curr_end - _TRANSFER_WINDOW_MS)
+            chunks.append((curr_start, curr_end))
+            curr_end = curr_start - 1
+        return chunks
+
+    @staticmethod
+    def _sapi_with_retry(fn: Any, params: Dict[str, Any], errors: List[str], label: str, max_retries: int = 3) -> Any:
+        """
+        Call a Binance SAPI endpoint with exponential backoff on rate limits (429/418).
+        Non-rate-limit failures are recorded once per label into `errors` for transparency.
+        """
+        if fn is None:
+            errors.append(f"{label}: endpoint not available in installed ccxt version")
+            return None
+
+        delay = 1.0
+        last_err = ""
+        for attempt in range(max_retries):
+            try:
+                return fn(params)
+            except Exception as e:
+                last_err = str(e)
+                is_rate_limit = any(
+                    x in last_err for x in ("429", "418", "Too many requests", "rate limit", "WAY_TOO_MANY_REQUESTS")
+                )
+                if is_rate_limit and attempt < max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2.0
+                    continue
+                break
+
+        if last_err:
+            msg = f"{label}: {last_err[:180]}"
+            if not any(e.startswith(f"{label}:") for e in errors):
+                errors.append(msg)
+            logger.warning("SAPI %s failed: %s", label, last_err[:180])
+        return None
+
+    @staticmethod
+    def _parse_fiat_order(f_ord: Dict[str, Any], kind: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse one /sapi/v1/fiat/orders entry into a unified DEPOSIT/WITHDRAW record.
+        Handles Binance quirks: success status is 'Trade Success' and the fiat amount
+        field is documented as 'ammout' (API typo) on some response versions.
+        """
+        raw_status = str(f_ord.get("status", "")).strip().upper()
+        if raw_status not in ("SUCCESSFUL", "SUCCESS", "COMPLETED", "TRADE SUCCESS", "TRADE_SUCCESS", "FINISHED"):
+            return None
+
+        act_side = "DEPOSIT" if kind == "fiat_0" else "WITHDRAW"
+        try:
+            f_ts = int(f_ord.get("createTime") or f_ord.get("updateTime") or 0)
+        except (TypeError, ValueError):
+            f_ts = 0
+        if f_ts <= 0:
+            return None
+
+        ord_no = str(f_ord.get("orderNo", "") or f_ts)
+        f_id = f"fiat_{act_side.lower()}_{ord_no}"
+
+        fiat_curr = str(f_ord.get("fiatCurrency", "USD") or "USD").upper()
+        try:
+            fiat_amt = float(f_ord.get("amount") or f_ord.get("ammout") or 0.0)
+            crypto_qty = float(f_ord.get("money") or 0.0)
+            crypto_price = float(f_ord.get("price") or 0.0)
+            fee_amt = float(f_ord.get("commission") or f_ord.get("totalFee") or 0.0)
+        except (TypeError, ValueError):
+            return None
+
+        dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
+        dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+        act_title = "הפקדת פיאט" if act_side == "DEPOSIT" else "משיכת פיאט"
+        method = f_ord.get("method") or f_ord.get("source") or "Bank/Card"
+
+        notes = f"{act_title} מוצלחת: {fiat_amt} {fiat_curr} באמצעות {method}"
+        if crypto_qty > 0:
+            notes += f" | כמות קריפטו בעסקה: {crypto_qty} (מחיר: {crypto_price})"
+
+        return {
+            "id": f_id,
+            "timestamp_ms": f_ts,
+            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": f"{fiat_curr}/USDT",
+            "coin": fiat_curr,
+            "side": act_side,
+            "action_type": f"FIAT_{act_side}",
+            "market": "FIAT",
+            "amount": fiat_amt,
+            "price": 1.0,
+            "total_usd": round(fiat_amt, 2),
+            "cost_basis_usd": round(fiat_amt, 2) if act_side == "DEPOSIT" else 0.0,
+            "fee_usd": round(fee_amt, 4),
+            "fee_currency": fiat_curr,
+            "realized_pnl_usd": 0.0,
+            "realized_pnl_pct": 0.0,
+            "client_order_id": "",
+            "exchange_order_id": ord_no,
+            "trade_id": ord_no,
+            "status": "SUCCESS",
+            "source": "BINANCE_FIAT",
+            "notes": notes,
+        }
+
+    @staticmethod
+    def _parse_p2p_order(o: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Parse one /sapi/v1/p2p/orderHistory/user entry into a unified BUY/SELL record.
+        Completed P2P buys create FIFO cost-basis lots; completed sells are disposals.
+        """
+        status = str(o.get("orderStatus", "")).strip().upper()
+        if status not in ("COMPLETED", "FINISHED", "SUCCESS"):
+            return None
+
+        trade_type = str(o.get("tradeType", "")).strip().upper()
+        if trade_type not in ("BUY", "SELL"):
+            return None
+
+        asset = str(o.get("asset", "")).upper().strip()
+        if not asset:
+            return None
+
+        try:
+            crypto_qty = float(o.get("amount") or 0.0)
+            fiat_amt = float(o.get("fiatAmount") or 0.0)
+            f_ts = int(o.get("orderFinishTime") or o.get("orderCreateTime") or 0)
+        except (TypeError, ValueError):
+            return None
+
+        if crypto_qty <= 0 or fiat_amt <= 0 or f_ts <= 0:
+            return None
+
+        fiat_curr = str(o.get("fiatCurrency", "USD") or "USD").upper()
+        ord_no = str(o.get("orderNumber", "") or o.get("orderId", "") or f_ts)
+        rec_id = f"p2p_{trade_type.lower()}_{ord_no}"
+        unit_price = fiat_amt / crypto_qty
+
+        dt_utc = datetime.fromtimestamp(f_ts / 1000.0, tz=timezone.utc)
+        dt_local = datetime.fromtimestamp(f_ts / 1000.0)
+        title = "רכישת קריפטו ב-P2P" if trade_type == "BUY" else "מכירת קריפטו ב-P2P"
+
+        return {
+            "id": rec_id,
+            "timestamp_ms": f_ts,
+            "datetime_utc": dt_utc.strftime("%Y-%m-%d %H:%M:%S"),
+            "datetime_local": dt_local.strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol": f"{asset}/USDT",
+            "coin": asset,
+            "side": trade_type,
+            "action_type": trade_type,
+            "market": "P2P",
+            "amount": crypto_qty,
+            "price": round(unit_price, 4),
+            "total_usd": round(fiat_amt, 2),
+            "cost_basis_usd": round(fiat_amt, 2) if trade_type == "BUY" else 0.0,
+            "fee_usd": 0.0,
+            "fee_currency": fiat_curr,
+            "realized_pnl_usd": 0.0,
+            "realized_pnl_pct": 0.0,
+            "client_order_id": "",
+            "exchange_order_id": ord_no,
+            "trade_id": ord_no,
+            "status": "FILLED",
+            "source": "BINANCE_P2P",
+            "notes": f"{title}: {crypto_qty} {asset} תמורת {fiat_amt} {fiat_curr} | אמצעי תשלום: {o.get('payType', 'N/A')}",
+        }
+
+    def _fetch_binance_p2p_orders(
+        self,
+        ex: Any,
+        errors: List[str],
+        since_ms: int,
+        until_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch completed P2P buy/sell orders via /sapi/v1/p2p/orderHistory/user.
+        Uses full-range page pagination (rows<=100), so only a few requests are needed.
+        """
+        results: List[Dict[str, Any]] = []
+        fn = getattr(ex, "sapiGetP2pOrderHistoryUser", None)
+        if fn is None:
+            errors.append("p2p_history: endpoint not available in installed ccxt version")
+            return results
+
+        for trade_type in ("BUY", "SELL"):
+            page = 1
+            for _ in range(10):  # up to 1000 orders per side
+                params: Dict[str, Any] = {"tradeType": trade_type, "page": page, "rows": 100}
+                if since_ms > 0:
+                    params["startTimestamp"] = since_ms
+                if until_ms > 0:
+                    params["endTimestamp"] = until_ms
+
+                resp = self._sapi_with_retry(fn, params, errors, f"p2p_{trade_type.lower()}")
+                if not isinstance(resp, dict):
+                    break
+                data = resp.get("data")
+                if not isinstance(data, list) or not data:
+                    break
+
+                for o in data:
+                    if not isinstance(o, dict):
+                        continue
+                    rec = self._parse_p2p_order(o)
+                    if rec is None:
+                        continue
+                    ts = int(rec["timestamp_ms"])
+                    if since_ms > 0 and ts < since_ms:
+                        continue
+                    if until_ms > 0 and ts > until_ms:
+                        continue
+                    results.append(rec)
+
+                if len(data) < 100:
+                    break
+                page += 1
 
         return results
 
@@ -1058,7 +1369,7 @@ class TaxHistoryService:
                 t["pnl_note"] = "רכישה (עלות בסיס נצברה למלאי)" if side == "BUY" else "הפקדה נכנסה למלאי"
 
             # 2. SELLS on SPOT -> Match against inventory using FIFO
-            elif side == "SELL" and market in ("SPOT", "BOT_EXECUTION", "TRANSFER") and qty > 0:
+            elif side == "SELL" and market in ("SPOT", "BOT_EXECUTION", "TRANSFER", "P2P", "FIAT") and qty > 0:
                 proceeds = round(qty * price, 2) if price > 0 else float(t.get("total_usd", 0.0))
                 t["total_usd"] = proceeds
 
@@ -1264,7 +1575,13 @@ class TaxHistoryService:
             "per_coin_summary": per_coin,
         }
 
-    def generate_tax_csv(self, timeframe: str, trades: List[Dict[str, Any]], summary: Dict[str, Any]) -> str:
+    def generate_tax_csv(
+        self,
+        timeframe: str,
+        trades: List[Dict[str, Any]],
+        summary: Dict[str, Any],
+        binance_status: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         Generate Israeli Tax Authority compliant CSV with UTF-8 BOM encoding for Excel.
         """
@@ -1286,6 +1603,23 @@ class TaxHistoryService:
         writer.writerow([f"# סה\"כ עמלות מסחר מותרות בניכוי (Allowable Trading Fees USD): ${summary.get('total_fees_usd', 0.0):,.2f}"])
         writer.writerow([f"# סה\"כ הפקדות (Total Deposits USD): ${summary.get('total_deposits_usd', 0.0):,.2f} ({summary.get('total_deposits_count', 0)} הפקדות)"])
         writer.writerow([f"# סה\"כ משיכות (Total Withdrawals USD): ${summary.get('total_withdrawals_usd', 0.0):,.2f} ({summary.get('total_withdrawals_count', 0)} משיכות)"])
+
+        # Transparency notes: explain zero-deposit reports, fetch errors and missing cost basis
+        transfer_errors = (binance_status or {}).get("transfer_fetch_errors") or []
+        zero_basis_sells = [
+            t for t in trades
+            if str(t.get("side", "")).upper() == "SELL"
+            and float(t.get("total_usd", 0.0) or 0.0) > 0
+            and float(t.get("cost_basis_usd", 0.0) or 0.0) <= 0
+            and str(t.get("status", "SUCCESS")).upper() not in ("FAILED", "CANCELLED", "REJECTED", "EXPIRED")
+        ]
+        if summary.get("total_deposits_count", 0) == 0:
+            writer.writerow(["# ⚠ לא אותרו הפקדות בטווח הנבחר. ייתכן שההפקדה בוצעה דרך P2P/Convert, שלמפתח ה-API חסרה הרשאת Wallet, או שטרם הוזנה יתרת פתיחה ידנית במסך היסטוריית המסחר."])
+        if transfer_errors:
+            writer.writerow([f"# ⚠ שגיאות שליפת היסטוריית העברות/הפקדות: {'; '.join(str(e)[:120] for e in transfer_errors[:4])}"])
+        if zero_basis_sells:
+            writer.writerow([f"# ⚠ אותרו {len(zero_basis_sells)} מכירות ללא עלות רכישה מקורית (יתרת פתיחה חסרה) — הרווח הממומש בדוח זה עשוי להיות מוגזם. הזן הפקדה/יתרת פתיחה ידנית לתיקון."])
+
         writer.writerow(["# =========================================================================================="])
         writer.writerow([])
 

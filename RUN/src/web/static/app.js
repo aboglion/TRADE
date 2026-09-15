@@ -5263,11 +5263,34 @@ async function fetchTradeHistory(forceRefresh = false) {
         const sIp = data.server_ip || "89.139.94.94";
 
         if (bStatus.connected) {
-            if (banner) banner.className = "tax-status-banner success";
-            if (bannerIcon) bannerIcon.textContent = "🟢";
-            if (bannerContent) {
-                bannerContent.innerHTML = `<strong>מחובר ל-Binance בהצלחה!</strong> נשלפו ${bStatus.futures_trades_count || 0} עסקאות פיוצ'רס, ${bStatus.income_records_count || 0} תנועות רווח/הפסד ועמלות, ו-${bStatus.spot_trades_count || 0} עסקאות ספוט, לצד ${bStatus.bot_orders_count || 0} פקודות בוט מקומיות.`;
+            const depCount = bStatus.deposits_count || 0;
+            const wdCount = bStatus.withdrawals_count || 0;
+            const tErrs = bStatus.transfer_fetch_errors || [];
+            const zeroBasisSells = taxTradesList.filter(t =>
+                String(t.side || "").toUpperCase() === "SELL" &&
+                (t.total_usd || 0) > 0 &&
+                (t.cost_basis_usd || 0) <= 0
+            );
+
+            let bannerHtml = `<strong>מחובר ל-Binance בהצלחה!</strong> נשלפו ${bStatus.futures_trades_count || 0} עסקאות פיוצ'רס, ${bStatus.income_records_count || 0} תנועות רווח/הפסד ועמלות, ${bStatus.spot_trades_count || 0} עסקאות ספוט, <strong>${depCount} הפקדות ו-${wdCount} משיכות</strong>, לצד ${bStatus.bot_orders_count || 0} פקודות בוט מקומיות.`;
+            let hasWarning = false;
+
+            if (tErrs.length > 0) {
+                hasWarning = true;
+                bannerHtml += `<div style="margin-top:6px;"><strong>⚠️ שגיאות בשליפת היסטוריית העברות/הפקדות:</strong> ${escapeHtml(tErrs.slice(0, 3).join(" | "))}</div>`;
             }
+            if (depCount === 0) {
+                hasWarning = true;
+                bannerHtml += `<div style="margin-top:6px;">⚠️ לא אותרו הפקדות בטווח הנבחר. ייתכן שההפקדה בוצעה דרך P2P/Convert, שלמפתח ה-API חסרה הרשאת Wallet, או שטרם הוזנה יתרת פתיחה ידנית.</div>`;
+            }
+            if (zeroBasisSells.length > 0) {
+                hasWarning = true;
+                bannerHtml += `<div style="margin-top:6px;"><strong>⚠️ ${zeroBasisSells.length} מכירות ללא עלות רכישה מקורית</strong> — יתרת הפתיחה חסרה, והרווח הממומש עשוי להיות מוגזם. <button class="btn btn-primary" style="padding:2px 10px; font-size:0.8rem;" onclick="openManualDepositModal()">📥 הזנת יתרת פתיחה / הפקדה ידנית</button></div>`;
+            }
+
+            if (banner) banner.className = hasWarning ? "tax-status-banner warning" : "tax-status-banner success";
+            if (bannerIcon) bannerIcon.textContent = hasWarning ? "⚠️" : "🟢";
+            if (bannerContent) bannerContent.innerHTML = bannerHtml;
         } else if (bStatus.is_auth_or_ip_error) {
             if (banner) banner.className = "tax-status-banner warning";
             if (bannerIcon) bannerIcon.textContent = "⚠️";
