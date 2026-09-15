@@ -35,6 +35,11 @@ _TRANSFER_WINDOW_MS = 85 * 86400 * 1000
 _BINANCE_INCEPTION_MS = 1498867200000
 # Safety cap: 45 chunks x 85 days ≈ 10.5 years of history per full scan.
 _MAX_TRANSFER_CHUNKS = 45
+# Binance P2P/C2C service launched ~2020; clamp startTimestamp so all-time scans never
+# send pre-service timestamps that Binance rejects with -31002 "Illegal parameter".
+_P2P_INCEPTION_MS = 1577836800000  # 2020-01-01T00:00:00Z
+# Transfer sources whose failure must block cache-coverage advancement (data-loss risk).
+_CRITICAL_TRANSFER_LABELS = ("deposit_history", "withdraw_history", "transfer_master_fetcher")
 
 
 _cached_ip_val: str = "89.139.94.94"
@@ -68,6 +73,31 @@ def _get_outbound_ip() -> str:
         t.start()
     return _cached_ip_val
 
+
+def _sync_exchange_time(ex: Any) -> Optional[int]:
+    """
+    Explicitly sync the local clock offset with Binance server time (non-fatal).
+
+    ccxt applies options['timeDifference'] to signed request timestamps when
+    options['adjustForTimeDifference'] is enabled, but the offset is normally loaded
+    lazily on the first signed request. Under concurrent fan-out (the transfer
+    fetcher's thread pool) that lazy load can race, causing -1021 "Timestamp outside
+    recvWindow" errors. Pre-syncing here eliminates the race and provides a resync
+    hook for _sapi_with_retry retries.
+    """
+    try:
+        loader = getattr(ex, "load_time_difference", None)
+        if callable(loader):
+            diff = loader()
+            try:
+                diff_int = int(diff or 0)
+            except (TypeError, ValueError):
+                diff_int = 0
+            logger.info("Binance server time synced: local-server offset %d ms", diff_int)
+            return diff_int
+    except Exception as e:
+        logger.debug("Binance time sync skipped: %s", e)
+    return None
 
 
 class TaxHistoryService:
@@ -345,9 +375,12 @@ class TaxHistoryService:
                     "options": {
                         "defaultType": "future",
                         "adjustForTimeDifference": True,
-                        "recvWindow": 10000,
+                        "recvWindow": 30000,
                     },
                 })
+                # Explicitly sync the clock offset before concurrent fan-out to avoid
+                # -1021 "Timestamp outside recvWindow" races (see _sync_exchange_time).
+                _sync_exchange_time(exchange)
                 symbols = self._get_tracked_symbols()
 
                 # Execute all 4 Binance query tasks concurrently in parallel to avoid frontend hanging
@@ -602,8 +635,9 @@ class TaxHistoryService:
                 "secret": api_secret,
                 "enableRateLimit": False,
                 "timeout": 3500,
-                "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
+                "options": {"adjustForTimeDifference": True, "recvWindow": 30000},
             })
+            _sync_exchange_time(spot_ex)
 
             for sym in symbols:
                 clean_sym = sym.replace("/", "").upper()
@@ -736,8 +770,12 @@ class TaxHistoryService:
                 "secret": api_secret,
                 "enableRateLimit": False,
                 "timeout": 8000,
-                "options": {"adjustForTimeDifference": True, "recvWindow": 10000},
+                "options": {"adjustForTimeDifference": True, "recvWindow": 30000},
             })
+            # Pre-sync the clock offset BEFORE the thread pool fans out, so no request
+            # is signed with an unadjusted timestamp (fixes intermittent -1021).
+            _sync_exchange_time(ex)
+            resync = (lambda: _sync_exchange_time(ex)) if ex is not None else None
 
             seen_transfer_ids = set()
 
@@ -745,14 +783,14 @@ class TaxHistoryService:
                 return ("dep", self._sapi_with_retry(
                     ex.sapiGetCapitalDepositHisrec,
                     {"startTime": cs, "endTime": ce, "limit": 1000},
-                    errors, "deposit_history",
+                    errors, "deposit_history", resync=resync,
                 ))
 
             def fetch_wd(cs: int, ce: int):
                 return ("wd", self._sapi_with_retry(
                     ex.sapiGetCapitalWithdrawHistory,
                     {"startTime": cs, "endTime": ce, "limit": 1000},
-                    errors, "withdraw_history",
+                    errors, "withdraw_history", resync=resync,
                 ))
 
             # 1. Fetch crypto deposits & withdrawals via chunked thread pool (controlled concurrency)
@@ -876,6 +914,7 @@ class TaxHistoryService:
                             {"transactionType": t, "beginTime": c_start, "endTime": c_end, "limit": 500},
                             errors,
                             f"fiat_orders_{t}",
+                            resync=resync,
                         )
                         time.sleep(0.12)
                         if not isinstance(resp, dict):
@@ -918,7 +957,10 @@ class TaxHistoryService:
             merged_by_id[rid] = r
         all_records = list(merged_by_id.values())
 
-        if not errors:
+        if not self._has_critical_transfer_error(errors):
+            # Advance coverage unless a critical source (deposits/withdrawals) failed.
+            # Optional sources (fiat/p2p/convert) failing must not force a perpetual
+            # full 45-chunk rescan on every report run.
             new_covered = min(covered_since, target_since) if covered_since > 0 else target_since
             self._save_transfer_cache(all_records, new_covered, now_ms)
         else:
@@ -996,10 +1038,32 @@ class TaxHistoryService:
         return chunks
 
     @staticmethod
-    def _sapi_with_retry(fn: Any, params: Dict[str, Any], errors: List[str], label: str, max_retries: int = 3) -> Any:
+    def _has_critical_transfer_error(errors: List[str]) -> bool:
         """
-        Call a Binance SAPI endpoint with exponential backoff on rate limits (429/418).
-        Non-rate-limit failures are recorded once per label into `errors` for transparency.
+        True if any transfer fetch error came from a critical source (deposits/withdrawals).
+
+        Optional sources (fiat/p2p/convert) may legitimately be unavailable for an
+        account (region/permissions); their failure must not block transfer-cache
+        coverage advancement, otherwise every report run repeats a full 45-chunk scan.
+        """
+        return any(
+            str(e).split(":", 1)[0].strip() in _CRITICAL_TRANSFER_LABELS
+            for e in errors
+        )
+
+    @staticmethod
+    def _sapi_with_retry(
+        fn: Any,
+        params: Dict[str, Any],
+        errors: List[str],
+        label: str,
+        max_retries: int = 3,
+        resync: Any = None,
+    ) -> Any:
+        """
+        Call a Binance SAPI endpoint with exponential backoff on rate limits (429/418)
+        and clock-drift errors (-1021, retried after re-syncing server time via `resync`).
+        Non-retryable failures are recorded once per label into `errors` for transparency.
         """
         if fn is None:
             return None
@@ -1014,10 +1078,16 @@ class TaxHistoryService:
                 is_rate_limit = any(
                     x in last_err for x in ("429", "418", "Too many requests", "rate limit", "WAY_TOO_MANY_REQUESTS")
                 )
+                is_clock_drift = "-1021" in last_err
                 if "-1003" in last_err:
                     # Binance IP/UID rate limit: abort immediately to prevent increasing the penalty window
                     break
-                if is_rate_limit and attempt < max_retries - 1:
+                if (is_rate_limit or is_clock_drift) and attempt < max_retries - 1:
+                    if is_clock_drift and callable(resync):
+                        try:
+                            resync()
+                        except Exception:
+                            pass
                     time.sleep(delay)
                     delay *= 2.0
                     continue
@@ -1029,6 +1099,10 @@ class TaxHistoryService:
                 clean_err = "Binance 429: מגבלת קצב SAPI — הקריאות הוגבלו כדי להגן על חשבונך"
             elif "-2015" in last_err:
                 clean_err = "Binance -2015: נדרשת הרשאת קריאה/ארנק או הוספת כתובת ה-IP בבינאנס"
+            elif "-31002" in last_err:
+                clean_err = "Binance -31002: פרמטר לא חוקי — ה-endpoint הוסר (C2C) או חסרה הרשאת P2P"
+            elif "-1021" in last_err:
+                clean_err = "Binance -1021: שעון מקומי לא מסונכרן עם שרת בינאנס (recvWindow)"
             msg = f"{label}: {clean_err[:150]}"
             if not any(e.startswith(f"{label}:") for e in errors):
                 errors.append(msg)
@@ -1174,34 +1248,72 @@ class TaxHistoryService:
     ) -> List[Dict[str, Any]]:
         """
         Fetch completed P2P / C2C buy/sell orders via Binance SAPI.
-        Supports both c2c/orderMatch/listUserOrderHistory and legacy endpoints.
+
+        Prefers the current /sapi/v1/p2p/orderHistory/user endpoint. The legacy
+        /sapi/v1/c2c/orderMatch/listUserOrderHistory endpoint was decommissioned by
+        Binance and now answers -31002 "Illegal parameter", so it is only used as a
+        last-resort fallback. Candidates are probed on the first BUY page and the
+        first one returning a valid dict is used for pagination; an error is recorded
+        only if every candidate fails.
         """
         results: List[Dict[str, Any]] = []
-        fn = (
-            getattr(ex, "sapiGetC2cOrderMatchListUserOrderHistory", None)
-            or getattr(ex, "sapi_get_c2c_ordermatch_listuserorderhistory", None)
-            or getattr(ex, "sapiGetP2pOrderHistoryUser", None)
-            or getattr(ex, "sapi_get_p2p_order_history_user", None)
-        )
-        if fn is None:
+        resync = (lambda: _sync_exchange_time(ex)) if ex is not None else None
+
+        candidates: List[Any] = []
+        seen_fns = set()
+        for cand in (
+            getattr(ex, "sapiGetP2pOrderHistoryUser", None),
+            getattr(ex, "sapi_get_p2p_order_history_user", None),
+            getattr(ex, "sapiGetC2cOrderMatchListUserOrderHistory", None),
+            getattr(ex, "sapi_get_c2c_ordermatch_listuserorderhistory", None),
+        ):
+            if cand is not None and cand not in seen_fns:
+                seen_fns.add(cand)
+                candidates.append(cand)
+        if not candidates:
             try:
-                fn = lambda p: ex.request("c2c/orderMatch/listUserOrderHistory", "sapi", "GET", p)
+                candidates.append(lambda p: ex.request("p2p/orderHistory/user", "sapi", "GET", p))
             except Exception:
-                fn = None
+                pass
+        if not candidates:
+            return results
+
+        # Clamp the lookback to the P2P service era (2020-01-01) so all-time scans
+        # never send pre-service timestamps that Binance rejects with -31002.
+        p2p_since = max(since_ms, _P2P_INCEPTION_MS) if since_ms > 0 else _P2P_INCEPTION_MS
+
+        # Probe candidates on the first BUY page; pick the first that answers.
+        probe_params: Dict[str, Any] = {"tradeType": "BUY", "page": 1, "rows": 100}
+        if p2p_since > 0:
+            probe_params["startTimestamp"] = p2p_since
+        if until_ms > 0:
+            probe_params["endTimestamp"] = until_ms
+
+        fn = None
+        for cand in candidates:
+            try:
+                resp = cand(dict(probe_params))
+                if isinstance(resp, dict):
+                    fn = cand
+                    break
+            except Exception:
+                continue
 
         if fn is None:
+            errors.append("p2p_orders: כל ה-endpoints של P2P/C2C לא זמינים (ה-endpoint הוסר או חסרה הרשאת P2P)")
+            logger.warning("P2P order history unavailable: all candidate endpoints failed")
             return results
 
         for trade_type in ("BUY", "SELL"):
             page = 1
             for _ in range(5):  # up to 500 orders per side
                 params: Dict[str, Any] = {"tradeType": trade_type, "page": page, "rows": 100}
-                if since_ms > 0:
-                    params["startTimestamp"] = since_ms
+                if p2p_since > 0:
+                    params["startTimestamp"] = p2p_since
                 if until_ms > 0:
                     params["endTimestamp"] = until_ms
 
-                resp = self._sapi_with_retry(fn, params, errors, f"p2p_{trade_type.lower()}")
+                resp = self._sapi_with_retry(fn, params, errors, f"p2p_{trade_type.lower()}", resync=resync)
                 time.sleep(0.1)
                 if not isinstance(resp, dict):
                     break
@@ -1296,6 +1408,7 @@ class TaxHistoryService:
         Ensures crypto converted from fiat or stablecoins establishes proper FIFO cost basis.
         """
         results: List[Dict[str, Any]] = []
+        resync = (lambda: _sync_exchange_time(ex)) if ex is not None else None
         fn = (
             getattr(ex, "sapiGetConvertTradeFlow", None)
             or getattr(ex, "sapi_get_convert_tradeflow", None)
@@ -1320,7 +1433,7 @@ class TaxHistoryService:
                 break
             curr_end = min(target_until, curr_start + c_window)
             params = {"startTime": curr_start, "endTime": curr_end, "limit": 100}
-            resp = self._sapi_with_retry(fn, params, errors, "convert_history")
+            resp = self._sapi_with_retry(fn, params, errors, "convert_history", resync=resync)
             time.sleep(0.1)
             if isinstance(resp, dict):
                 data = resp.get("list") or resp.get("data") or []

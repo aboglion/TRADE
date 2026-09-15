@@ -13,6 +13,7 @@ from src.services.tax_history_service import (
     _BINANCE_INCEPTION_MS,
     _TRANSFER_WINDOW_MS,
     _MAX_TRANSFER_CHUNKS,
+    _P2P_INCEPTION_MS,
 )
 
 
@@ -614,6 +615,157 @@ class TestTaxHistoryService(unittest.TestCase):
         # Should abort on first 1003 attempt to not hammer rate limiter
         self.assertEqual(call_count, 1)
         self.assertTrue(any("429" in e or "מגבלת קצב" in e for e in errors))
+
+
+    # ------------------------------------------------------------------
+    # P2P endpoint selection, -1021 retry, and cache-coverage hardening
+    # ------------------------------------------------------------------
+
+    def test_sapi_with_retry_retries_on_1021_with_resync(self):
+        call_count = 0
+        resync_count = 0
+
+        def flaky(params):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception('binance {"code":-1021,"msg":"Timestamp for this request is outside of the recvWindow."}')
+            return {"data": []}
+
+        def resync():
+            nonlocal resync_count
+            resync_count += 1
+
+        errors = []
+        res = TaxHistoryService._sapi_with_retry(flaky, {}, errors, "withdraw_history", max_retries=3, resync=resync)
+        self.assertEqual(res, {"data": []})
+        self.assertEqual(call_count, 2)
+        self.assertEqual(resync_count, 1)
+        self.assertEqual(errors, [])
+
+    def test_p2p_fetch_prefers_p2p_endpoint_over_deprecated_c2c(self):
+        buy_order = {
+            "orderStatus": "COMPLETED", "tradeType": "BUY", "asset": "BTC",
+            "amount": "0.00319", "fiatAmount": "95.7", "fiatCurrency": "USD",
+            "orderFinishTime": 1687000000000, "orderNumber": "P2P1",
+        }
+
+        def fake_p2p(params):
+            if params.get("tradeType") == "BUY":
+                return {"data": [buy_order]}
+            return {"data": []}
+
+        mock_ex = MagicMock()
+        mock_ex.sapiGetC2cOrderMatchListUserOrderHistory.side_effect = Exception('{"code":-31002,"msg":"Illegal parameter"}')
+        mock_ex.sapiGetP2pOrderHistoryUser.side_effect = fake_p2p
+        errors = []
+        recs = self.service._fetch_binance_p2p_orders(mock_ex, errors, 0, 1750000000000)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["coin"], "BTC")
+        self.assertEqual(recs[0]["cost_basis_usd"], 95.7)
+        self.assertEqual(errors, [])
+        # The decommissioned C2C endpoint must never be called when P2P works
+        mock_ex.sapiGetC2cOrderMatchListUserOrderHistory.assert_not_called()
+
+    def test_p2p_fetch_falls_back_to_c2c_when_p2p_unavailable(self):
+        sell_order = {
+            "orderNumber": "C2C_1", "tradeType": "SELL", "asset": "BTC",
+            "fiat": "USD", "amount": "0.001", "totalPrice": "30.0", "unitPrice": "30000.0",
+            "orderStatus": "COMPLETED", "createTime": 1687000000000,
+        }
+
+        def fake_c2c(params):
+            if params.get("tradeType") == "SELL":
+                return {"data": [sell_order]}
+            return {"data": []}
+
+        mock_ex = MagicMock()
+        mock_ex.sapiGetP2pOrderHistoryUser.side_effect = Exception('{"code":-31002,"msg":"Illegal parameter"}')
+        mock_ex.sapiGetC2cOrderMatchListUserOrderHistory.side_effect = fake_c2c
+        errors = []
+        recs = self.service._fetch_binance_p2p_orders(mock_ex, errors, 0, 1750000000000)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["side"], "SELL")
+        self.assertEqual(recs[0]["coin"], "BTC")
+        self.assertEqual(errors, [])
+
+    def test_p2p_fetch_records_error_only_when_all_endpoints_fail(self):
+        mock_ex = MagicMock()
+        mock_ex.sapiGetP2pOrderHistoryUser.side_effect = Exception('{"code":-31002,"msg":"Illegal parameter"}')
+        mock_ex.sapiGetC2cOrderMatchListUserOrderHistory.side_effect = Exception('{"code":-31002,"msg":"Illegal parameter"}')
+        errors = []
+        recs = self.service._fetch_binance_p2p_orders(mock_ex, errors, 0, 1750000000000)
+        self.assertEqual(recs, [])
+        self.assertTrue(any("p2p_orders" in e for e in errors))
+
+    def test_p2p_fetch_clamps_start_timestamp_to_p2p_inception(self):
+        captured = {}
+
+        def fake_p2p(params):
+            captured.update(params)
+            return {"data": []}
+
+        mock_ex = MagicMock()
+        mock_ex.sapiGetP2pOrderHistoryUser.side_effect = fake_p2p
+        errors = []
+        # since_ms=0 (all-time) must be clamped to the P2P service era, not 2017
+        self.service._fetch_binance_p2p_orders(mock_ex, errors, 0, 1750000000000)
+        self.assertEqual(captured.get("startTimestamp"), _P2P_INCEPTION_MS)
+        self.assertEqual(errors, [])
+
+    def test_has_critical_transfer_error_classification(self):
+        self.assertTrue(TaxHistoryService._has_critical_transfer_error(["withdraw_history: -1021"]))
+        self.assertTrue(TaxHistoryService._has_critical_transfer_error(["deposit_history: -2015"]))
+        self.assertTrue(TaxHistoryService._has_critical_transfer_error(["transfer_master_fetcher: boom"]))
+        self.assertFalse(TaxHistoryService._has_critical_transfer_error(["p2p_buy: -31002"]))
+        self.assertFalse(TaxHistoryService._has_critical_transfer_error(["fiat_orders_0: x", "convert_history: y"]))
+        self.assertFalse(TaxHistoryService._has_critical_transfer_error([]))
+
+    def test_transfer_cache_advances_on_soft_errors_only(self):
+        import tempfile
+        from pathlib import Path
+
+        now_ms = int(time.time() * 1000)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_file = Path(tmp_dir) / "exchange_transfers.json"
+            with patch.object(self.service, "_get_transfer_cache_file", return_value=cache_file):
+                with patch("ccxt.binance") as mock_binance_cls:
+                    mock_ex = MagicMock()
+                    mock_binance_cls.return_value = mock_ex
+                    mock_ex.sapiGetCapitalDepositHisrec.return_value = []
+                    mock_ex.sapiGetCapitalWithdrawHistory.return_value = []
+                    mock_ex.sapiGetFiatOrders.return_value = {"data": []}
+                    # P2P + C2C both unavailable -> soft error only
+                    mock_ex.sapiGetP2pOrderHistoryUser.side_effect = Exception('{"code":-31002,"msg":"Illegal parameter"}')
+                    mock_ex.sapiGetC2cOrderMatchListUserOrderHistory.side_effect = Exception('{"code":-31002,"msg":"Illegal parameter"}')
+                    with patch("time.sleep"):
+                        records, meta = self.service._fetch_binance_deposits_and_withdrawals("key", "secret", 0, now_ms)
+                    self.assertTrue(any("p2p_orders" in e for e in meta["errors"]))
+                    # Soft-only errors must NOT block coverage advancement
+                    saved = self.service._load_transfer_cache()
+                    self.assertEqual(saved["covered_since_ms"], _BINANCE_INCEPTION_MS)
+
+    def test_transfer_cache_does_not_advance_on_critical_error(self):
+        import tempfile
+        from pathlib import Path
+
+        now_ms = int(time.time() * 1000)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_file = Path(tmp_dir) / "exchange_transfers.json"
+            with patch.object(self.service, "_get_transfer_cache_file", return_value=cache_file):
+                with patch("ccxt.binance") as mock_binance_cls:
+                    mock_ex = MagicMock()
+                    mock_binance_cls.return_value = mock_ex
+                    mock_ex.sapiGetCapitalDepositHisrec.return_value = []
+                    mock_ex.sapiGetCapitalWithdrawHistory.side_effect = Exception('{"code":-1021,"msg":"Timestamp for this request is outside of the recvWindow."}')
+                    mock_ex.sapiGetFiatOrders.return_value = {"data": []}
+                    mock_ex.sapiGetP2pOrderHistoryUser.return_value = {"data": []}
+                    with patch("time.sleep"):
+                        records, meta = self.service._fetch_binance_deposits_and_withdrawals("key", "secret", 0, now_ms)
+                    self.assertTrue(any("withdraw_history" in e for e in meta["errors"]))
+                    # Critical errors must block coverage advancement so gaps get retried
+                    saved = self.service._load_transfer_cache()
+                    self.assertEqual(saved["covered_since_ms"], 0)
 
 
 if __name__ == "__main__":
