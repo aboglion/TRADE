@@ -5277,15 +5277,19 @@ async function fetchTradeHistory(forceRefresh = false) {
 
             if (tErrs.length > 0) {
                 hasWarning = true;
+                const hasIpOrAuth = tErrs.some(e => String(e).includes("-2015") || String(e).includes("אישור IP") || String(e).includes("כתובת ה-IP"));
                 bannerHtml += `<div style="margin-top:6px;"><strong>⚠️ שגיאות בשליפת היסטוריית העברות/הפקדות:</strong> ${escapeHtml(tErrs.slice(0, 3).join(" | "))}</div>`;
+                if (hasIpOrAuth) {
+                    bannerHtml += `<div style="margin-top:4px; font-size:0.83rem; color:#94a3b8;">כדי לאפשר לבינאנס להחזיר היסטוריית העברות והפקדות, הוסף את ה-IP ב-API Management בבינאנס: <span class="ip-copy-badge" onclick="copyIpAddress('${sIp}')" title="לחץ להעתקת כתובת ה-IP">📋 ${sIp}</span> וסמן הרשאת Reading.</div>`;
+                }
             }
             if (depCount === 0) {
                 hasWarning = true;
-                bannerHtml += `<div style="margin-top:6px;">⚠️ לא אותרו הפקדות בטווח הנבחר. ייתכן שההפקדה בוצעה דרך P2P/Convert, שלמפתח ה-API חסרה הרשאת Wallet, או שטרם הוזנה יתרת פתיחה ידנית.</div>`;
+                bannerHtml += `<div style="margin-top:6px;">⚠️ לא אותרו הפקדות בטווח הנבחר. ייתכן שההפקדה בוצעה דרך P2P/Convert, שלמפתח ה-API חסרה הרשאת Wallet, או שטרם הוזנה יתרת פתיחה ידנית. <button class="btn btn-secondary" style="padding:1px 8px; font-size:0.78rem; margin-right:6px;" onclick="openManualDepositModal()">📥 הוספת יתרת פתיחה ידנית</button></div>`;
             }
             if (zeroBasisSells.length > 0) {
                 hasWarning = true;
-                bannerHtml += `<div style="margin-top:6px;"><strong>⚠️ ${zeroBasisSells.length} מכירות ללא עלות רכישה מקורית</strong> — יתרת הפתיחה חסרה, והרווח הממומש עשוי להיות מוגזם. <button class="btn btn-primary" style="padding:2px 10px; font-size:0.8rem;" onclick="openManualDepositModal()">📥 הזנת יתרת פתיחה / הפקדה ידנית</button></div>`;
+                bannerHtml += `<div style="margin-top:6px;"><strong>⚠️ ${zeroBasisSells.length} מכירות ללא עלות רכישה מקורית</strong> — יתרת הפתיחה חסרה, והרווח הממומש עשוי להיות מוגזם. <button class="btn btn-primary" style="padding:2px 10px; font-size:0.8rem; margin-right:6px;" onclick="openManualDepositModal()">📥 הזנת יתרת פתיחה / הפקדה ידנית</button></div>`;
             }
 
             if (banner) banner.className = hasWarning ? "tax-status-banner warning" : "tax-status-banner success";

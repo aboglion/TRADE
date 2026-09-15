@@ -767,6 +767,42 @@ class TestTaxHistoryService(unittest.TestCase):
                     saved = self.service._load_transfer_cache()
                     self.assertEqual(saved["covered_since_ms"], 0)
 
+    def test_transfer_circuit_breaker_stops_chunk_spam_on_2015(self):
+        now_ms = int(time.time() * 1000)
+        auth_err = Exception('binance {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}')
+        with patch("ccxt.binance") as mock_binance_cls:
+            mock_ex = MagicMock()
+            mock_binance_cls.return_value = mock_ex
+            mock_ex.sapiGetCapitalDepositHisrec.side_effect = auth_err
+            mock_ex.sapiGetCapitalWithdrawHistory.return_value = []
+            mock_ex.sapiGetFiatOrders.side_effect = auth_err
+            mock_ex.sapiGetP2pOrderHistoryUser.side_effect = auth_err
+            with patch("time.sleep"):
+                records, meta = self.service._fetch_binance_deposits_and_withdrawals("key", "secret", 0, now_ms)
+
+        # Deposit chunks must abort on the first failure instead of executing all 30+ chunks
+        self.assertEqual(mock_ex.sapiGetCapitalDepositHisrec.call_count, 1)
+        self.assertEqual(records, [])
+        self.assertTrue(any("-2015" in e for e in meta["errors"]))
+
+    def test_transfer_circuit_breaker_stops_on_429(self):
+        now_ms = int(time.time() * 1000)
+        rate_err = Exception('binance 429 {"code":-1003,"msg":"Too many requests; current request has limited."}')
+        with patch("ccxt.binance") as mock_binance_cls:
+            mock_ex = MagicMock()
+            mock_binance_cls.return_value = mock_ex
+            mock_ex.sapiGetCapitalDepositHisrec.side_effect = rate_err
+            mock_ex.sapiGetCapitalWithdrawHistory.return_value = []
+            with patch("time.sleep"):
+                records, meta = self.service._fetch_binance_deposits_and_withdrawals("key", "secret", 0, now_ms)
+
+        # Must abort immediately on 429/1003 to protect account IP from penalty escalation
+        self.assertEqual(mock_ex.sapiGetCapitalDepositHisrec.call_count, 1)
+        # Fiat and other endpoints must NOT be called when rate limit is active
+        mock_ex.sapiGetFiatOrders.assert_not_called()
+        self.assertEqual(records, [])
+        self.assertTrue(any("429" in e or "מגבלת קצב" in e for e in meta["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()

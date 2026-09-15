@@ -793,15 +793,34 @@ class TaxHistoryService:
                     errors, "withdraw_history", resync=resync,
                 ))
 
-            # 1. Fetch crypto deposits & withdrawals via chunked thread pool (controlled concurrency)
-            tasks = []
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                for c_start, c_end in chunks:
-                    tasks.append(pool.submit(fetch_dep, c_start, c_end))
-                    tasks.append(pool.submit(fetch_wd, c_start, c_end))
+            # 1. Fetch crypto deposits & withdrawals via paced chunk execution with instant circuit-breaker
+            auth_or_perm_failed = False
+            rate_limit_failed = False
 
-                for fut in as_completed(tasks):
-                    kind, payload = fut.result()
+            for c_start, c_end in chunks:
+                if auth_or_perm_failed or rate_limit_failed:
+                    break
+
+                for kind, fn, lbl in (
+                    ("dep", ex.sapiGetCapitalDepositHisrec, "deposit_history"),
+                    ("wd", ex.sapiGetCapitalWithdrawHistory, "withdraw_history"),
+                ):
+                    payload = self._sapi_with_retry(
+                        fn,
+                        {"startTime": c_start, "endTime": c_end, "limit": 1000},
+                        errors,
+                        lbl,
+                        resync=resync,
+                    )
+                    time.sleep(0.06)
+
+                    if any("-2015" in str(e) or "הוספת כתובת ה-IP" in str(e) for e in errors):
+                        auth_or_perm_failed = True
+                        break
+                    if any("429" in str(e) or "-1003" in str(e) or "מגבלת קצב" in str(e) for e in errors):
+                        rate_limit_failed = True
+                        break
+
                     if not isinstance(payload, list):
                         continue
 
@@ -900,13 +919,13 @@ class TaxHistoryService:
                                 "notes": f"משיכת קריפטו מוצלחת לרשת {w.get('network', '')} | עמלה: {tx_fee} {coin} | כתובת: {str(w.get('address', ''))[:12]}...",
                             })
 
-            # 2. Query Fiat deposit & withdrawal orders sequentially with throttling to prevent 429 rate limits
+            # 2. Query Fiat deposit & withdrawal orders sequentially
             fiat_fn = getattr(ex, "sapiGetFiatOrders", None)
-            if fiat_fn is not None:
+            if fiat_fn is not None and not rate_limit_failed:
                 fiat_chunks = chunks[:4]  # Limit to most recent ~1 year of fiat records
                 fiat_throttled = False
                 for c_start, c_end in fiat_chunks:
-                    if fiat_throttled:
+                    if fiat_throttled or rate_limit_failed:
                         break
                     for t in ("0", "1"):
                         resp = self._sapi_with_retry(
@@ -916,11 +935,14 @@ class TaxHistoryService:
                             f"fiat_orders_{t}",
                             resync=resync,
                         )
-                        time.sleep(0.12)
+                        time.sleep(0.08)
+                        if any("429" in str(e) or "-1003" in str(e) or "מגבלת קצב" in str(e) for e in errors):
+                            rate_limit_failed = True
+                            break
+                        if any("-2015" in str(e) or "הוספת כתובת ה-IP" in str(e) for e in errors):
+                            fiat_throttled = True
+                            break
                         if not isinstance(resp, dict):
-                            if any("429" in str(e) or "Too many requests" in str(e) for e in errors):
-                                fiat_throttled = True
-                                break
                             continue
                         data = resp.get("data", [])
                         if isinstance(data, list):
@@ -931,19 +953,21 @@ class TaxHistoryService:
                                 seen_transfer_ids.add(rec["id"])
                                 results.append(rec)
 
-            # 3. P2P / C2C order history: paginated full-range query (independent of 85-day chunks)
-            for rec in self._fetch_binance_p2p_orders(ex, errors, fetch_from, target_until):
-                if rec["id"] in seen_transfer_ids:
-                    continue
-                seen_transfer_ids.add(rec["id"])
-                results.append(rec)
+            # 3. P2P / C2C order history: paginated full-range query
+            if not rate_limit_failed:
+                for rec in self._fetch_binance_p2p_orders(ex, errors, fetch_from, target_until):
+                    if rec["id"] in seen_transfer_ids:
+                        continue
+                    seen_transfer_ids.add(rec["id"])
+                    results.append(rec)
 
             # 4. Binance Convert trade flow: converts fiat/crypto to trading inventory
-            for rec in self._fetch_binance_convert_orders(ex, errors, fetch_from, target_until):
-                if rec["id"] in seen_transfer_ids:
-                    continue
-                seen_transfer_ids.add(rec["id"])
-                results.append(rec)
+            if not rate_limit_failed:
+                for rec in self._fetch_binance_convert_orders(ex, errors, fetch_from, target_until):
+                    if rec["id"] in seen_transfer_ids:
+                        continue
+                    seen_transfer_ids.add(rec["id"])
+                    results.append(rec)
 
         except Exception as ex_err:
             err_msg = str(ex_err)
@@ -1079,8 +1103,8 @@ class TaxHistoryService:
                     x in last_err for x in ("429", "418", "Too many requests", "rate limit", "WAY_TOO_MANY_REQUESTS")
                 )
                 is_clock_drift = "-1021" in last_err
-                if "-1003" in last_err:
-                    # Binance IP/UID rate limit: abort immediately to prevent increasing the penalty window
+                if "-1003" in last_err or "-2015" in last_err:
+                    # Binance IP/UID rate limit or auth/permission error: abort immediately to prevent penalty escalation
                     break
                 if (is_rate_limit or is_clock_drift) and attempt < max_retries - 1:
                     if is_clock_drift and callable(resync):
@@ -1270,11 +1294,10 @@ class TaxHistoryService:
             if cand is not None and cand not in seen_fns:
                 seen_fns.add(cand)
                 candidates.append(cand)
-        if not candidates:
-            try:
-                candidates.append(lambda p: ex.request("p2p/orderHistory/user", "sapi", "GET", p))
-            except Exception:
-                pass
+        try:
+            candidates.append(lambda p: ex.request("p2p/orderHistory/user", "sapi", "GET", p))
+        except Exception:
+            pass
         if not candidates:
             return results
 
@@ -1290,18 +1313,26 @@ class TaxHistoryService:
             probe_params["endTimestamp"] = until_ms
 
         fn = None
+        probe_errs: List[str] = []
         for cand in candidates:
             try:
                 resp = cand(dict(probe_params))
                 if isinstance(resp, dict):
                     fn = cand
                     break
-            except Exception:
+            except Exception as pe:
+                probe_errs.append(str(pe))
                 continue
 
         if fn is None:
-            errors.append("p2p_orders: כל ה-endpoints של P2P/C2C לא זמינים (ה-endpoint הוסר או חסרה הרשאת P2P)")
-            logger.warning("P2P order history unavailable: all candidate endpoints failed")
+            all_err_text = " ".join(probe_errs)
+            if any(x in all_err_text for x in ("-2015", "Invalid API-key", "permissions", "IP")):
+                errors.append("p2p_orders: Binance -2015: נדרשת הרשאת P2P או אישור IP בבינאנס")
+            elif any(x in all_err_text for x in ("429", "-1003", "Too many requests")):
+                errors.append("p2p_orders: Binance 429: מגבלת קצב SAPI")
+            else:
+                errors.append("p2p_orders: כל ה-endpoints של P2P/C2C לא זמינים (ה-endpoint הוסר או חסרה הרשאת P2P)")
+            logger.warning("P2P order history unavailable: all candidate endpoints failed (%s)", (probe_errs[0] if probe_errs else "")[:120])
             return results
 
         for trade_type in ("BUY", "SELL"):
@@ -1434,14 +1465,18 @@ class TaxHistoryService:
             curr_end = min(target_until, curr_start + c_window)
             params = {"startTime": curr_start, "endTime": curr_end, "limit": 100}
             resp = self._sapi_with_retry(fn, params, errors, "convert_history", resync=resync)
-            time.sleep(0.1)
-            if isinstance(resp, dict):
-                data = resp.get("list") or resp.get("data") or []
-                if isinstance(data, list):
-                    for o in data:
-                        rec = self._parse_convert_order(o)
-                        if rec is not None:
-                            results.append(rec)
+            time.sleep(0.08)
+            if not isinstance(resp, dict):
+                if any(x in str(e) for e in errors for x in ("-2015", "429", "-1003", "מגבלת קצב", "כתובת ה-IP")):
+                    break
+                curr_start = curr_end + 1
+                continue
+            data = resp.get("list") or resp.get("data") or []
+            if isinstance(data, list):
+                for o in data:
+                    rec = self._parse_convert_order(o)
+                    if rec is not None:
+                        results.append(rec)
             curr_start = curr_end + 1
 
         return results
