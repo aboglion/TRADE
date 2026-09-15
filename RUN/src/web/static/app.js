@@ -3276,12 +3276,14 @@ function renderBinaryTree(data) {
 
             let allPassed = true;
             nodes.forEach((node, index) => {
-                const isMet = isBuyMode ? !!node.met : !!node.triggered;
+                const isMet = isBuyMode ? !!node.met : !node.triggered;
                 if (!isMet) allPassed = false;
 
                 const nodeClass = isMet ? "tree-node-pass" : "tree-node-fail";
                 const badgeClass = isMet ? "badge-pass" : "badge-fail";
-                const badgeText = isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)";
+                const badgeText = isBuyMode
+                    ? (isMet ? "✓ מתקיים (MET)" : "✗ לא מתקיים (UNMET)")
+                    : (isMet ? "✓ מוגן (SAFE)" : "🚨 נשבר (TRIPPED)");
                 const icon = isMet ? "🟢" : "🔴";
                 const stepNum = index + 1;
                 const totalSteps = nodes.length;
@@ -3311,7 +3313,9 @@ function renderBinaryTree(data) {
                 if (index < nodes.length - 1) {
                     const branchClass = isMet ? "tree-branch-pass" : "tree-branch-fail";
                     const labelClass = isMet ? "label-pass" : "label-fail";
-                    const labelText = isMet ? "YES 🟢 (המשך לשלב הבא)" : "NO 🔴 (חסום בשלב זה)";
+                    const labelText = isBuyMode
+                        ? (isMet ? "YES 🟢 (המשך לשלב הבא)" : "NO 🔴 (חסום בשלב זה)")
+                        : (isMet ? "SAFE 🟢 (מנגנון תקין - המשך)" : "TRIPPED 🔴 (סטופ נשבר!)");
                     html += `
                         <div class="tree-branch-container">
                             <div class="tree-branch-line ${branchClass}"></div>
@@ -3322,7 +3326,9 @@ function renderBinaryTree(data) {
             });
 
             const branchToLeafClass = allPassed ? "tree-branch-pass" : "tree-branch-fail";
-            const branchToLeafLabel = allPassed ? "YES 🟢 (סיום בהצלחה)" : "NO 🔴 (תוצאה סופית)";
+            const branchToLeafLabel = isBuyMode
+                ? (allPassed ? "YES 🟢 (סיום בהצלחה)" : "NO 🔴 (תוצאה סופית)")
+                : (allPassed ? "SAFE 🟢 (כל הסטופים תקינים)" : "EXIT 🚨 (טריגר יציאה פעיל)");
             html += `
                 <div class="tree-branch-container">
                     <div class="tree-branch-line ${branchToLeafClass}"></div>
@@ -3356,18 +3362,26 @@ function renderBinaryTree(data) {
                 }
             } else if (isSellMode) {
                 const sellTriggered = nodes.some(n => n.triggered);
-                if (sellTriggered) {
+                const isPosActive = coinData && coinData.position && coinData.position.active;
+                if (!isPosActive) {
+                    html += `
+                        <div class="tree-leaf-outcome outcome-sell-safe">
+                            <div class="outcome-title">🛡️ אין פוזיציה פתוחה בנכס (NO ACTIVE POSITION)</div>
+                            <div class="outcome-desc">אין פוזיציה פעילה ב-${coin}. מנגנוני הסטופ רדומים עד לפתיחת פוזיציה חדשה.</div>
+                        </div>
+                    `;
+                } else if (sellTriggered) {
                     html += `
                         <div class="tree-leaf-outcome outcome-sell-triggered">
-                            <div class="outcome-title">🚨 טריגר מכירה ויציאה הופעל! (EXIT TRIGGERED)</div>
-                            <div class="outcome-desc">טריגר יציאה הופעל ב-${coin}! הבוט יבצע סגירה/מכירה מיידית בנכס.</div>
+                            <div class="outcome-title">🚨 החלטה: מכירה ויציאה מיידית! (SELL TRIGGERED)</div>
+                            <div class="outcome-desc">טריגר מכירה נשבר ב-${coin}! הבוט מבצע סגירה/מכירה מיידית בבורסה להגנה על ההון.</div>
                         </div>
                     `;
                 } else {
                     html += `
                         <div class="tree-leaf-outcome outcome-sell-safe">
-                            <div class="outcome-title">🛡️ פוזיציה בטוחה / אין טריגר מכירה (POSITION SAFE)</div>
-                            <div class="outcome-desc">אף תנאי מכירה לא הופעל ב-${coin}. הנכס נשאר מוחזק בבטחה.</div>
+                            <div class="outcome-title">🛡️ החלטה: המשך אחזקה (אי-מכירה | HOLD)</div>
+                            <div class="outcome-desc">אף תנאי מכירה לא התקיים ב-${coin} — כל מנגנוני הבטיחות תקינים. הנכס נשאר מוחזק במלואו ללא פקודת מכירה.</div>
                         </div>
                     `;
                 }
@@ -3400,7 +3414,39 @@ function evaluateLadderCircuit(nodes) {
     return { evaluated, allPass, firstBlocker };
 }
 
-function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActive, outcomeMeta) {
+function evaluateSellSafetyCircuit(nodes, isPosActive) {
+    let circuitIntact = true;
+    let firstTriggered = null;
+
+    const evaluated = nodes.map(node => {
+        const isTriggered = !!node.triggered;
+        let circuitState = "energized";
+
+        if (!isPosActive) {
+            circuitState = "dormant";
+        } else if (circuitIntact && !isTriggered) {
+            circuitState = "energized";
+        } else if (circuitIntact && isTriggered) {
+            circuitState = "blocking";
+            circuitIntact = false;
+            firstTriggered = node;
+        } else {
+            circuitState = "dormant";
+        }
+
+        return {
+            ...node,
+            isMet: !isTriggered,
+            circuitState: circuitState,
+            badge: isTriggered ? (node.badge || "🚨 נשבר!") : (node.badge || "✓ מוגן")
+        };
+    });
+
+    const anySellTrip = nodes.some(n => n.triggered);
+    return { evaluated, circuitIntact: !anySellTrip, triggeredNode: firstTriggered };
+}
+
+function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActive, outcomeMeta, isSellMode = false) {
     let tHtml = `<div class="pipeline-track ladder-circuit">`;
     tHtml += `
         <div class="ladder-power-rail energized" title="מתח פיקוד ראשי (Power Rail)">
@@ -3512,16 +3558,43 @@ function renderLadderTrackHtml(evaluatedNodes, allPass, firstBlocker, isPosActiv
         }
     });
 
-    const finalConnClass = (allPass || isPosActive) ? "energized" : "dormant";
+    const finalConnClass = isSellMode
+        ? (allPass && isPosActive ? "energized" : "dormant")
+        : ((allPass || isPosActive) ? "energized" : "dormant");
     tHtml += `<div class="pipeline-connector ${finalConnClass}"></div>`;
 
     // Output Coil & Overall Circuit Progress
     const passedCount = evaluatedNodes.filter(n => n.circuitState === 'energized').length;
     const totalCount = evaluatedNodes.length;
-    const circuitProgressPct = (allPass || isPosActive) ? 100 : Math.round((passedCount / totalCount) * 100);
-    const coilProgLabel = (allPass || isPosActive) ? '✓ 100% מעגל מושלם' : `${passedCount}/${totalCount} שערים (${circuitProgressPct}%)`;
-    const coilProgClass = (allPass || isPosActive) ? 'energized' : 'blocking';
-    const coilTextClass = (allPass || isPosActive) ? 'prog-energized' : 'prog-blocking';
+
+    let circuitProgressPct = 0;
+    let coilProgLabel = "";
+    let coilProgClass = "energized";
+    let coilTextClass = "prog-energized";
+
+    if (isSellMode) {
+        if (!allPass) {
+            circuitProgressPct = 0;
+            coilProgLabel = firstBlocker ? `🚨 מכירה: ${firstBlocker.shortTitle}` : "🚨 טריגר מכירה פעיל!";
+            coilProgClass = "blocking";
+            coilTextClass = "prog-blocking";
+        } else if (isPosActive) {
+            circuitProgressPct = 100;
+            coilProgLabel = "✓ 100% בטוח (אי-מכירה)";
+            coilProgClass = "energized";
+            coilTextClass = "prog-energized";
+        } else {
+            circuitProgressPct = 100;
+            coilProgLabel = "אין פוזיציה בנכס";
+            coilProgClass = "dormant-pass";
+            coilTextClass = "prog-dormant-pass";
+        }
+    } else {
+        circuitProgressPct = (allPass || isPosActive) ? 100 : Math.round((passedCount / totalCount) * 100);
+        coilProgLabel = (allPass || isPosActive) ? '✓ 100% מעגל מושלם' : `${passedCount}/${totalCount} שערים (${circuitProgressPct}%)`;
+        coilProgClass = (allPass || isPosActive) ? 'energized' : 'blocking';
+        coilTextClass = (allPass || isPosActive) ? 'prog-energized' : 'prog-blocking';
+    }
 
     tHtml += `
         <div class="pipeline-node-wrapper ladder-output-coil">
@@ -3875,45 +3948,34 @@ function renderDashboardPipeline(data) {
         // SELL PIPELINE LADDER (Safety Exits & Short Protection)
         if (modesToRender.includes("SELL")) {
             const rawSellNodes = coinData.sell_tree_nodes || [];
-            
-            // In SELL pipeline, each node is an emergency safety breaker
-            const evaluatedSell = rawSellNodes.map(node => {
-                const isTriggered = !!node.triggered;
-                return {
-                    ...node,
-                    met: !isTriggered, // Safe when NOT triggered
-                    circuitState: isTriggered ? "blocking" : "energized"
-                };
-            });
-
-            const anySellTrip = rawSellNodes.some(n => n.triggered);
-            const triggeredNode = rawSellNodes.find(n => n.triggered);
+            const { evaluated: evaluatedSell, circuitIntact, triggeredNode } = evaluateSellSafetyCircuit(rawSellNodes, isPosActive);
+            const anySellTrip = !circuitIntact;
 
             let outcomeTitle = "";
             let outcomePillClass = "";
             let outcomeIcon = "";
 
-            if (anySellTrip) {
-                outcomeTitle = `EXIT TRIGGERED: ${triggeredNode ? triggeredNode.shortTitle : 'פקודת יציאה מופעלת'}`;
-                outcomePillClass = "sell-triggered";
-                outcomeIcon = "🚨";
-            } else if (isPosActive) {
-                outcomeTitle = "POSITION SAFE — כל מנגנוני הבטיחות תקינים";
+            if (!isPosActive) {
+                outcomeTitle = "סטטוס: אין פוזיציה פתוחה בנכס (ממתין לקנייה)";
                 outcomePillClass = "pass";
                 outcomeIcon = "🛡️";
+            } else if (anySellTrip) {
+                outcomeTitle = `החלטה: מכירה מיידית! (${triggeredNode ? triggeredNode.shortTitle : 'סטופ נשבר'})`;
+                outcomePillClass = "sell-triggered";
+                outcomeIcon = "🚨";
             } else {
-                outcomeTitle = "אין פוזיציה פתוחה בנכס (מעקב שורט מקרו בלבד)";
+                outcomeTitle = "החלטה: המשך אחזקה (אי-מכירה) — כל הסטופים תקינים";
                 outcomePillClass = "pass";
                 outcomeIcon = "🛡️";
             }
 
             const sellOutcomeMeta = {
-                circleClass: anySellTrip ? "fail blocking" : "pass energized",
-                icon: anySellTrip ? "🚨" : "🛡️",
-                title: "תוצאת מכירה",
-                liveVal: anySellTrip ? (triggeredNode ? triggeredNode.shortTitle : "יציאה מופעלת") : (isPosActive ? "סטופים תקינים" : "אין פוזיציה"),
-                badgeClass: anySellTrip ? "badge-blocking" : "badge-pass",
-                badgeText: anySellTrip ? "🚨 פקודת יציאה מופעלת!" : "🛡️ פוזיציה מוגנת"
+                circleClass: !isPosActive ? "dormant" : (anySellTrip ? "fail blocking" : "pass energized"),
+                icon: !isPosActive ? "🛡️" : (anySellTrip ? "🚨" : "🛡️"),
+                title: anySellTrip ? "החלטת יציאה" : "סטטוס אחזקה",
+                liveVal: !isPosActive ? "אין פוזיציה" : (anySellTrip ? (triggeredNode ? `מכירה: ${triggeredNode.shortTitle}` : "מכירה מיידית") : "המשך אחזקה (אי-מכירה)"),
+                badgeClass: !isPosActive ? "badge-dormant" : (anySellTrip ? "badge-blocking" : "badge-pass"),
+                badgeText: !isPosActive ? "אין פוזיציה" : (anySellTrip ? "🚨 מכירה מיידית!" : "🛡️ אי-מכירה (HOLD)")
             };
 
             html += `
@@ -3925,7 +3987,7 @@ function renderDashboardPipeline(data) {
                         </div>
                         <span class="pipeline-outcome-pill ${outcomePillClass}">${outcomeIcon} ${outcomeTitle}</span>
                     </div>
-                    ${renderLadderTrackHtml(evaluatedSell, !anySellTrip, triggeredNode, isPosActive, sellOutcomeMeta)}
+                    ${renderLadderTrackHtml(evaluatedSell, !anySellTrip, triggeredNode, isPosActive, sellOutcomeMeta, true)}
                 </div>
             `;
         }

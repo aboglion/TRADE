@@ -1889,119 +1889,98 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                             }
                         ]
 
-                    # Calculations for Sell Ladder Proximity
+                    # Calculations for Sell Ladder Proximity (True Strategy Exits Only)
                     bear_trig = (macro_regime == "BEAR")
                     s1_prog = 0.0 if bear_trig else 100.0
                     s1_label = f"+{macro_gap_pct:.1f}% מעל SMA (מוגן)" if not bear_trig else f"🐻 שורט פעיל ({macro_gap_pct:.1f}%)"
 
-                    s2_prog = 0.0 if safe_haven_active else 100.0
-                    s2_label = "✓ מוגן (מרווח משיא)" if not safe_haven_active else f"נסיגה {btc_pb_from_5d:+.1f}% משיא 5d"
-
-                    flash_margin = round(abs(flash_wick_limit_pct) - abs(btc_intraday_dip_pct), 1)
-                    s3_prog = 0.0 if flash_triggered else 100.0
-                    s3_label = f"מרווח {flash_margin:+.1f}% מפלאש" if not flash_triggered else f"צניחה {btc_intraday_dip_pct:+.1f}%"
-
                     if is_active and initial_stop is not None and initial_stop > 0:
-                        i_dist = round(((c_low - initial_stop) / initial_stop) * 100, 1)
-                        s4_trig = c_low <= initial_stop
-                        s4_prog = 0.0 if s4_trig else 100.0
-                        s4_label = f"🚨 נשבר ב-{abs(i_dist):.1f}%" if s4_trig else f"+{i_dist:.1f}% מרווח מסטופ"
+                        i_dist = round(((c_low - initial_stop) / initial_stop) * 100.0, 1)
+                        s2_trig = bool(c_low <= initial_stop)
+                        s2_prog = 0.0 if s2_trig else min(100.0, max(10.0, round((i_dist / 15.0) * 100.0, 0)))
+                        s2_label = f"🚨 נשבר ב-{abs(i_dist):.1f}%" if s2_trig else f"+{i_dist:.1f}% מרווח מסטופ"
                     else:
-                        s4_prog = 100.0
-                        s4_label = "אין פוזיציה (בטוח)"
+                        s2_trig = False
+                        s2_prog = 100.0
+                        s2_label = "אין פוזיציה (בטוח)"
+                        i_dist = 0.0
 
                     if is_active and trailing_stop is not None and trailing_stop > 0:
-                        t_dist = round(((c_low - trailing_stop) / trailing_stop) * 100, 1)
-                        s5_trig = c_low <= trailing_stop
-                        s5_prog = 0.0 if s5_trig else 100.0
-                        s5_label = f"🚨 נשבר ב-{abs(t_dist):.1f}%" if s5_trig else f"+{t_dist:.1f}% מרווח מטרייל"
+                        t_dist = round(((c_low - trailing_stop) / trailing_stop) * 100.0, 1)
+                        s3_trig = bool(c_low <= trailing_stop)
+                        s3_prog = 0.0 if s3_trig else min(100.0, max(10.0, round((t_dist / 10.0) * 100.0, 0)))
+                        s3_label = f"🚨 נשבר ב-{abs(t_dist):.1f}%" if s3_trig else f"+{t_dist:.1f}% מרווח מטרייל"
                     else:
-                        s5_prog = 100.0
-                        s5_label = "אין פוזיציה (בטוח)"
+                        s3_trig = False
+                        s3_prog = 100.0
+                        s3_label = "אין פוזיציה (בטוח)"
+                        t_dist = 0.0
 
-                    ema_dist = round(((c_close - ema50) / ema50) * 100, 1) if ema50 > 0 else 0.0
-                    s6_trig = (c_close < ema50) if (entry_mode == "TREND" and is_active) else False
-                    s6_prog = 0.0 if s6_trig else 100.0
-                    s6_label = f"שבירה {abs(ema_dist):.1f}% מתחת" if s6_trig else (f"+{ema_dist:.1f}% מעל EMA50" if ema_dist >= 0 else f"{ema_dist:.1f}% מ-EMA50")
+                    ema_dist = round(((c_close - ema50) / ema50) * 100.0, 1) if ema50 > 0 else 0.0
+                    is_trend_mode = (entry_mode == "TREND")
+                    s4_trig = bool(c_close < ema50 and is_trend_mode and is_active)
+                    if s4_trig:
+                        s4_prog = 0.0
+                        s4_label = f"🚨 שבירה ב-{abs(ema_dist):.1f}%"
+                    elif not is_trend_mode:
+                        s4_prog = 100.0
+                        s4_label = f"{ema_dist:+.1f}% מ-EMA50 (חסין ב-Strong Bull)"
+                    else:
+                        s4_prog = 100.0 if ema_dist >= 0 else max(10.0, round(100.0 + ema_dist * 10.0, 0))
+                        s4_label = f"+{ema_dist:.1f}% מעל EMA50" if ema_dist >= 0 else f"{ema_dist:.1f}% מ-EMA50"
 
                     sell_tree_nodes = [
                         {
                             "id": "node_bear_emergency",
                             "shortTitle": "1. יציאת דובים",
                             "title": f"1. יציאת דובים ושורט {bear_hedge_w*100:.0f}% (Bear Exit & Short Hedge)",
-                            "criteria": f"BTC < SMA150 or EMA20 < EMA50 -> Close Longs & Open {bear_hedge_w*100:.0f}% @ {short_lev:.1f}x BTC Short",
-                            "actual": f"BEAR ACTIVE ({bear_hedge_w*100:.0f}% @ {short_lev:.1f}x Short BTC)" if macro_regime == "BEAR" else "BULL ACTIVE (תקין)",
-                            "live_val": "BEAR" if macro_regime == "BEAR" else "BULL",
-                            "badge": "🚨 שורט דובים!" if macro_regime == "BEAR" else "✓ תקין",
+                            "criteria": f"BTC < SMA150 (${btc_sma150:,.0f}) or EMA20 < EMA50",
+                            "actual": f"BEAR ACTIVE ({bear_hedge_w*100:.0f}% @ {short_lev:.1f}x Short BTC)" if bear_trig else "BULL ACTIVE (שוק שוורי תקין)",
+                            "live_val": "BEAR" if bear_trig else "BULL",
+                            "badge": "🚨 שורט דובים!" if bear_trig else "✓ שוורי מוגן",
                             "progress_pct": s1_prog,
                             "progress_label": s1_label,
-                            "triggered": macro_regime == "BEAR",
-                            "explanation": f"סגירת כל הלונגים ומעבר לגידור שורט ממונף {short_lev:.1f}x על BTC ({notional_short_pct:.0f}% חשיפה נומינלית) במעבר למשטר דובים."
-                        },
-                        {
-                            "id": "node_crash_shield",
-                            "shortTitle": "2. מגן מפולת",
-                            "title": "2. מגן מפולת מוסדי (Crash Shield Safe Haven)",
-                            "criteria": f"5d Pullback < {cutoff_pct:.1f}% OR Close < EMA9 (${btc_ema9_daily:,.0f})",
-                            "actual": f"5d PB: {btc_pb_from_5d:+.2f}%, Under EMA9: {btc_daily_close < btc_ema9_daily}",
-                            "live_val": f"{btc_pb_from_5d:+.1f}%",
-                            "badge": "🛡️ הופעל (Safe Haven)" if safe_haven_active else "✓ מוגן",
-                            "progress_pct": s2_prog,
-                            "progress_label": s2_label,
-                            "triggered": safe_haven_active,
-                            "explanation": "נסיגה משיא 5 ימים או שבירת EMA9 מורידה מיד ל-1.0x ספוט ומעבירה 60% למזומן בריבית."
-                        },
-                        {
-                            "id": "node_flash_circuit_breaker",
-                            "shortTitle": "3. מפסק פלאש",
-                            "title": "3. מפסק ביטחון לנרות פלאש (Flash Circuit Breaker)",
-                            "criteria": f"Intraday Dip < {flash_wick_limit_pct:.1f}% -> Cut to 1.0x",
-                            "actual": f"Intraday Dip: {btc_intraday_dip_pct:+.2f}%",
-                            "live_val": f"{btc_intraday_dip_pct:+.1f}%",
-                            "badge": "⚡ הופעל!" if flash_triggered else "✓ תקין",
-                            "progress_pct": s3_prog,
-                            "progress_label": s3_label,
-                            "triggered": flash_triggered,
-                            "explanation": "צניחה תוך-יומית מנר הפתיחה חותכת מיד את המינוף ל-1.0x לספיגת המכה."
+                            "triggered": bear_trig,
+                            "explanation": f"סגירת כל הלונגים ומעבר לגידור שורט ממונף {short_lev:.1f}x על BTC במעבר למשטר דובים."
                         },
                         {
                             "id": "node_initial_risk_stop",
-                            "shortTitle": "4. סטופ ראשוני",
-                            "title": "4. סטופ סיכון ראשוני (Initial Risk Stop)",
+                            "shortTitle": "2. סטופ ראשוני",
+                            "title": "2. סטופ סיכון ראשוני (Initial Risk Stop)",
                             "criteria": f"Low <= Initial Stop (${initial_stop:,.2f})" if initial_stop else f"Initial Stop = ${c_close - init_risk_atr * c_atr:,.2f}",
-                            "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${initial_stop:,.2f}" if initial_stop else ""),
+                            "actual": (f"Low ${c_low:,.2f} vs Stop ${initial_stop:,.2f}" if initial_stop else ("אין פוזיציה" if not is_active else "מוגן")),
                             "live_val": f"${initial_stop:,.2f}" if initial_stop else "--",
-                            "badge": "🚨 נשבר!" if (is_active and initial_stop is not None and c_low <= initial_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
-                            "progress_pct": s4_prog,
-                            "progress_label": s4_label,
-                            "triggered": (c_low <= initial_stop) if (is_active and initial_stop is not None) else False,
-                            "explanation": "יציאת חירום אם הנר שבר את רמת הסיכון הראשונית בכניסה."
+                            "badge": ("🚨 נשבר!" if s2_trig else f"+{i_dist:.1f}% מרווח") if is_active else "אין פוזיציה",
+                            "progress_pct": s2_prog,
+                            "progress_label": s2_label,
+                            "triggered": s2_trig,
+                            "explanation": "יציאת חירום מיידית אם הנר שבר את רמת הסיכון הראשונית בכניסה."
                         },
                         {
                             "id": "node_atr_trailing_stop",
-                            "shortTitle": "5. סטופ נגרר",
-                            "title": "5. סטופ נגרר דינמי (ATR Trailing Stop)",
+                            "shortTitle": "3. סטופ נגרר",
+                            "title": "3. סטופ נגרר דינמי (ATR Trailing Stop)",
                             "criteria": f"Low <= Trailing Stop (${trailing_stop:,.2f})" if trailing_stop else f"Trailing Stop = ${c_high - tb * c_atr:,.2f}",
-                            "actual": f"Low ${c_low:,.2f}" + (f" vs Stop ${trailing_stop:,.2f}" if trailing_stop else ""),
+                            "actual": (f"Low ${c_low:,.2f} vs Stop ${trailing_stop:,.2f}" if trailing_stop else ("אין פוזיציה" if not is_active else "מוגן")),
                             "live_val": f"${trailing_stop:,.2f}" if trailing_stop else "--",
-                            "badge": "🚨 נשבר!" if (is_active and trailing_stop is not None and c_low <= trailing_stop) else ("✓ מוגן" if is_active else "אין פוזיציה"),
-                            "progress_pct": s5_prog,
-                            "progress_label": s5_label,
-                            "triggered": (c_low <= trailing_stop) if (is_active and trailing_stop is not None) else False,
+                            "badge": ("🚨 נשבר!" if s3_trig else f"+{t_dist:.1f}% מרווח") if is_active else "אין פוזיציה",
+                            "progress_pct": s3_prog,
+                            "progress_label": s3_label,
+                            "triggered": s3_trig,
                             "explanation": "נעילת רווחים: יציאה מיידית אם המחיר נסוג מתחת לסטופ הנגרר."
                         },
                         {
                             "id": "node_ema_breakdown",
-                            "shortTitle": "6. שבירת ממוצע",
-                            "title": "6. שבירת ממוצעים (EMA Exit)",
-                            "criteria": "Close < EMA50 (Trend only)",
+                            "shortTitle": "4. שבירת EMA50",
+                            "title": "4. שבירת ממוצעים (EMA50 Trend Exit)",
+                            "criteria": "Close < EMA50 (במצב TREND בלבד)",
                             "actual": f"Close ${c_close:,.2f} vs EMA50 ${ema50:,.2f}",
                             "live_val": f"EMA50: ${ema50:,.2f}",
-                            "badge": "🚨 שבירה!" if ((c_close < ema50) and (entry_mode == "TREND")) else ("✓ מעל" if is_active else "אין פוזיציה"),
-                            "progress_pct": s6_prog,
-                            "progress_label": s6_label,
-                            "triggered": (c_close < ema50) if (entry_mode == "TREND" and is_active) else False,
-                            "explanation": "אזהרת היפוך מגמה: סגירת נר מתחת ל-EMA50 כשהמצב הוא TREND."
+                            "badge": ("🚨 שבירה!" if s4_trig else ("✓ חסין ב-Strong" if not is_trend_mode else "✓ מעל")) if is_active else "אין פוזיציה",
+                            "progress_pct": s4_prog,
+                            "progress_label": s4_label,
+                            "triggered": s4_trig,
+                            "explanation": "אזהרת היפוך מגמה: סגירת נר מתחת ל-EMA50 כשהמצב הוא TREND בלבד."
                         }
                     ]
 
