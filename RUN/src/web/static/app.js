@@ -5,7 +5,30 @@
  */
 
 let activeErrorsList = [];
-let authToken = sessionStorage.getItem("dash_password") || "";
+let authToken = "";
+try {
+    authToken = localStorage.getItem("dash_password") || sessionStorage.getItem("dash_password") || "";
+    if (authToken) {
+        localStorage.setItem("dash_password", authToken);
+        sessionStorage.setItem("dash_password", authToken);
+    }
+} catch (e) {
+    console.warn("Storage read error:", e);
+}
+
+function setStoredAuthToken(token) {
+    try {
+        if (token) {
+            localStorage.setItem("dash_password", token);
+            sessionStorage.setItem("dash_password", token);
+        } else {
+            localStorage.removeItem("dash_password");
+            sessionStorage.removeItem("dash_password");
+        }
+    } catch (e) {
+        console.warn("Storage write error:", e);
+    }
+}
 let currentRunMode = "DRY_RUN";
 let latestPortfolioData = null;
 let latestOrdersList = [];
@@ -440,9 +463,9 @@ async function apiFetch(url, options = {}) {
 
     try {
         const res = await fetch(url, options);
-        if (res.status === 401 || res.status === 429) {
+        if (res.status === 401) {
             authToken = "";
-            sessionStorage.removeItem("dash_password");
+            setStoredAuthToken("");
             showLoginModal();
         } else {
             handleConnectionSuccess();
@@ -477,8 +500,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (el) el.addEventListener(event, handler);
     }
 
-    // Login listeners
+    // Login & Lock listeners
     safeAddListener("submitLoginBtn", "click", performLogin);
+    safeAddListener("lockDashboardBtn", "click", lockDashboard);
+    safeAddListener("toolbarLockBtn", "click", lockDashboard);
     const passInput = document.getElementById("dashboardPasswordInput");
     if (passInput) passInput.addEventListener("keypress", (e) => {
         if (e.key === "Enter") performLogin();
@@ -625,14 +650,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     startMainPolling();
 });
 
+function updateLockButtonVisibility(authRequired) {
+    const lockBadge = document.getElementById("lockDashboardBtn");
+    const toolbarLockBtn = document.getElementById("toolbarLockBtn");
+    const displayVal = authRequired ? "" : "none";
+    if (lockBadge) lockBadge.style.display = displayVal;
+    if (toolbarLockBtn) toolbarLockBtn.style.display = displayVal;
+}
+
 async function checkAuthStatus() {
     try {
         const res = await apiFetch("/api/auth_check");
         if (res.ok) {
             const data = await res.json();
+            updateLockButtonVisibility(data.auth_required);
             if (data.auth_required && !data.authenticated) {
                 authToken = "";
-                sessionStorage.removeItem("dash_password");
+                setStoredAuthToken("");
                 showLoginModal();
                 if (data.locked_out) {
                     const errorMsg = document.getElementById("loginErrorMsg");
@@ -656,8 +690,14 @@ function showLoginModal() {
     const modal = document.getElementById("loginModal");
     if (modal) {
         modal.classList.add("active");
+        const errorMsg = document.getElementById("loginErrorMsg");
+        if (errorMsg) {
+            errorMsg.style.display = "none";
+            errorMsg.textContent = "";
+        }
         const input = document.getElementById("dashboardPasswordInput");
         if (input) {
+            input.value = "";
             setTimeout(() => input.focus(), 100);
         }
     }
@@ -667,6 +707,21 @@ function closeLoginModal() {
     const modal = document.getElementById("loginModal");
     if (modal) modal.classList.remove("active");
 }
+
+async function lockDashboard() {
+    authToken = "";
+    setStoredAuthToken("");
+
+    try {
+        await fetch("/api/logout", { method: "POST" });
+    } catch (e) {
+        console.warn("Logout API call failed:", e);
+    }
+
+    showToast("🔒 הדשבורד ננעל בהצלחה (Dashboard Locked)", "info");
+    showLoginModal();
+}
+window.lockDashboard = lockDashboard;
 
 async function performLogin() {
     const input = document.getElementById("dashboardPasswordInput");
@@ -694,14 +749,15 @@ async function performLogin() {
 
         if (res.ok && data.success) {
             authToken = password;
-            sessionStorage.setItem("dash_password", password);
+            setStoredAuthToken(password);
             input.value = "";
             closeLoginModal();
+            updateLockButtonVisibility(true);
             showToast("🔑 Successfully logged in to dashboard!", "success");
             fetchDashboardData();
         } else {
             authToken = "";
-            sessionStorage.removeItem("dash_password");
+            setStoredAuthToken("");
             errorMsg.textContent = data.error || "Invalid password";
             errorMsg.style.display = "block";
         }

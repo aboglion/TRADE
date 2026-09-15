@@ -328,6 +328,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if clean_path == "/api/auth_check":
             self._handle_auth_check()
             return
+        if clean_path == "/api/logout":
+            self._handle_logout()
+            return
 
         if clean_path.startswith("/api/"):
             if not self._require_auth():
@@ -386,6 +389,9 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         clean_path = self.path.split("?")[0]
         if clean_path == "/api/login":
             self._handle_login()
+            return
+        if clean_path == "/api/logout":
+            self._handle_logout()
             return
 
         if clean_path.startswith("/api/"):
@@ -556,7 +562,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 content = json.dumps({"success": True, "token": expected_pass, "message": "Authenticated successfully"}).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Set-Cookie", f"dash_auth={expected_pass}; Path=/; SameSite=Strict")
+                self.send_header("Set-Cookie", f"dash_auth={expected_pass}; Path=/; Max-Age=31536000; SameSite=Lax")
                 self.send_header("Content-Length", str(len(content)))
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
@@ -579,6 +585,16 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                     self._send_json({"success": False, "error": "Invalid password"}, status=401)
         except Exception as e:
             self._send_json({"success": False, "error": str(e)}, status=400)
+
+    def _handle_logout(self) -> None:
+        content = json.dumps({"success": True, "message": "Logged out successfully"}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Set-Cookie", "dash_auth=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(content)
 
     # ── REST API Handlers ─────────────────────────────────────
 

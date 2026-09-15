@@ -237,6 +237,27 @@ body {
     box-shadow: 0 0 14px rgba(239, 68, 68, 0.3) !important;
 }
 
+.lock-badge {
+    background: rgba(244, 63, 94, 0.12);
+    color: #fda4af;
+    border: 1px solid rgba(244, 63, 94, 0.35);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.lock-badge:hover {
+    background: rgba(244, 63, 94, 0.24);
+    color: #ffffff;
+    border-color: rgba(244, 63, 94, 0.65);
+    transform: translateY(-1px);
+    box-shadow: 0 0 14px rgba(244, 63, 94, 0.35);
+}
+
+.lock-badge:active {
+    transform: translateY(1px);
+}
+
 .dot {
     width: 8px;
     height: 8px;
@@ -355,6 +376,19 @@ body {
     background: rgba(244, 63, 94, 0.25);
     border-color: rgba(244, 63, 94, 0.6);
     box-shadow: 0 0 15px rgba(244, 63, 94, 0.25);
+}
+
+.btn-lock {
+    background: rgba(244, 63, 94, 0.08);
+    color: #fda4af;
+    border-color: rgba(244, 63, 94, 0.32);
+}
+
+.btn-lock:hover {
+    background: rgba(244, 63, 94, 0.22);
+    border-color: rgba(244, 63, 94, 0.6);
+    color: #ffffff;
+    box-shadow: 0 0 14px rgba(244, 63, 94, 0.3);
 }
 
 .btn-action {

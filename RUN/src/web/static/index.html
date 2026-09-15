@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=33">
+    <link rel="stylesheet" href="style.css?v=34">
 </head>
 <body>
     <div class="ambient-glow bg-glow-1"></div>
@@ -48,6 +48,11 @@
                         <span class="dot pulse" id="updaterDot"></span>
                         <span id="updaterText">AUTO-PULL: ACTIVE</span>
                     </div>
+
+                    <button class="status-badge lock-badge" id="lockDashboardBtn" title="נעילת דשבורד ויציאה (Lock Dashboard)" onclick="lockDashboard()">
+                        <span class="lock-icon">🔒</span>
+                        <span id="lockBadgeText">נעילת דשבורד</span>
+                    </button>
                 </div>
             </div>
 
@@ -94,6 +99,10 @@
 
                     <button class="btn btn-outline" id="refreshBtn" title="Force immediate data refresh" onclick="manualRefresh()">
                         <span>🔄</span> <span class="btn-text">Refresh Data</span>
+                    </button>
+
+                    <button class="btn btn-outline btn-lock" id="toolbarLockBtn" title="נעילת דשבורד ויציאה מהחשבון (Lock Dashboard)" onclick="lockDashboard()">
+                        <span>🔒</span> <span class="btn-text">נעילה</span>
                     </button>
 
                     <button class="btn btn-danger" id="killSwitchBtn" title="Emergency Stop! Enable/Disable Kill Switch to block new trading orders" onclick="openKillSwitchModal()">
