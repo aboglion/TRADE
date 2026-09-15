@@ -1338,9 +1338,71 @@ async function fetchOrders() {
         updatePnlAndFeesDisplay(selectedPnlTimeframe);
 
         if (allOrders.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">No orders executed yet</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell text-muted">No orders executed yet</td></tr>`;
             return;
         }
+
+        // Fallback client-side FIFO lot queue if backend did not compute realized PnL
+        const clientInventory = {};
+        completedList.forEach(o => {
+            if (o.realized_pnl_usd !== undefined && o.realized_pnl_usd !== null) return;
+            const side = (o.side || "BUY").toUpperCase();
+            const symbol = (o.symbol || "").toUpperCase();
+            const coin = symbol.includes("/") ? symbol.split("/")[0] : symbol.replace("USDT", "");
+            const amountVal = o.filled_amount || o.amount || 0;
+            const priceVal = o.average_price || o.price || 0;
+            const feeVal = typeof o.fees === 'number' ? o.fees : 0.0;
+            let feeInUsd = feeVal;
+            if (o.fee_currency && o.fee_currency !== "USDT" && o.fee_currency !== "USD" && priceVal > 0) {
+                feeInUsd = feeVal * priceVal;
+            }
+
+            if (!clientInventory[coin]) clientInventory[coin] = [];
+
+            if (side === "BUY" && amountVal > 0 && priceVal > 0) {
+                clientInventory[coin].push({
+                    qty: amountVal,
+                    price: priceVal,
+                    feeUnit: feeInUsd / amountVal
+                });
+                o.realized_pnl_usd = null;
+                o.realized_pnl_pct = null;
+                o.pnl_note = "רכישה (עלות נצברה למלאי)";
+            } else if (side === "SELL" && amountVal > 0 && priceVal > 0) {
+                const proceeds = amountVal * priceVal;
+                let matchedCost = 0;
+                let matchedBuyFee = 0;
+                let neededQty = amountVal;
+
+                const coinLots = clientInventory[coin];
+                while (neededQty > 1e-8 && coinLots.length > 0) {
+                    const firstLot = coinLots[0];
+                    const takeQty = Math.min(neededQty, firstLot.qty);
+                    matchedCost += takeQty * firstLot.price;
+                    matchedBuyFee += takeQty * firstLot.feeUnit;
+                    firstLot.qty -= takeQty;
+                    neededQty -= takeQty;
+                    if (firstLot.qty <= 1e-8) {
+                        coinLots.shift();
+                    }
+                }
+
+                if (matchedCost > 0) {
+                    const totalFees = feeInUsd + matchedBuyFee;
+                    const netPnl = proceeds - matchedCost - totalFees;
+                    const pnlPct = (netPnl / matchedCost) * 100;
+                    o.realized_pnl_usd = netPnl;
+                    o.realized_pnl_pct = pnlPct;
+                    o.cost_basis_usd = matchedCost;
+                    o.matched_fees_usd = totalFees;
+                    o.pnl_note = `תמורה: $${proceeds.toFixed(2)} | עלות: $${matchedCost.toFixed(2)} | עמלות: $${totalFees.toFixed(4)}`;
+                } else {
+                    o.realized_pnl_usd = null;
+                    o.realized_pnl_pct = null;
+                    o.pnl_note = "לא אותרה עלות רכישה במלאי";
+                }
+            }
+        });
 
         allOrders.slice(0, 100).forEach(o => {
             const tr = document.createElement("tr");
@@ -1358,6 +1420,7 @@ async function fetchOrders() {
             const grossTotalUsd = amountVal * priceVal;
             let netTotalStr = "--";
             let netStyle = "color: var(--text-muted);";
+            let netTitle = "";
 
             if (grossTotalUsd > 0) {
                 let feeInUsd = feeVal;
@@ -1369,11 +1432,36 @@ async function fetchOrders() {
                     const netCost = grossTotalUsd + feeInUsd;
                     netTotalStr = `-$${netCost.toFixed(2)}`;
                     netStyle = "color: var(--accent-danger, #f43f5e);";
+                    netTitle = "עלות קנייה ששולמה מהחשבון כולל עמלה (תזרים יוצא)";
                 } else {
                     const netReceived = grossTotalUsd - feeInUsd;
                     netTotalStr = `+$${netReceived.toFixed(2)}`;
                     netStyle = "color: var(--accent-success, #10b981); font-weight: 600;";
+                    netTitle = "תקבול שנכנס לחשבון ממכירת הנכס לאחר ניכוי עמלה (תזרים נכנס - לא רווח נטו!)";
                 }
+            }
+
+            // Realized PnL formatting (Net profit/loss taking all fees into account)
+            let pnlDisplayHtml = `<span class="text-muted" style="font-size:0.75rem;">--</span>`;
+            if (side === "SELL") {
+                if (typeof o.realized_pnl_usd === 'number') {
+                    const pnlVal = o.realized_pnl_usd;
+                    const pnlPctVal = typeof o.realized_pnl_pct === 'number' ? o.realized_pnl_pct : 0;
+                    const pnlSign = pnlVal > 0 ? "+" : (pnlVal < 0 ? "-" : "");
+                    const absVal = Math.abs(pnlVal).toFixed(2);
+                    const pctSign = pnlPctVal >= 0 ? "+" : "";
+                    const pctStr = ` (${pctSign}${pnlPctVal.toFixed(2)}%)`;
+                    const pnlStyle = pnlVal > 0
+                        ? "color: var(--accent-success, #10b981); font-weight: 700;"
+                        : (pnlVal < 0 ? "color: var(--accent-danger, #f43f5e); font-weight: 700;" : "color: var(--text-muted);");
+                    const note = o.pnl_note ? `${o.pnl_note} | ` : "";
+                    const title = `${note}רווח/הפסד נטו: ${pnlSign}$${absVal}${pctStr} (בניכוי כל עמלות הרכישה והמכירה)`;
+                    pnlDisplayHtml = `<span style="${pnlStyle}" title="${escapeHtml(title)}">${pnlSign}$${absVal}${pctStr}</span>`;
+                } else {
+                    pnlDisplayHtml = `<span class="text-muted" style="font-size:0.72rem; opacity:0.75;" title="לא אותרה רכישה קודמת במלאי לחישוב רווח">--</span>`;
+                }
+            } else if (side === "BUY") {
+                pnlDisplayHtml = `<span class="text-muted" style="font-size:0.72rem; opacity:0.75;" title="רכישה - עלות נצברה במלאי (רווח/הפסד יחושב בעת המכירה)">עלות נצברה</span>`;
             }
 
             const statusRaw = String(o.status || (o._isPendingGroup ? "PENDING" : "FILLED")).toUpperCase();
@@ -1417,7 +1505,8 @@ async function fetchOrders() {
                 <td>${amountVal}</td>
                 <td>${priceStr}</td>
                 <td>${feeStr}</td>
-                <td><span style="${netStyle}">${netTotalStr}</span></td>
+                <td><span style="${netStyle}" title="${escapeHtml(netTitle)}">${netTotalStr}</span></td>
+                <td>${pnlDisplayHtml}</td>
                 <td><span class="tag ${statusClass}" title="${statusTitle}">${statusDisplay}</span></td>
             `;
             tableBody.appendChild(tr);
@@ -1847,7 +1936,7 @@ async function confirmClearOrders() {
             const data = await res.json().catch(() => ({}));
             const tableBody = document.getElementById("ordersTableBody");
             if (tableBody) {
-                tableBody.innerHTML = `<tr><td colspan="8" class="empty-cell text-muted">No orders executed yet</td></tr>`;
+                tableBody.innerHTML = `<tr><td colspan="9" class="empty-cell text-muted">No orders executed yet</td></tr>`;
             }
             const orderCountEl = document.getElementById("orderCount");
             if (orderCountEl) orderCountEl.textContent = "0";

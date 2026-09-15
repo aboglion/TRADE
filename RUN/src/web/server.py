@@ -854,15 +854,135 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
                 "message": "Binance authentication rejected (-2015: Invalid API-key, IP whitelist, or Futures permission)." if is_auth_err else err_msg,
             }, status=500)
 
+    @staticmethod
+    def _enrich_orders_with_fifo_pnl(
+        orders: list[dict[str, Any]],
+        session_initial_prices: dict[str, float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Enrich completed orders with Realized PnL (net of all fees) using FIFO matching.
+        Orders are processed in chronological order.
+        """
+        enriched: list[dict[str, Any]] = []
+        inventory: dict[str, list[dict[str, Any]]] = {}
+        init_prices = session_initial_prices or {}
+
+        for o in orders:
+            o_copy = dict(o)
+            status = str(o_copy.get("status", "")).upper()
+            side = str(o_copy.get("side", "")).upper()
+            symbol = str(o_copy.get("symbol", "")).upper()
+            coin = symbol.split("/")[0] if "/" in symbol else symbol.replace("USDT", "")
+
+            amount = float(o_copy.get("filled_amount") or o_copy.get("amount") or 0.0)
+            price = float(o_copy.get("average_price") or o_copy.get("price") or 0.0)
+            fee = float(o_copy.get("fees") or 0.0)
+            fee_curr = str(o_copy.get("fee_currency") or "USDT").upper()
+
+            # Fee in USD
+            fee_usd = fee
+            if fee_curr not in ("USDT", "USD") and price > 0:
+                fee_usd = fee * price
+
+            o_copy["fee_usd"] = round(fee_usd, 6)
+
+            is_filled = status in ("FILLED", "PARTIALLY_FILLED", "DONE", "SUCCESS")
+            if not is_filled or amount <= 0 or price <= 0:
+                o_copy["realized_pnl_usd"] = None
+                o_copy["realized_pnl_pct"] = None
+                o_copy["pnl_note"] = ""
+                enriched.append(o_copy)
+                continue
+
+            # Check if order already has an explicit realized PnL (e.g. Futures trade from exchange)
+            if o_copy.get("realized_pnl") is not None and side != "BUY":
+                try:
+                    pnl_raw = float(o_copy["realized_pnl"])
+                    net_pnl = pnl_raw - fee_usd
+                    o_copy["realized_pnl_usd"] = round(net_pnl, 4)
+                    tot = amount * price
+                    o_copy["realized_pnl_pct"] = round((net_pnl / tot * 100.0), 2) if tot > 0 else 0.0
+                    o_copy["pnl_note"] = f"רווח/הפסד פיוצ'רס מבינאנס: ${pnl_raw:.2f} (בניכוי עמלה: ${fee_usd:.4f})"
+                    enriched.append(o_copy)
+                    continue
+                except (ValueError, TypeError):
+                    pass
+
+            if coin not in inventory:
+                inventory[coin] = []
+
+            if side == "BUY":
+                fee_unit = (fee_usd / amount) if amount > 0 else 0.0
+                inventory[coin].append({
+                    "qty": amount,
+                    "price": price,
+                    "fee_unit": fee_unit,
+                })
+                o_copy["realized_pnl_usd"] = None
+                o_copy["realized_pnl_pct"] = None
+                o_copy["pnl_note"] = "רכישה (עלות נצברה למלאי, רווח ימומש במכירה)"
+            elif side == "SELL":
+                proceeds = amount * price
+                matched_cost = 0.0
+                matched_buy_fee = 0.0
+                needed_qty = amount
+
+                coin_lots = inventory[coin]
+                while needed_qty > 1e-8 and coin_lots:
+                    first_lot = coin_lots[0]
+                    avail_qty = first_lot["qty"]
+                    take_qty = min(needed_qty, avail_qty)
+
+                    matched_cost += take_qty * first_lot["price"]
+                    matched_buy_fee += take_qty * first_lot["fee_unit"]
+                    first_lot["qty"] -= take_qty
+                    needed_qty -= take_qty
+
+                    if first_lot["qty"] <= 1e-8:
+                        coin_lots.pop(0)
+
+                # If needed_qty still > 0, fallback to session_initial_prices if known
+                if needed_qty > 1e-8:
+                    fallback_px = float(init_prices.get(coin) or init_prices.get(symbol) or 0.0)
+                    if fallback_px > 0:
+                        matched_cost += needed_qty * fallback_px
+
+                total_fees = fee_usd + matched_buy_fee
+                net_pnl = proceeds - matched_cost - total_fees
+                pnl_pct = (net_pnl / matched_cost * 100.0) if matched_cost > 0 else 0.0
+
+                if matched_cost > 0:
+                    o_copy["realized_pnl_usd"] = round(net_pnl, 4)
+                    o_copy["realized_pnl_pct"] = round(pnl_pct, 2)
+                    o_copy["cost_basis_usd"] = round(matched_cost, 2)
+                    o_copy["matched_fees_usd"] = round(total_fees, 4)
+                    o_copy["pnl_note"] = f"תמורה: ${proceeds:.2f} | עלות: ${matched_cost:.2f} | עמלות: ${total_fees:.4f}"
+                else:
+                    o_copy["realized_pnl_usd"] = None
+                    o_copy["realized_pnl_pct"] = None
+                    o_copy["pnl_note"] = "לא אותרה רכישה קודמת במלאי לחישוב רווח"
+            else:
+                o_copy["realized_pnl_usd"] = None
+                o_copy["realized_pnl_pct"] = None
+                o_copy["pnl_note"] = ""
+
+            enriched.append(o_copy)
+
+        return enriched
+
     def _handle_orders(self) -> None:
         state = self._get_active_state()
         if not state:
             self._send_json({"pending": [], "completed": []})
             return
 
+        raw_completed = state.completed_orders[-1000:]
+        init_prices = dict(state.session_initial_prices) if state.session_initial_prices else {}
+        enriched_completed = self._enrich_orders_with_fifo_pnl(raw_completed, init_prices)
+
         data = {
             "pending": state.pending_orders,
-            "completed": state.completed_orders[-1000:],  # Return up to 1000 completed orders
+            "completed": enriched_completed,
         }
         self._send_json(data)
 
